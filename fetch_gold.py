@@ -80,6 +80,47 @@ def get(url, **kw):
     return r
 
 
+def browser_get(url, headers=None):
+    """جلب يحاكي متصفح Chrome (بصمة TLS) لتجاوز حجب Akamai/Cloudflare لخوادم GitHub."""
+    errors = []
+    try:
+        try:
+            from curl_cffi import requests as creq
+        except ImportError:
+            import subprocess
+            import sys
+            subprocess.run([sys.executable, "-m", "pip", "install", "-q", "curl_cffi"], check=False)
+            from curl_cffi import requests as creq
+        for imp in ("chrome", "safari", "edge"):
+            try:
+                r = creq.get(url, impersonate=imp, headers=headers or {}, timeout=TIMEOUT)
+                if r.status_code == 200 and not looks_like_html(r.content):
+                    return r
+                errors.append(f"{imp}: HTTP {r.status_code} {page_hint(r.content)}")
+            except Exception as e:
+                errors.append(f"{imp}: {e}")
+    except Exception as e:
+        errors.append(f"curl_cffi: {e}")
+    try:
+        r = requests.get(url, headers={**HEADERS, **(headers or {})}, timeout=TIMEOUT)
+        if r.status_code == 200 and not looks_like_html(r.content):
+            return r
+        errors.append(f"requests: HTTP {r.status_code} {page_hint(r.content)}")
+    except Exception as e:
+        errors.append(f"requests: {e}")
+    raise RuntimeError(" | ".join(errors)[:280])
+
+
+def looks_like_html(content):
+    head = content[:400].lstrip().lower()
+    return head.startswith(b"<!doctype html") or head.startswith(b"<html") or b"<head" in head
+
+
+def page_hint(content):
+    m = re.search(rb"<title>(.*?)</title>", content[:3000], re.I | re.S)
+    return ("[" + m.group(1).decode("utf-8", "replace").strip()[:60] + "]") if m else ""
+
+
 def num(x):
     if x is None:
         return None
@@ -310,12 +351,9 @@ def fetch_cot():
 # ---------------------------------------------------------------- CME COMEX
 def fetch_comex():
     import xlrd
-    r = get(CME_URL, headers={
-        "Accept": "application/vnd.ms-excel,application/octet-stream,*/*",
+    r = browser_get(CME_URL, headers={
         "Referer": "https://www.cmegroup.com/clearing/operations-and-deliveries/nymex-delivery-notices.html",
     })
-    if r.content[:200].lstrip().startswith(b"<"):
-        raise RuntimeError("CME returned an HTML page instead of the XLS (access blocked)")
     sh = xlrd.open_workbook(file_contents=r.content).sheet_by_index(0)
 
     def row_text(i):
@@ -358,23 +396,31 @@ def fetch_comex():
 
 # ---------------------------------------------------------------- SPDR GLD
 def fetch_gld():
-    text = get(GLD_URL).content.decode("utf-8-sig", errors="replace")
+    r = browser_get(GLD_URL, headers={"Referer": "https://www.spdrgoldshares.com/usa/historical-data/"})
+    text = r.content.decode("utf-8-sig", errors="replace")
     lines = text.splitlines()
-    hi = next(i for i, l in enumerate(lines) if "date" in l.lower() and "tonnes" in l.lower())
+    hi = next((i for i, l in enumerate(lines[:60])
+               if "date" in l.lower() and ("tonnes" in l.lower() or "ounces" in l.lower())), None)
+    if hi is None:
+        raise RuntimeError("GLD: header not found; first line: " + (lines[0][:120] if lines else "empty file"))
     reader = csv.reader(lines[hi:])
     header = [h.strip().lower() for h in next(reader)]
     di = next(i for i, h in enumerate(header) if "date" in h)
     tcols = [i for i, h in enumerate(header) if "tonnes" in h]
-    ti = next((i for i in tcols if "trust" in header[i]), tcols[0])
+    ocols = [i for i, h in enumerate(header) if "ounces" in h]
+    if tcols:
+        ci, factor = next((i for i in tcols if "trust" in header[i]), tcols[0]), 1000.0
+    else:
+        ci, factor = next((i for i in ocols if "trust" in header[i]), ocols[0]), OZ_KG
     out = {}
     for row in reader:
-        if len(row) <= max(di, ti):
+        if len(row) <= max(di, ci):
             continue
-        d, t = parse_day(row[di]), num(row[ti])
-        if d and t and d >= START_DAY:
-            out[d] = round(t * 1000)
+        d, v = parse_day(row[di]), num(row[ci])
+        if d and v and d >= START_DAY:
+            out[d] = round(v * factor)
     if not out:
-        raise RuntimeError("GLD: parsed 0 rows")
+        raise RuntimeError(f"GLD: parsed 0 rows (columns: {header[:6]})")
     series = sorted([d, v] for d, v in out.items())
     log(f"GLD ok: {len(series)} days, latest {series[-1][0]}")
     return {"etf": {"GLD": series}}
@@ -401,7 +447,7 @@ def main():
             data["sources"][name] = {"ok": True, "last_ok": now}
         except Exception as e:
             log(name, "FAILED:", repr(e))
-            data["sources"][name] = {"ok": False, "error": str(e)[:300],
+            data["sources"][name] = {"ok": False, "error": (str(e) or repr(e))[:300],
                                      "last_ok": prev_src.get("last_ok")}
             for key in keys:
                 if key in prev:
