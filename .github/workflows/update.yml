@@ -1,0 +1,38 @@
+name: تحديث بيانات الذهب
+
+on:
+  schedule:
+    - cron: "30 23 * * 1-5"
+    - cron: "0 14 * * 6"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gold-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: تثبيت المكتبات
+        run: pip install requests xlrd
+
+      - name: جلب البيانات
+        run: python fetch_gold.py
+
+      - name: حفظ البيانات في المستودع
+        run: |
+          git config user.name "gold-data-bot"
+          git config user.email "gold-data-bot@users.noreply.github.com"
+          git add data.json data/
+          git diff --cached --quiet || git commit -m "تحديث بيانات الذهب $(date -u +%F)"
+          git push
