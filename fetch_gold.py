@@ -599,11 +599,14 @@ def parse_gld_rows(rows, save_ozps=True):
     else:
         ci, factor = next((i for i in ocols if "trust" in header[i]), ocols[0]), OZ_KG
     hn = [re.sub(r"\s+", " ", h) for h in header]
-    gi = next((i for i, h in enumerate(hn) if "in gold" in h and "total" not in h), None)          # ذهب لكل سهم
+    gi = next((i for i, h in enumerate(hn) if "total" not in h and (
+        "in gold" in h or ("per share" in h and ("ounce" in h or "gold" in h)) or ("ounces of gold" in h and "share" in h))), None)  # ذهب لكل سهم
     ni = next((i for i, h in enumerate(hn) if "nav" in h and ("share" in h or "per gld" in h)
                and "in gold" not in h and "total" not in h), None)                                   # قيمة السهم بالدولار
     li = next((i for i, h in enumerate(hn) if "lbma" in h or "gold price" in h), None)              # سعر LBMA إن وُجد صراحة
-    ci_close = next((i for i, h in enumerate(hn) if "close" in h), None)
+    ci_close = next((i for i, h in enumerate(hn) if "close" in h or "closing" in h), None)
+    toz_i = next((i for i, h in enumerate(hn) if "total" in h and "ounce" in h), None)              # إجمالي الأونصات
+    tnav_i = next((i for i, h in enumerate(hn) if "total net asset value" in h and "ounce" not in h and "tonne" not in h), None)
     if save_ozps:
         log("GLD archive columns:", " | ".join(f"{i}:{h[:38]}" for i, h in enumerate(hn))[:600])
     out, ozps, lbma = {}, {}, {}
@@ -621,6 +624,9 @@ def parse_gld_rows(rows, save_ozps=True):
                     if not (px and 500 < px < 30000):
                         nav = num(r[ni]) if ni is not None and len(r) > ni else None
                         px = nav / oz if nav else None                                        # سعر LBMA PM الذي يُقيَّم به GLD
+                    if not (px and 500 < px < 30000) and toz_i is not None and tnav_i is not None and len(r) > max(toz_i, tnav_i):
+                        toz, tnav = num(r[toz_i]), num(r[tnav_i])
+                        px = tnav / toz if toz and tnav else None                             # إجمالي قيمة الصندوق ÷ إجمالي أونصاته
                     if not (px and 500 < px < 30000) and ci_close is not None and len(r) > ci_close:
                         cl = num(r[ci_close])
                         px = cl / oz if cl else None                                          # بديل أخير: سعر إغلاق السهم
@@ -633,7 +639,8 @@ def parse_gld_rows(rows, save_ozps=True):
     if ozps and save_ozps:
         save(GLD_OZPS, ozps)
     if save_ozps:
-        log(f"GLD-derived London price: {len(lbma)} days; gold-per-share col={gi}, NAV col={ni}, LBMA col={li}")
+        log(f"GLD-derived London price: {len(lbma)} days; gold-per-share col={gi}, NAV col={ni}, LBMA col={li}"
+            + (f", latest {max(lbma)} = ${lbma[max(lbma)]:,.2f}" if lbma else ""))
         if lbma:
             save(GLD_LBMA, lbma)
     return sorted([d, v] for d, v in out.items())
