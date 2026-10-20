@@ -6,6 +6,11 @@ on:
     - cron: "30 23 * * 1-5"   # بعد إغلاق السوق الأمريكي: CME وCOT يوم الجمعة
     - cron: "0 14 * * 6"      # السبت: التقاط أي تقرير تأخر
   workflow_dispatch:          # زر التشغيل اليدوي من تبويب Actions
+    inputs:
+      ai_force:
+        description: "اكتب تقرير الذكاء الاصطناعي الآن (true / false)"
+        required: false
+        default: "false"
 
 permissions:
   contents: write
@@ -32,6 +37,8 @@ jobs:
       - name: جلب البيانات
         env:
           SEC_CONTACT: ${{ secrets.SEC_CONTACT }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AI_FORCE: ${{ github.event.inputs.ai_force }}
         run: python fetch_gold.py
 
       - name: حفظ البيانات في المستودع
