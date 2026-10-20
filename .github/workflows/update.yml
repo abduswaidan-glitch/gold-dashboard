@@ -33,6 +33,6 @@ jobs:
         run: |
           git config user.name "gold-data-bot"
           git config user.email "gold-data-bot@users.noreply.github.com"
-          git add data.json data/
+          git add -A
           git diff --cached --quiet || git commit -m "تحديث بيانات الذهب $(date -u +%F)"
           git push
