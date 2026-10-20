@@ -36,6 +36,8 @@ COMEX_HIST = os.path.join("data", "comex_history.json")
 DELIV_HIST = os.path.join("data", "deliveries_history.json")
 F13_HIST = os.path.join("data", "f13_history.json")
 GLD_OZPS = os.path.join("data", "gld_ozps.json")
+ETF_HIST = os.path.join("data", "etf_history.json")
+SGE_HIST = os.path.join("data", "sge_history.json")
 
 IMF_URL = "https://api.imf.org/external/sdmx/2.1/data/IRFCL/.IRFCLDT1_IRFCL56V_FTO..M"
 COT_URLS = [
@@ -384,7 +386,7 @@ def fetch_cot():
 
 
 def fetch_cot_legacy():
-    rows = socrata_gold(LEGACY_URLS, limit=80)
+    rows = socrata_gold(LEGACY_URLS, limit=170)
     s = rows[0]
     k = [
         find_key(s, ("noncomm", "long")),
@@ -561,11 +563,11 @@ def table_sheets(content):
     return [("csv", list(csv.reader(text.splitlines())))]
 
 
-def parse_gld_sheets(sheets):
+def parse_gld_sheets(sheets, save_ozps=True):
     errors = []
     for name, rows in sheets:
         try:
-            return parse_gld_rows(rows)
+            return parse_gld_rows(rows, save_ozps)
         except Exception as e:
             errors.append(f"[{name}] {e}")
     raise RuntimeError(" ; ".join(errors)[:240])
@@ -579,7 +581,7 @@ def cell_day(v):
     return parse_day(v)
 
 
-def parse_gld_rows(rows):
+def parse_gld_rows(rows, save_ozps=True):
     def low(r):
         return [str(c or "").strip().lower() for c in r]
     hi = next((i for i, r in enumerate(rows[:300])
@@ -609,7 +611,7 @@ def parse_gld_rows(rows):
             out[d] = round(v * factor)
     if not out:
         raise RuntimeError(f"parsed 0 rows (columns: {header[:5]})")
-    if ozps:
+    if ozps and save_ozps:
         save(GLD_OZPS, ozps)
     return sorted([d, v] for d, v in out.items())
 
@@ -666,6 +668,176 @@ def fetch_gld():
         except Exception as e:
             errors.append(f"{u.rsplit('/', 1)[-1][:50]}: {e}")
     raise RuntimeError("GLD: " + " | ".join(errors)[:260])
+
+
+# ---------------------------------------------------------------- more gold ETFs
+GLDM_URL = "https://api.spdrgoldshares.com/api/v1/historical-archive?product=gldm&exchange=NYSE&lang=en"
+IAU_PAGE = "https://www.ishares.com/us/products/239561/ishares-gold-trust-fund"
+
+
+def fetch_etfs():
+    """GLDM (أرشيف SPDR كامل) و IAU (صفحة iShares اليومية، يُبنى سجلها يوميًا)."""
+    hist = load(ETF_HIST, {})
+    out, errors = {}, []
+    try:
+        out["GLDM"] = parse_gld_sheets(table_sheets(browser_get(GLDM_URL, headers={"Referer": GLD_PAGE}).content), save_ozps=False)
+        log(f"GLDM ok: {len(out['GLDM'])} days, latest {out['GLDM'][-1][0]}")
+    except Exception as e:
+        errors.append(f"GLDM: {e}")
+        log("GLDM FAILED:", e)
+    try:
+        html = browser_get(IAU_PAGE, allow_html=True).content.decode("utf-8", "replace")
+        text = re.sub(r"<[^>]+>", " ", html)
+        text = re.sub(r"\s+", " ", text)
+        m = re.search(r"Tonnes in Trust\s*([\d,]+\.?\d*)\s*as of\s*([A-Za-z]{3}\s+\d{1,2},\s*\d{4})", text)
+        if not m:
+            m2 = re.search(r"Ounces in Trust\s*([\d,]+\.?\d*)\s*as of\s*([A-Za-z]{3}\s+\d{1,2},\s*\d{4})", text)
+            if not m2:
+                raise RuntimeError("IAU: 'Tonnes in Trust' not found on page")
+            kg, d = num(m2.group(1)) * OZ_KG, m2.group(2)
+        else:
+            kg, d = num(m.group(1)) * 1000, m.group(2)
+        day = dt.datetime.strptime(re.sub(r"\s+", " ", d.replace(",", ", ")).replace(" ,", ","), "%b %d, %Y").date().isoformat()
+        series = hist.setdefault("IAU", [])
+        upsert(series, day, round(kg))
+        out["IAU"] = series
+        log(f"IAU ok: {day}, {kg / 1000:,.2f} t ({len(series)} days in history)")
+    except Exception as e:
+        errors.append(f"IAU: {e}")
+        log("IAU FAILED:", e)
+        if hist.get("IAU"):
+            out["IAU"] = hist["IAU"]
+    save(ETF_HIST, hist)
+    if not out:
+        raise RuntimeError(" | ".join(errors)[:280])
+    return {"etf2": out, "etf2_errors": errors}
+
+
+# ---------------------------------------------------------------- physical market: EFP & Shanghai premium
+LBMA_PM = "https://prices.lbma.org.uk/json/gold_pm.json"
+LBMA_AM = "https://prices.lbma.org.uk/json/gold_am.json"
+YAHOO = "https://query1.finance.yahoo.com/v8/finance/chart/{}?range=2y&interval=1d"
+YAHOO2 = "https://query2.finance.yahoo.com/v8/finance/chart/{}?range=2y&interval=1d"
+SGE_API = "https://www.sge.com.cn/graph/DayilyJzj"
+SGE_HOME = "https://www.sge.com.cn/"
+FX_URL = "https://api.frankfurter.app/{}..?from=USD&to=CNY"
+
+
+def lbma_series(url):
+    rows = browser_get(url, headers={"Accept": "application/json"}).json()
+    out = {}
+    for r in rows:
+        d, v = r.get("d"), (r.get("v") or [None])[0]
+        if d and v:
+            out[d[:10]] = float(v)
+    return out
+
+
+def yahoo_series(symbol):
+    errors = []
+    for base in (YAHOO, YAHOO2):
+        try:
+            j = browser_get(base.format(symbol), headers={"Accept": "application/json"}).json()
+            res = j["chart"]["result"][0]
+            ts, cl = res["timestamp"], res["indicators"]["quote"][0]["close"]
+            return {dt.datetime.utcfromtimestamp(t).date().isoformat(): float(c) for t, c in zip(ts, cl) if c}
+        except Exception as e:
+            errors.append(str(e)[:80])
+    raise RuntimeError(f"Yahoo {symbol}: " + " | ".join(errors))
+
+
+def sge_series():
+    hist = load(SGE_HIST, {})
+    try:
+        creq = ensure("curl_cffi.requests", "curl_cffi")
+        r = creq.post(SGE_API, impersonate="chrome", timeout=TIMEOUT,
+                      data={"start": (dt.date.today() - dt.timedelta(days=760)).isoformat(), "end": dt.date.today().isoformat()},
+                      headers={"Referer": "https://www.sge.com.cn/sjzx/jzj", "X-Requested-With": "XMLHttpRequest"})
+        j = r.json()
+        for key in ("wp", "zp"):
+            for ts, v in j.get(key, []):
+                d = dt.datetime.utcfromtimestamp(ts / 1000 + 8 * 3600).date().isoformat()
+                if v:
+                    hist.setdefault(d, {})["pm" if key == "wp" else "am"] = float(v)
+        log(f"SGE API ok: {len(hist)} days")
+    except Exception as e:
+        log("SGE API failed, trying homepage:", str(e)[:120])
+        html = browser_get(SGE_HOME, allow_html=True).content.decode("utf-8", "replace")
+        text = re.sub(r"<[^>]+>", " ", html)
+        text = re.sub(r"\s+", " ", text)
+        md = re.search(r"行情日期[:：]\s*(\d{4}-\d{2}-\d{2})", text)
+        am = re.search(r"上海金早盘价[^\d]*([\d.]+)", text)
+        pm = re.search(r"上海金午盘价[^\d]*([\d.]+)", text)
+        if not (md and (am or pm)):
+            raise RuntimeError("SGE: benchmark not found on homepage")
+        rec = hist.setdefault(md.group(1), {})
+        if am:
+            rec["am"] = float(am.group(1))
+        if pm:
+            rec["pm"] = float(pm.group(1))
+        log(f"SGE homepage ok: {md.group(1)}")
+    for d in sorted(hist)[:-800]:
+        del hist[d]
+    save(SGE_HIST, hist)
+    return {d: v.get("pm") or v.get("am") for d, v in hist.items() if v.get("pm") or v.get("am")}
+
+
+def fx_usdcny():
+    start = (dt.date.today() - dt.timedelta(days=760)).isoformat()
+    try:
+        j = get(FX_URL.format(start)).json()
+        return {d: v["CNY"] for d, v in j.get("rates", {}).items() if v.get("CNY")}
+    except Exception as e:
+        log("FX frankfurter failed, trying Yahoo:", str(e)[:100])
+        return yahoo_series("CNY=X")
+
+
+def value_on_or_before(table, d, max_days=4):
+    for k in range(max_days + 1):
+        x = (dt.date.fromisoformat(d) - dt.timedelta(days=k)).isoformat()
+        if x in table:
+            return table[x]
+    return None
+
+
+def fetch_physical():
+    errors, out = [], {}
+    try:
+        pm = lbma_series(LBMA_PM)
+        am = lbma_series(LBMA_AM)
+    except Exception as e:
+        raise RuntimeError(f"LBMA: {e}")
+    cut = (dt.date.today() - dt.timedelta(days=730)).isoformat()
+    try:
+        gc = yahoo_series("GC=F")
+        efp = []
+        for d in sorted(gc):
+            if d >= cut and d in pm:
+                efp.append([d, round(gc[d] - pm[d], 2), round(gc[d], 2), round(pm[d], 2)])
+        out["efp"] = efp
+        log(f"EFP ok: {len(efp)} days, latest {efp[-1][0] if efp else '-'}")
+    except Exception as e:
+        errors.append(f"EFP: {e}")
+        log("EFP FAILED:", e)
+    try:
+        sge = sge_series()
+        fx = fx_usdcny()
+        prem = []
+        for d in sorted(sge):
+            ref = am.get(d) or pm.get(d)
+            rate = value_on_or_before(fx, d)
+            if d >= cut and ref and rate:
+                usd = sge[d] * 31.1034768 / rate
+                prem.append([d, round(usd - ref, 2), round(usd, 2), round(ref, 2)])
+        out["sh"] = prem
+        log(f"Shanghai premium ok: {len(prem)} days, latest {prem[-1][0] if prem else '-'}")
+    except Exception as e:
+        errors.append(f"SGE: {e}")
+        log("Shanghai premium FAILED:", e)
+    if not out.get("efp") and not out.get("sh"):
+        raise RuntimeError(" | ".join(errors)[:280])
+    out["errors"] = errors
+    return {"physical": out}
 
 
 # ---------------------------------------------------------------- SEC 13F (institutions)
@@ -1008,6 +1180,8 @@ SECTIONS = {
     "deliveries": (fetch_deliveries, ()),
     "comex": (fetch_comex, ()),
     "etf": (fetch_gld, ("etf",)),
+    "etf2": (fetch_etfs, ("etf2", "etf2_errors")),
+    "physical": (fetch_physical, ("physical",)),
     "f13": (fetch_f13, ("f13",)),
 }
 

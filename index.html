@@ -42,7 +42,7 @@ button{font:inherit;color:inherit}
 .wrap{max-width:1040px;margin:0 auto;padding:0 18px}
 
 /* masthead: the stamped ingot */
-.masthead{padding:28px 0 18px}
+.masthead{padding:10px 0 18px}
 .ingot{position:relative;padding:22px 28px 20px;color:var(--ingot-ink);
   background:linear-gradient(170deg,var(--metal-hi) 0%,#C99A3E 45%,var(--metal-lo) 100%);
   clip-path:polygon(3% 0,97% 0,100% 100%,0 100%);}
@@ -139,7 +139,7 @@ tr:last-child td{border-bottom:0}
 .rvc .selcol{fill:color-mix(in srgb,var(--metal) 18%,transparent)}
 .ticks{display:flex;font-size:11.5px;color:var(--muted);padding-top:4px}
 .ticks span{flex:1;text-align:center;white-space:nowrap;overflow:visible}
-.tt{position:absolute;top:8px;z-index:3;direction:rtl;min-width:230px;max-width:290px;background:var(--surface);color:var(--ink);
+.tt{position:absolute;top:8px;z-index:3;min-width:230px;max-width:300px;background:var(--surface);color:var(--ink);
   border:1px solid var(--rule);box-shadow:0 6px 18px rgba(0,0,0,.18);padding:8px 10px;font-size:13px;pointer-events:none}
 .tt-d{font-weight:600;margin-bottom:4px;border-bottom:1px solid var(--rule);padding-bottom:4px}
 .tt div:not(.tt-d){display:flex;justify-content:space-between;gap:12px;padding:1px 0}
@@ -202,175 +202,238 @@ footer a{color:inherit}
   .ingot{animation:strike .6s ease-out both}
   @keyframes strike{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
 }
+
+/* language switch (always top-right) */
+.topbar{display:flex;justify-content:flex-end;direction:ltr;padding:12px 0 10px}
+.lang{display:inline-flex;border:1px solid var(--rule);border-radius:99px;overflow:hidden;background:var(--surface)}
+.lang button{display:inline-flex;align-items:center;gap:6px;border:0;background:none;padding:5px 12px;cursor:pointer;font-size:13.5px;color:var(--ink)}
+.lang button+button{border-left:1px solid var(--rule)}
+.lang button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.lang img{width:20px;height:14px;object-fit:cover;border-radius:2px;box-shadow:0 0 0 1px rgba(0,0,0,.15)}
+.flag{width:20px;height:14px;object-fit:cover;border-radius:2px;vertical-align:-2px;margin-inline-end:7px;box-shadow:0 0 0 1px rgba(0,0,0,.12)}
+/* about panel */
+.about{border:1px solid var(--rule);background:var(--surface);margin:16px 0 4px}
+.about summary{cursor:pointer;padding:10px 14px;font-weight:600;font-size:15px;list-style:none;display:flex;justify-content:space-between;gap:10px}
+.about summary::-webkit-details-marker{display:none}
+.about summary::after{content:"−";color:var(--muted);font-weight:400}
+.about:not([open]) summary::after{content:"+"}
+.about-body{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:4px 26px;padding:0 14px 12px;border-top:1px solid var(--rule)}
+.about-body h4{margin:10px 0 3px;font-size:14.5px}
+.about-body p{margin:0;font-size:14px;color:var(--ink);opacity:.92;max-width:68ch}
+.fresh{font-size:13px;padding:2px 10px;border-radius:99px;border:1px solid var(--rule)}
+.fresh.ok{color:var(--buy);border-color:color-mix(in srgb,var(--buy) 45%,transparent)}
+.fresh.stale{color:var(--sell);border-color:color-mix(in srgb,var(--sell) 45%,transparent)}
+/* COT signal gauges */
+.gauges{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin:16px 0 18px}
+.gauge{background:var(--surface);border:1px solid var(--rule);padding:12px 14px;cursor:pointer;text-align:start;font:inherit;color:inherit}
+.gauge[aria-pressed="true"]{outline:2px solid var(--metal);outline-offset:-2px}
+.gauge h3{margin:0;font-size:14.5px;font-weight:600}
+.gauge .gv{font-family:var(--kufi);font-size:30px;font-weight:700;line-height:1.3}
+.gbar{position:relative;height:12px;margin:6px 0 4px;direction:ltr;
+  background:linear-gradient(90deg,color-mix(in srgb,var(--sell) 55%,transparent) 0 10%,color-mix(in srgb,var(--muted) 18%,transparent) 10% 90%,color-mix(in srgb,var(--buy) 55%,transparent) 90% 100%)}
+.gbar i{position:absolute;top:-4px;width:3px;height:20px;background:var(--ink);transform:translateX(-1px)}
+.gbar b{position:absolute;top:-3px;width:9px;height:9px;border-radius:50%;border:2px solid var(--metal);background:var(--surface);transform:translate(-4px,4px)}
+.gscale{position:relative;height:16px;font-size:11.5px;color:var(--muted);direction:ltr}
+.gscale span{position:absolute;top:0;transform:translateX(-50%)}
+.gscale span:first-child{transform:none}
+.gscale span:last-child{transform:translateX(-100%)}
+.gtxt{font-size:13.5px;margin-top:6px}
+.sig-hot{color:var(--sell);font-weight:600} .sig-cold{color:var(--blue);font-weight:600} .sig-mid{color:var(--muted)}
 </style>
 </head>
 <body>
+<div class="wrap topbar"><div class="lang" id="lang" role="group" aria-label="Language / اللغة"></div></div>
 <header class="wrap masthead">
   <div class="ingot">
-    <h1>تدفقات الذهب</h1>
-    <div class="assay" id="assay">جارٍ تحميل البيانات…</div>
+    <h1 id="title">تدفقات الذهب</h1>
+    <div class="assay" id="assay">…</div>
   </div>
   <p class="updated" id="updated"></p>
 </header>
-
-<nav class="tabs wrap" role="tablist" aria-label="الأقسام" id="tabs"></nav>
+<nav class="tabs wrap" role="tablist" id="tabs"></nav>
 <main class="wrap" id="view" aria-live="polite"></main>
-
-<footer class="wrap">
-  المصادر: IMF IRFCL للحيازات الرسمية، CFTC COT (Legacy وDisaggregated)، CME لمخزون COMEX وتقرير Issues and Stops، SPDR لصندوق GLD، وSEC Form 13F لحيازات المؤسسات.
-  تُحدَّث البيانات تلقائيًا عبر GitHub Actions، وكل قسم يعرض تاريخ آخر قراءة رسمية له.
-</footer>
-
+<footer class="wrap" id="foot"></footer>
 <script>
 'use strict';
-const PERIODS = {m:{days:30,label:'شهر',since:'شهر'}, q:{days:91,label:'ربع سنة',since:'ربع سنة'}, y:{days:365,label:'سنة',since:'سنة'}};
-const TABS = [
-  {id:'countries', label:'الدول'},
-  {id:'cb', label:'البنوك المركزية'},
-  {id:'banks', label:'البنوك التجارية'},
-  {id:'noncomm', label:'COT Non-Commercial'},
-  {id:'f13', label:'المؤسسات (13F)'},
-  {id:'comex', label:'COMEX'},
-  {id:'etf', label:'صناديق ETF'},
-];
-const NAMES = {USA:'الولايات المتحدة',DEU:'ألمانيا',ITA:'إيطاليا',FRA:'فرنسا',RUS:'روسيا',CHN:'الصين',CHE:'سويسرا',JPN:'اليابان',
-IND:'الهند',NLD:'هولندا',TUR:'تركيا',PRT:'البرتغال',POL:'بولندا',UZB:'أوزبكستان',SAU:'السعودية',GBR:'المملكة المتحدة',KAZ:'كازاخستان',
-ESP:'إسبانيا',AUT:'النمسا',THA:'تايلاند',SGP:'سنغافورة',BEL:'بلجيكا',DZA:'الجزائر',PHL:'الفلبين',VEN:'فنزويلا',IRQ:'العراق',
-BRA:'البرازيل',EGY:'مصر',SWE:'السويد',ZAF:'جنوب أفريقيا',MEX:'المكسيك',LBY:'ليبيا',GRC:'اليونان',KOR:'كوريا الجنوبية',ROU:'رومانيا',
-HUN:'المجر',AUS:'أستراليا',KWT:'الكويت',IDN:'إندونيسيا',DNK:'الدنمارك',PAK:'باكستان',ARG:'الأرجنتين',BLR:'بيلاروسيا',FIN:'فنلندا',
-QAT:'قطر',BGR:'بلغاريا',JOR:'الأردن',MYS:'ماليزيا',CZE:'التشيك',SRB:'صربيا',PER:'بيرو',SVK:'سلوفاكيا',UKR:'أوكرانيا',ARE:'الإمارات',
-OMN:'عُمان',BHR:'البحرين',LBN:'لبنان',MAR:'المغرب',TUN:'تونس',SYR:'سوريا',CAN:'كندا',NOR:'النرويج',IRL:'أيرلندا',ISR:'إسرائيل',
-LUX:'لوكسمبورغ',IRN:'إيران',KGZ:'قيرغيزستان',TJK:'طاجيكستان',MNG:'منغوليا',GHA:'غانا',NGA:'نيجيريا',COL:'كولومبيا',CHL:'تشيلي',
-ECU:'الإكوادور',BOL:'بوليفيا',HRV:'كرواتيا',SVN:'سلوفينيا',LTU:'ليتوانيا',LVA:'لاتفيا',EST:'إستونيا',CYP:'قبرص',MLT:'مالطا',
-ISL:'آيسلندا',NZL:'نيوزيلندا',VNM:'فيتنام',BGD:'بنغلاديش',LKA:'سريلانكا',MMR:'ميانمار',KHM:'كمبوديا',AZE:'أذربيجان',ARM:'أرمينيا',
-GEO:'جورجيا',MKD:'مقدونيا الشمالية',ALB:'ألبانيا',BIH:'البوسنة والهرسك',MDA:'مولدوفا',URY:'الأوروغواي',PRY:'باراغواي',GTM:'غواتيمالا',
-DOM:'الدومينيكان',SLV:'السلفادور',HKG:'هونغ كونغ',MUS:'موريشيوس',KEN:'كينيا',SDN:'السودان',MOZ:'موزمبيق',CUW:'كوراساو',ABW:'أروبا',
-AGO:'أنغولا',CRI:'كوستاريكا',HND:'هندوراس',NIC:'نيكاراغوا',PAN:'بنما',JAM:'جامايكا',TTO:'ترينيداد وتوباغو',BRB:'باربادوس',
-SUR:'سورينام',GUY:'غيانا',HTI:'هايتي',MWI:'مالاوي',ZMB:'زامبيا',ZWE:'زيمبابوي',UGA:'أوغندا',TZA:'تنزانيا',RWA:'رواندا',
-MDG:'مدغشقر',BWA:'بوتسوانا',NAM:'ناميبيا',SEN:'السنغال',CIV:'ساحل العاج',CMR:'الكاميرون',MLI:'مالي',BFA:'بوركينا فاسو',
-MRT:'موريتانيا',YEM:'اليمن',AFG:'أفغانستان',NPL:'نيبال',LAO:'لاوس',PNG:'بابوا غينيا الجديدة',FJI:'فيجي',BRN:'بروناي',MAC:'ماكاو',
-CUB:'كوبا',PRK:'كوريا الشمالية',TWN:'تايوان',TKM:'تركمانستان',MNE:'الجبل الأسود',XKX:'كوسوفو',ETH:'إثيوبيا'};
+/* ================= language ================= */
+const state = {lang:'ar', tab:'countries', mode:{}, period:{}, all:false, sel:{}, country:null,
+  bankView:'cot', cotCat:'swap', bank:null, vault:null, mgr:null, sig:'mm', etfFund:'GLD', phys:'efp'};
+try { const s = localStorage.getItem('gold-lang'); if (s === 'en' || s === 'ar') state.lang = s; } catch (e) {}
+const qLang = new URLSearchParams(location.search).get('lang');
+if (qLang === 'en' || qLang === 'ar') state.lang = qLang;
+const L = (ar, en) => state.lang === 'en' ? en : ar;
+const isAr = () => state.lang === 'ar';
 
-const CONTRACT_KG = 100 * 0.0311034768;
-const state = {tab:'countries', mode:{}, period:{}, all:false, sel:{}, country:null, bankView:'cot', cotCat:'swap', bank:null, vault:null, mgr:null};
-TABS.forEach(t => { state.mode[t.id] = 'stock'; state.period[t.id] = 'm'; });
-let DATA = null;
-
-/* ---------- formatting ---------- */
-const nf0 = new Intl.NumberFormat('en-US',{maximumFractionDigits:0});
-const nf1 = new Intl.NumberFormat('en-US',{minimumFractionDigits:1,maximumFractionDigits:1});
-const nf2 = new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-const fMonth = new Intl.DateTimeFormat('ar-u-nu-latn',{month:'long',year:'numeric',timeZone:'UTC'});
-const fDay = new Intl.DateTimeFormat('ar-u-nu-latn',{day:'numeric',month:'long',year:'numeric',timeZone:'UTC'});
-const fStamp = new Intl.DateTimeFormat('ar-u-nu-latn',{dateStyle:'medium',timeStyle:'short'});
+/* ================= formatting ================= */
+const nf0 = new Intl.NumberFormat('en-US', {maximumFractionDigits:0});
+const nf1 = new Intl.NumberFormat('en-US', {minimumFractionDigits:1, maximumFractionDigits:1});
+const nf2 = new Intl.NumberFormat('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+let fMonth, fDay, fStamp, fShortM;
+function setFormatters(){
+  const loc = isAr() ? 'ar-u-nu-latn' : 'en-GB';
+  fMonth = new Intl.DateTimeFormat(loc, {month:'long', year:'numeric', timeZone:'UTC'});
+  fDay = new Intl.DateTimeFormat(loc, {day:'numeric', month:'long', year:'numeric', timeZone:'UTC'});
+  fStamp = new Intl.DateTimeFormat(loc, {dateStyle:'medium', timeStyle:'short'});
+  fShortM = new Intl.DateTimeFormat(loc, {month:'short', year:'2-digit', timeZone:'UTC'});
+}
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const toDate = s => new Date(s + 'T00:00:00Z');
+const dm = d => { const t = toDate(d); return `${t.getUTCDate()}/${t.getUTCMonth() + 1}`; };
 const sg = v => v > 0 ? '+' : v < 0 ? '−' : '';
 const bd = s => `<bdi dir="ltr">${s}</bdi>`;
-const KG = v => `${bd((v < 0 ? '−' : '') + nf0.format(Math.abs(v)))} كغ`;
-const TN = v => `${bd((v < 0 ? '−' : '') + nf1.format(Math.abs(v) / 1000))} طن`;
-const sKG = v => `${bd(sg(v) + nf0.format(Math.abs(v)))} كغ`;
-const sTN = v => `${bd(sg(v) + nf1.format(Math.abs(v) / 1000))} طن`;
+const U = {t: () => L('طن', 't'), kg: () => L('كغ', 'kg'), ct: () => L('عقد', 'contracts'), oz: () => '$/oz'};
+const KG = v => `${bd((v < 0 ? '−' : '') + nf0.format(Math.abs(v)))} ${U.kg()}`;
+const TN = v => `${bd((v < 0 ? '−' : '') + nf1.format(Math.abs(v) / 1000))} ${U.t()}`;
+const sKG = v => `${bd(sg(v) + nf0.format(Math.abs(v)))} ${U.kg()}`;
+const sTN = v => `${bd(sg(v) + nf1.format(Math.abs(v) / 1000))} ${U.t()}`;
+const CT = v => `${bd((v < 0 ? '−' : '') + nf0.format(Math.abs(v)))} ${U.ct()}`;
+const sCT = v => `${bd(sg(v) + nf0.format(Math.abs(v)))} ${U.ct()}`;
+const USD = v => bd((v < 0 ? '−$' : '$') + nf2.format(Math.abs(v)));
+const sUSD = v => bd(sg(v) + '$' + nf2.format(Math.abs(v)));
 const sPCT = p => p == null || !isFinite(p) ? '' : bd(sg(p) + nf2.format(Math.abs(p)) + '%');
-const plainKG = v => `${sg(v)}${nf0.format(Math.abs(v))} kg`;
+const plainSigned = (v, unit) => `${sg(v)}${nf0.format(Math.abs(v))} ${unit}`;
 const isMonthly = s => s.length > 1 && s.every(p => p[0].endsWith('-01'));
 const fmtD = (d, monthly) => monthly ? fMonth.format(toDate(d)) : fDay.format(toDate(d));
-const nameOf = c => NAMES[c] || c;
+const CONTRACT_KG = 100 * 0.0311034768;
+const cls = v => v > 0 ? 'up' : v < 0 ? 'down' : 'flat';
 
-/* ---------- math ---------- */
+/* ================= countries: ISO3 -> ISO2, names, flags ================= */
+const ISO2 = Object.fromEntries(('USA:US DEU:DE ITA:IT FRA:FR RUS:RU CHN:CN CHE:CH JPN:JP IND:IN NLD:NL TUR:TR PRT:PT POL:PL UZB:UZ SAU:SA GBR:GB '
+ + 'KAZ:KZ ESP:ES AUT:AT THA:TH SGP:SG BEL:BE DZA:DZ PHL:PH VEN:VE IRQ:IQ BRA:BR EGY:EG SWE:SE ZAF:ZA MEX:MX LBY:LY GRC:GR KOR:KR '
+ + 'ROU:RO HUN:HU AUS:AU KWT:KW IDN:ID DNK:DK PAK:PK ARG:AR BLR:BY FIN:FI QAT:QA BGR:BG JOR:JO MYS:MY CZE:CZ SRB:RS PER:PE SVK:SK '
+ + 'UKR:UA ARE:AE OMN:OM BHR:BH LBN:LB MAR:MA TUN:TN SYR:SY CAN:CA NOR:NO IRL:IE ISR:IL LUX:LU IRN:IR KGZ:KG TJK:TJ MNG:MN GHA:GH '
+ + 'NGA:NG COL:CO CHL:CL ECU:EC BOL:BO HRV:HR SVN:SI LTU:LT LVA:LV EST:EE CYP:CY MLT:MT ISL:IS NZL:NZ VNM:VN BGD:BD LKA:LK MMR:MM '
+ + 'KHM:KH AZE:AZ ARM:AM GEO:GE MKD:MK ALB:AL BIH:BA MDA:MD URY:UY PRY:PY GTM:GT DOM:DO SLV:SV HKG:HK MUS:MU KEN:KE SDN:SD MOZ:MZ '
+ + 'CUW:CW ABW:AW AGO:AO CRI:CR HND:HN NIC:NI PAN:PA JAM:JM TTO:TT BRB:BB SUR:SR GUY:GY HTI:HT MWI:MW ZMB:ZM ZWE:ZW UGA:UG TZA:TZ '
+ + 'RWA:RW MDG:MG BWA:BW NAM:NA SEN:SN CIV:CI CMR:CM MLI:ML BFA:BF MRT:MR YEM:YE AFG:AF NPL:NP LAO:LA PNG:PG FJI:FJ BRN:BN MAC:MO '
+ + 'CUB:CU PRK:KP TWN:TW TKM:TM MNE:ME XKX:XK ETH:ET BEN:BJ TGO:TG NER:NE TCD:TD GAB:GA COG:CG COD:CD BDI:BI SLE:SL LBR:LR GIN:GN '
+ + 'GMB:GM CPV:CV SYC:SC LSO:LS SWZ:SZ BLZ:BZ BHS:BS ATG:AG DMA:DM GRD:GD KNA:KN LCA:LC VCT:VC SMR:SM AND:AD LIE:LI MCO:MC BTN:BT '
+ + 'MDV:MV TLS:TL SLB:SB VUT:VU WSM:WS TON:TO KIR:KI').split(' ').map(x => x.split(':')));
+let regionNames = null;
+function countryName(code){
+  const c2 = ISO2[code];
+  if (!c2) return code;
+  try { return regionNames.of(c2) || code; } catch (e) { return code; }
+}
+const flag = code => ISO2[code] ? `<img class="flag" src="https://flagcdn.com/w40/${ISO2[code].toLowerCase()}.png" alt="" loading="lazy" width="20" height="14">` : '';
+const nameOf = countryName;
+
+/* ================= bank & depository names ================= */
+const BANK_RULES = [[/J\.?\s?P\.?\s?MORGAN|JPMORGAN/,'JPMorgan'],[/HSBC/,'HSBC'],[/GOLDMAN/,'Goldman Sachs'],[/BOFA|BANC OF AMERICA|BANK OF AMERICA|MERRILL/,'Bank of America'],
+ [/CITIGROUP|CITIBANK|\bCITI\b/,'Citigroup'],[/MORGAN STANLEY/,'Morgan Stanley'],[/WELLS FARGO/,'Wells Fargo'],[/BARCLAYS/,'Barclays'],[/\bRBC\b|ROYAL BANK OF CANADA/,'RBC'],
+ [/SCOTIA/,'Scotiabank'],[/\bUBS\b/,'UBS'],[/BNP/,'BNP Paribas'],[/SOCIETE GENERALE|SG AMERICAS/,'Société Générale'],[/DEUTSCHE BANK/,'Deutsche Bank'],
+ [/MIZUHO/,'Mizuho'],[/NOMURA/,'Nomura'],[/MACQUARIE/,'Macquarie'],[/STONEX|FCSTONE/,'StoneX'],[/MAREX/,'Marex'],[/ABN AMRO/,'ABN AMRO'],
+ [/\bADM\b/,'ADM'],[/STANDARD CHARTERED/,'Standard Chartered'],[/\bICBC\b/,'ICBC'],[/BANK OF CHINA|BOCI/,'Bank of China'],[/TORONTO.?DOMINION|\bTD SEC/,'TD'],
+ [/\bBMO\b|BANK OF MONTREAL/,'BMO'],[/BRINK/,"Brink's"],[/LOOMIS/,'Loomis'],[/MALCA/,'Malca-Amit'],[/MANFRA/,'Manfra, Tordella & Brookes'],
+ [/ASAHI/,'Asahi'],[/INTERNATIONAL DEPOSITORY|\bIDS\b/,'IDS of Delaware'],[/DELAWARE DEPOSITORY/,'Delaware Depository'],[/DORMAN/,'Dorman'],[/ADVANTAGE FUTURES/,'Advantage Futures']];
+const GLOBAL_BANKS = new Set(['JPMorgan','HSBC','Goldman Sachs','Bank of America','Citigroup','Morgan Stanley','Wells Fargo','Barclays','RBC','Scotiabank','UBS','BNP Paribas','Société Générale','Deutsche Bank','Mizuho','Nomura','Macquarie','Standard Chartered','ICBC','Bank of China','TD','BMO','ABN AMRO']);
+const titleCase = raw => String(raw).toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
+  .replace(/\b(Llc|Lp|Llp|Plc|Ag|Sa|Nv|Ltd|Lllp|Na|Usa|Us|Uk)\b/g, w => w.toUpperCase()).replace(/\s+\/[a-z]{2,3}\/?$/i, '').replace(/[,.\s]+$/, '');
+function bankName(raw){
+  const u = String(raw).toUpperCase();
+  for (const [re, n] of BANK_RULES) if (re.test(u)) return n;
+  return titleCase(raw);
+}
+
+/* ================= math helpers ================= */
+const PERIODS = {m:{days:30, ar:'شهر', en:'Month'}, q:{days:91, ar:'ربع سنة', en:'Quarter'}, y:{days:365, ar:'سنة', en:'Year'}};
+const pLabel = k => L(PERIODS[k].ar, PERIODS[k].en);
 function last(s){ return s && s.length ? s[s.length - 1] : null; }
-
-/* compare the latest reading with the reading closest to (latest − days) */
 function change(s, days){
   if (!s || s.length < 2) return null;
-  const end = last(s), endT = toDate(end[0]).getTime();
-  const target = endT - days * 864e5;
-  let best = null, bestGap = Infinity;
+  const end = last(s), target = toDate(end[0]).getTime() - days * 864e5;
+  let best = null, gap = Infinity;
   for (let i = 0; i < s.length - 1; i++){
-    const gap = Math.abs(toDate(s[i][0]).getTime() - target);
-    if (gap < bestGap){ bestGap = gap; best = s[i]; }
+    const g = Math.abs(toDate(s[i][0]).getTime() - target);
+    if (g < gap){ gap = g; best = s[i]; }
   }
-  if (!best || bestGap > days * 864e5 * 0.5) return null;
+  if (!best || gap > days * 864e5 * 0.5) return null;
   const d = end[1] - best[1];
   return {from: best, to: end, d, pct: best[1] ? d / Math.abs(best[1]) * 100 : null};
 }
 
-/* ---------- small renderers ---------- */
+/* ================= shared renderers ================= */
+let DATA = null;
+const RVM = {};
+const WINDOW = 20;
+
 function sourceWarn(src){
   const s = DATA.sources && DATA.sources[src];
   if (!s || s.ok) return '';
-  const when = s.last_ok ? ` بتاريخ ${fDay.format(new Date(s.last_ok))}` : '';
-  return `<p class="warn">تعذّر جلب هذا المصدر في آخر تشغيل: <bdi dir="ltr">${esc((s.error || 'خطأ غير معروف').slice(0, 140))}</bdi>. المعروض هو آخر بيانات ناجحة${when}.</p>`;
+  const when = s.last_ok ? ` ${L('بتاريخ', 'from')} ${fDay.format(new Date(s.last_ok))}` : '';
+  return `<p class="warn">${L('تعذّر جلب هذا المصدر في آخر تشغيل', 'This source could not be fetched on the last run')}: <bdi dir="ltr">${esc((s.error || '').slice(0, 140))}</bdi>. ${L('المعروض هو آخر بيانات ناجحة', 'Showing the last successful data')}${when}.</p>`;
 }
 
-function head(title, desc, chips, src){
-  return `<div class="sec-head"><h2>${title}</h2><p>${desc}</p>
-    <div class="meta">${chips.filter(Boolean).map(c => `<span class="chip">${c}</span>`).join('')}</div></div>${sourceWarn(src)}`;
+/* freshness: how old is the latest data point vs. what the source normally allows */
+function fresh(lastDate, maxDays){
+  if (!lastDate) return '';
+  const age = Math.floor((Date.now() - toDate(lastDate).getTime()) / 864e5);
+  const ok = age <= maxDays;
+  return `<span class="fresh ${ok ? 'ok' : 'stale'}" title="${L('عمر آخر قراءة', 'Age of latest data')}: ${age} ${L('يومًا', 'days')}">${ok
+    ? L('محدَّث تلقائيًا ✓', 'Auto-updated ✓')
+    : L(`أقدم من المتوقع (${age} يومًا)`, `Older than expected (${age} days)`)}</span>`;
+}
+
+function head(title, desc, chips, src, freshTag){
+  return `<div class="sec-head"><h2>${title}</h2>${desc ? `<p>${desc}</p>` : ''}
+    <div class="meta">${chips.filter(Boolean).map(c => `<span class="chip">${c}</span>`).join('')}${freshTag || ''}</div></div>${src ? sourceWarn(src) : ''}`;
+}
+
+/* about panel: [[title, text], ...] in the current language */
+function about(id, blocks){
+  const open = state.aboutClosed && state.aboutClosed[id] ? '' : 'open';
+  return `<details class="about" ${open} data-about="${id}"><summary>${L('عن هذا القسم: ماذا يعرض وكيف تُجمع بياناته', 'About this section: what it shows and how the data is collected')}</summary>
+    <div class="about-body">${blocks.map(([t, p]) => `<section><h4>${t}</h4><p>${p}</p></section>`).join('')}</div></details>`;
 }
 
 function controls(id, modes){
   const m = state.mode[id], p = state.period[id];
   return `<div class="controls">
-    ${modes ? `<div class="seg" role="group" aria-label="طريقة العرض">
-      <button data-act="mode" data-v="stock" aria-pressed="${m === 'stock'}">المحتوى الإجمالي</button>
-      <button data-act="mode" data-v="chg" aria-pressed="${m === 'chg'}">التغير</button>
-    </div>` : ''}
-    <div class="seg" role="group" aria-label="مدة المقارنة">
-      ${Object.entries(PERIODS).map(([k, v]) =>
-        `<button data-act="period" data-v="${k}" aria-pressed="${p === k}">${v.label}</button>`).join('')}
+    ${modes ? `<div class="seg" role="group" aria-label="${L('طريقة العرض', 'View')}">
+      <button data-act="mode" data-v="stock" aria-pressed="${m === 'stock'}">${L('المحتوى الإجمالي', 'Total holdings')}</button>
+      <button data-act="mode" data-v="chg" aria-pressed="${m === 'chg'}">${L('التغير', 'Change')}</button></div>` : ''}
+    <div class="seg" role="group" aria-label="${L('مدة المقارنة', 'Comparison period')}">
+      ${Object.keys(PERIODS).map(k => `<button data-act="period" data-v="${k}" aria-pressed="${p === k}">${pLabel(k)}</button>`).join('')}
     </div></div>`;
 }
 
 function chgLine(c, monthly, words){
-  if (!c) return `<div class="chg na">لا تتوفر بعد قراءة سابقة كافية لهذه المدة</div>`;
-  const cls = c.d > 0 ? 'up' : c.d < 0 ? 'down' : 'flat';
-  const w = c.d > 0 ? words[0] : c.d < 0 ? words[1] : 'دون تغيير';
-  return `<div class="chg ${cls}"><b>${sKG(c.d)}</b><span>${sTN(c.d)}</span><span>${sPCT(c.pct)}</span><em>${w}</em></div>
-    <span class="since">مقارنة بـ ${fmtD(c.from[0], monthly)}</span>`;
+  if (!c) return `<div class="chg na">${L('لا تتوفر بعد قراءة سابقة كافية لهذه المدة', 'Not enough history for this period yet')}</div>`;
+  const w = c.d > 0 ? words[0] : c.d < 0 ? words[1] : L('دون تغيير', 'Unchanged');
+  return `<div class="chg ${cls(c.d)}"><b>${sKG(c.d)}</b><span>${sTN(c.d)}</span><span>${sPCT(c.pct)}</span><em>${w}</em></div>
+    <span class="since">${L('مقارنة بـ', 'Compared with')} ${fmtD(c.from[0], monthly)}</span>`;
 }
 
 function figure(label, s, period, words, extra = ''){
   const l = last(s);
-  if (!l) return `<div class="fig"><h3>${label}</h3><p class="empty">لا توجد بيانات بعد.</p></div>`;
+  if (!l) return `<div class="fig"><h3>${label}</h3><p class="empty">${L('لا توجد بيانات بعد.', 'No data yet.')}</p></div>`;
   const monthly = isMonthly(s);
-  return `<div class="fig"><h3>${label}</h3>
-    <div class="v">${TN(l[1])}</div><div class="sub">${KG(l[1])} حتى ${fmtD(l[0], monthly)}</div>
+  return `<div class="fig"><h3>${label}</h3><div class="v">${TN(l[1])}</div>
+    <div class="sub">${KG(l[1])} ${L('حتى', 'as of')} ${fmtD(l[0], monthly)}</div>
     ${chgLine(change(s, PERIODS[period].days), monthly, words)}${extra}</div>`;
 }
 
-function rankedList(title, rows, cls, maxAbs, monthly){
-  if (!rows.length) return `<div class="ranked"><h3>${title}</h3><p class="empty">لا توجد دول في هذه الفئة خلال المدة.</p></div>`;
+function rankedList(title, rows, k, maxAbs, monthly, nameFn){
+  if (!rows.length) return `<div class="ranked"><h3>${title}</h3><p class="empty">${L('لا يوجد شيء في هذه الفئة خلال المدة.', 'Nothing in this group for the period.')}</p></div>`;
   return `<div class="ranked"><h3>${title}</h3>${rows.map(r => `
-    <div class="row"><span>${esc(nameOf(r.code))}</span>
-      <span class="track"><span class="bar ${cls}" style="display:block;width:${Math.max(2, Math.abs(r.c.d) / maxAbs * 100).toFixed(1)}%"></span></span>
-      <span class="val ${cls}">${sTN(r.c.d)}</span>
-      <span class="det">${sKG(r.c.d)} ${sPCT(r.c.pct)}، من ${TN(r.c.from[1])} إلى ${TN(r.c.to[1])} (${fmtD(r.c.from[0], monthly)} ← ${fmtD(r.c.to[0], monthly)})</span>
+    <div class="row"><span>${nameFn(r)}</span>
+      <span class="track"><span class="bar ${k}" style="display:block;width:${Math.max(2, Math.abs(r.c.d) / maxAbs * 100).toFixed(1)}%"></span></span>
+      <span class="val ${k}">${sTN(r.c.d)}</span>
+      <span class="det">${sKG(r.c.d)} ${sPCT(r.c.pct)}${L('، من', ', from')} ${TN(r.c.from[1])} ${L('إلى', 'to')} ${TN(r.c.to[1])} (${fmtD(r.c.from[0], monthly)} → ${fmtD(r.c.to[0], monthly)})</span>
     </div>`).join('')}</div>`;
 }
 
-function countryChanges(period){
-  const days = PERIODS[period].days;
-  return Object.entries(DATA.countries || {})
-    .map(([code, s]) => ({code, s, c: change(s, days)}))
-    .filter(r => r.c && r.c.d !== 0);
-}
+const noData = () => `<p class="empty">${L('لا توجد بيانات بعد. شغّل سير العمل من تبويب Actions في GitHub ثم أعد تحميل الصفحة.', 'No data yet. Run the workflow from the Actions tab on GitHub, then reload the page.')}</p>`;
+const chips = (act, items, cur) => `<div class="chips">${items.map(([v, l]) =>
+  `<button class="chip-btn" data-act="${act}" data-v="${esc(v)}" aria-pressed="${v === cur}">${l}</button>`).join('')}</div>`;
+const chgSub = (v, fmt) => `<span class="${cls(v)}">${fmt(v)}</span> ${L('عن التقرير السابق', 'vs previous report')}`;
 
-/* ---------- 20-report viewer (chart + hover panel + table + report list) ---------- */
-const WINDOW = 20;
-const RVM = {};
-const fShort = new Intl.DateTimeFormat('ar-u-nu-latn',{day:'numeric',month:'numeric',timeZone:'UTC'});
-const fShortM = new Intl.DateTimeFormat('ar-u-nu-latn',{month:'short',year:'2-digit',timeZone:'UTC'});
-const dm = d => { const t = toDate(d); return `${t.getUTCDate()}/${t.getUTCMonth() + 1}`; };
-const CT = v => `${bd(nf0.format(v))} عقد`;
-const sCT = v => `${bd(sg(v) + nf0.format(Math.abs(v)))} عقد`;
-const KG_PER_CT = CONTRACT_KG;
-
+/* ================= 20-report viewer ================= */
 function flowModel(series, gross){
   const s = (series || []).slice(-(WINDOW + 4)), pts = [];
   for (let i = 1; i < s.length; i++){
     const [d, v] = s[i], prev = s[i - 1][1], delta = v - prev, g = gross && gross[d];
-    pts.push({d, line:v, delta, pct: prev ? delta / Math.abs(prev) * 100 : null,
-      d3: i >= 3 ? v - s[i - 3][1] : null,
+    pts.push({d, line:v, delta, pct: prev ? delta / Math.abs(prev) * 100 : null, d3: i >= 3 ? v - s[i - 3][1] : null,
       buy: g ? g.buy : Math.max(delta, 0), sell: g ? g.sell : Math.max(-delta, 0), g});
   }
   return pts.slice(-WINDOW);
@@ -382,8 +445,18 @@ function lsModel(recs){
     const [d, l, s, sp] = r[i], [, pl, ps, psp] = r[i - 1];
     const net = l - s, pnet = pl - ps, delta = net - pnet;
     pts.push({d, buy:l, sell:s, line:net, delta, pct: pnet ? delta / Math.abs(pnet) * 100 : null,
-      d3: i >= 3 ? net - (r[i - 3][1] - r[i - 3][2]) : null,
-      dl: l - pl, ds: s - ps, sp: sp || 0, dsp: (sp || 0) - (psp || 0), rec: r[i]});
+      d3: i >= 3 ? net - (r[i - 3][1] - r[i - 3][2]) : null, dl: l - pl, ds: s - ps, sp: sp || 0, dsp: (sp || 0) - (psp || 0), rec: r[i]});
+  }
+  return pts.slice(-WINDOW);
+}
+
+/* spread model (USD/oz): bars above zero = premium, below = discount */
+function spreadModel(rows){
+  const r = (rows || []).slice(-(WINDOW + 4)), pts = [];
+  for (let i = 1; i < r.length; i++){
+    const [d, v, a, b] = r[i], prev = r[i - 1][1];
+    pts.push({d, line:v, a, b, delta: v - prev, pct: b ? v / b * 100 : null, d3: i >= 3 ? v - r[i - 3][1] : null,
+      buy: Math.max(v, 0), sell: Math.max(-v, 0)});
   }
   return pts.slice(-WINDOW);
 }
@@ -395,11 +468,11 @@ function rvSel(id, pts){
 }
 
 function reportView(id, title, pts, cfg){
-  if (!pts.length) return `<div class="rv"><h3 class="rv-title">${title}</h3><p class="empty">${cfg.empty || 'لا تكفي التقارير لرسم المخطط بعد؛ يكتمل مع التحديثات القادمة.'}</p></div>`;
+  if (!pts.length) return `<div class="rv"><h3 class="rv-title">${title}</h3><p class="empty">${cfg.empty || L('لا تكفي التقارير لرسم المخطط بعد؛ يكتمل مع التحديثات القادمة.', 'Not enough reports to draw the chart yet; it fills in with upcoming updates.')}</p></div>`;
   RVM[id] = {pts, cfg};
   const si = rvSel(id, pts), p = pts[si], n = pts.length;
   const W = 640, H = 230, T = 10, B = 10, ph = H - T - B, cw = W / n;
-  const mu = Math.max(1, ...pts.map(q => q.buy)), md = Math.max(1, ...pts.map(q => q.sell));
+  const mu = Math.max(1e-9, ...pts.map(q => q.buy)), md = Math.max(1e-9, ...pts.map(q => q.sell));
   const sc = ph / (mu + md), zy = T + mu * sc;
   let svg = `<svg class="rvc" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">`;
   svg += `<rect class="selcol" x="${(si * cw).toFixed(1)}" y="0" width="${cw.toFixed(1)}" height="${H}"/>`;
@@ -413,148 +486,59 @@ function reportView(id, title, pts, cfg){
     const lv = pts.map(q => q.line); let lo = Math.min(...lv), hi = Math.max(...lv);
     if (lo === hi){ lo -= 1; hi += 1; }
     const Y = v => T + 8 + (hi - v) / (hi - lo) * (ph - 16);
-    const xy = pts.map((q, i) => `${((i + .5) * cw).toFixed(1)},${Y(q.line).toFixed(1)}`);
-    svg += `<polyline class="l-net" points="${xy.join(' ')}" vector-effect="non-scaling-stroke"/>`;
+    svg += `<polyline class="l-net" points="${pts.map((q, i) => `${((i + .5) * cw).toFixed(1)},${Y(q.line).toFixed(1)}`).join(' ')}" vector-effect="non-scaling-stroke"/>`;
   }
-  pts.forEach((q, i) => { svg += `<rect class="hit" data-rv="${id}" data-i="${i}" x="${(i * cw).toFixed(1)}" y="0" width="${cw.toFixed(1)}" height="${H}"/>`; });
+  pts.forEach((q, i) => { svg += `<rect class="hit" data-rv="${esc(id)}" data-i="${i}" x="${(i * cw).toFixed(1)}" y="0" width="${cw.toFixed(1)}" height="${H}"/>`; });
   svg += '</svg>';
-  const monthly = cfg.monthly;
-  const step = n > 12 ? 4 : n > 6 ? 2 : 1;
+  const monthly = cfg.monthly, step = n > 12 ? 4 : n > 6 ? 2 : 1;
   const ticks = pts.map((q, i) => `<span>${(i % step === (n - 1) % step) ? (monthly ? fShortM.format(toDate(q.d)) : dm(q.d)) : ''}</span>`).join('');
   const legend = `<div class="legend"><span><i style="background:var(--buy)"></i>${cfg.buy}</span><span><i style="background:var(--sell)"></i>${cfg.sell}</span>${cfg.line ? `<span><i style="background:var(--ink)"></i>${cfg.line}</span>` : ''}</div>`;
   const cells = cfg.cells(p, si, pts).map(c => `<div class="cell"><h4>${c.label}</h4><div class="cv">${c.v}</div><div class="cs">${c.sub || ''}</div></div>`).join('');
-  const list = pts.map((q, i) => ({q, i})).reverse().map(({q, i}) => {
-    const cls = q.delta > 0 ? 'up' : q.delta < 0 ? 'down' : 'flat';
-    return `<button class="rep" data-act="sel" data-rv="${id}" data-i="${i}" aria-pressed="${i === si}">
-      <span>${fmtD(q.d, monthly)}</span><span class="${cls}">${cfg.sfmt(q.delta)}</span></button>`;
-  }).join('');
-  return `<div class="rv" id="rv-${id}">
+  const list = pts.map((q, i) => ({q, i})).reverse().map(({q, i}) =>
+    `<button class="rep" data-act="sel" data-rv="${esc(id)}" data-i="${i}" aria-pressed="${i === si}"><span>${fmtD(q.d, monthly)}</span><span class="${cls(q.delta)}">${cfg.sfmt(q.delta)}</span></button>`).join('');
+  return `<div class="rv" id="rv-${esc(id)}">
     <h3 class="rv-title">${title}</h3>${legend}
-    <div class="rv-plot">${svg}<div class="ticks">${ticks}</div><div class="tt" hidden></div></div>
+    <div class="rv-plot">${svg}<div class="ticks">${ticks}</div><div class="tt" dir="${isAr() ? 'rtl' : 'ltr'}" hidden></div></div>
     <div class="rv-bottom">
-      <div><div class="rv-sel">التقرير المختار: <b>${fmtD(p.d, monthly)}</b></div><div class="cells">${cells}</div></div>
-      <div class="rv-list" aria-label="آخر ${n} تقريرًا">${list}</div>
+      <div><div class="rv-sel">${L('التقرير المختار', 'Selected report')}: <b>${fmtD(p.d, monthly)}</b></div><div class="cells">${cells}</div></div>
+      <div class="rv-list" aria-label="${L('آخر التقارير', 'Latest reports')}">${list}</div>
     </div></div>`;
 }
 
 function panelHTML(id, i){
   const m = RVM[id]; if (!m) return '';
   const q = m.pts[i], c = m.cfg;
-  const row = (k, v, cls) => `<div><span>${k}</span><b class="${cls}">${v}</b></div>`;
+  const row = (k, v, cl) => `<div><span>${k}</span><b class="${cl}">${v}</b></div>`;
   let h = `<div class="tt-d">${fmtD(q.d, c.monthly)}</div>`;
+  if (c.panel) return h + c.panel(q, row);
   h += row(c.buy, c.fmt(q.buy), 'up');
   h += row(c.sell, c.fmt(q.sell), 'down');
   if (c.extra) h += c.extra(q);
-  h += row(c.pctLabel || 'نسبة التغير', q.pct == null ? '—' : sPCT(q.pct), 'ink');
-  h += row(c.deltaLabel || 'الدلتا', c.sfmt(q.delta), 'orange');
-  h += row('دلتا آخر 3 تقارير', q.d3 == null ? '—' : c.sfmt(q.d3), q.d3 >= 0 ? 'blue' : 'down');
+  h += row(c.pctLabel || L('نسبة التغير', 'Change %'), q.pct == null ? '—' : sPCT(q.pct), 'ink');
+  h += row(c.deltaLabel || L('الدلتا', 'Delta'), c.sfmt(q.delta), 'orange');
+  h += row(L('دلتا آخر 3 تقارير', 'Delta, last 3 reports'), q.d3 == null ? '—' : c.sfmt(q.d3), q.d3 >= 0 ? 'blue' : 'down');
   return h;
 }
 
-function chgSub(v, fmt){
-  const cls = v > 0 ? 'up' : v < 0 ? 'down' : 'flat';
-  return `<span class="${cls}">${fmt(v)}</span> عن التقرير السابق`;
-}
-
-const kgCfg = (o) => Object.assign({fmt: KG, sfmt: sKG}, o);
-const ctCfg = (o) => Object.assign({fmt: CT, sfmt: sCT}, o);
-const lsCells = (spreadLabel) => (p) => [
-  {label:'عقود Long', v: CT(p.buy), sub: chgSub(p.dl, sCT)},
-  {label:'عقود Short', v: CT(p.sell), sub: chgSub(p.ds, sCT)},
-  spreadLabel === false
-    ? {label:'الصافي (Long − Short)', v: CT(p.line), sub: chgSub(p.delta, sCT)}
-    : {label:'عقود Spread', v: CT(p.sp), sub: chgSub(p.dsp, sCT)},
+const kgCfg = o => Object.assign({fmt: KG, sfmt: sKG}, o);
+const ctCfg = o => Object.assign({fmt: CT, sfmt: sCT}, o);
+const lsCells = netInstead => p => [
+  {label: L('عقود Long', 'Long contracts'), v: CT(p.buy), sub: chgSub(p.dl, sCT)},
+  {label: L('عقود Short', 'Short contracts'), v: CT(p.sell), sub: chgSub(p.ds, sCT)},
+  netInstead
+    ? {label: L('الصافي (Long − Short)', 'Net (Long − Short)'), v: CT(p.line), sub: chgSub(p.delta, sCT)}
+    : {label: L('عقود Spread', 'Spread contracts'), v: CT(p.sp), sub: chgSub(p.dsp, sCT)},
 ];
-const lsExtra = q => `<div><span>تغير Long</span><b class="up">${sCT(q.dl)}</b></div><div><span>تغير Short</span><b class="down">${sCT(q.ds)}</b></div>`;
+const lsExtra = q => `<div><span>${L('تغير Long', 'Long change')}</span><b class="up">${sCT(q.dl)}</b></div><div><span>${L('تغير Short', 'Short change')}</span><b class="down">${sCT(q.ds)}</b></div>`;
 
-/* ---------- bank & depository names ---------- */
-const BANK_RULES = [[/J\.?\s?P\.?\s?MORGAN/,'JPMorgan'],[/HSBC/,'HSBC'],[/GOLDMAN/,'Goldman Sachs'],[/BOFA|BANC OF AMERICA|BANK OF AMERICA|MERRILL/,'Bank of America'],
- [/CITIGROUP|CITIBANK|\bCITI\b/,'Citigroup'],[/MORGAN STANLEY/,'Morgan Stanley'],[/WELLS FARGO/,'Wells Fargo'],[/BARCLAYS/,'Barclays'],[/\bRBC\b|ROYAL BANK OF CANADA/,'RBC'],
- [/SCOTIA/,'Scotiabank'],[/\bUBS\b/,'UBS'],[/BNP/,'BNP Paribas'],[/SOCIETE|SG AMERICAS/,'Société Générale'],[/DEUTSCHE/,'Deutsche Bank'],
- [/MIZUHO/,'Mizuho'],[/NOMURA/,'Nomura'],[/MACQUARIE/,'Macquarie'],[/STONEX|FCSTONE/,'StoneX'],[/MAREX/,'Marex'],[/ABN AMRO/,'ABN AMRO'],
- [/\bADM\b/,'ADM'],[/STANDARD CHARTERED/,'Standard Chartered'],[/ICBC/,'ICBC'],[/BANK OF CHINA|BOCI/,'Bank of China'],[/\bTD\b|TORONTO/,'TD'],
- [/BMO|BANK OF MONTREAL/,'BMO'],[/BRINK/,"Brink's"],[/LOOMIS/,'Loomis'],[/MALCA/,'Malca-Amit'],[/MANFRA/,'Manfra, Tordella & Brookes'],
- [/ASAHI/,'Asahi'],[/INTERNATIONAL DEPOSITORY|\bIDS\b/,'IDS of Delaware'],[/DELAWARE DEPOSITORY/,'Delaware Depository'],[/DORMAN/,'Dorman'],[/ADVANTAGE/,'Advantage Futures']];
-const GLOBAL_BANKS = new Set(['JPMorgan','HSBC','Goldman Sachs','Bank of America','Citigroup','Morgan Stanley','Wells Fargo','Barclays','RBC','Scotiabank','UBS','BNP Paribas','Société Générale','Deutsche Bank','Mizuho','Nomura','Macquarie','Standard Chartered','ICBC','Bank of China','TD','BMO','ABN AMRO']);
-function bankName(raw){
-  const u = String(raw).toUpperCase();
-  for (const [re, n] of BANK_RULES) if (re.test(u)) return n;
-  return String(raw).toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
-}
-
-/* deliveries: per display bank per day -> {stp, iss, H:[i,s], C:[i,s]} (contracts) */
-function deliveriesByBank(){
-  const daily = (DATA.deliveries || {}).daily || {}, days = Object.keys(daily).sort(), banks = {};
-  days.forEach(d => {
-    Object.entries(daily[d] || {}).forEach(([raw, acc]) => {
-      const b = bankName(raw), rec = ((banks[b] = banks[b] || {})[d] = banks[b][d] || {iss:0, stp:0, H:[0,0], C:[0,0]});
-      Object.entries(acc).forEach(([org, [i, s]]) => { rec.iss += i; rec.stp += s; if (rec[org]){ rec[org][0] += i; rec[org][1] += s; } });
-    });
-  });
-  return {days, banks};
-}
-
-/* ---------- sections ---------- */
+/* ================= sections ================= */
 const R = {};
-const noData = '<p class="empty">لا توجد بيانات بعد. شغّل سير العمل من تبويب Actions في GitHub ثم أعد تحميل الصفحة.</p>';
-const chips = (act, items, cur) => `<div class="chips">${items.map(([v, l]) =>
-  `<button class="chip-btn" data-act="${act}" data-v="${esc(v)}" aria-pressed="${v === cur}">${l}</button>`).join('')}</div>`;
+const cName = code => `${flag(code)}<bdi>${esc(nameOf(code))}</bdi>`;
 
-R.countries = () => {
-  const id = 'countries', p = state.period[id];
-  const entries = Object.entries(DATA.countries || {});
-  let h = head('مشتريات الدول من الذهب',
-    'الحيازات الرسمية لكل دولة كما ترفعها إلى صندوق النقد الدولي في نموذج IRFCL الشهري. الموجب شراء والسالب بيع.',
-    ['شهري', 'تأخير نحو 50 يومًا', `${entries.length} دولة`], 'imf');
-  if (!entries.length) return h + noData;
-
-  const codes = entries.map(([c]) => c).sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'ar'));
-  if (!state.country || !DATA.countries[state.country]) state.country = DATA.countries.CHN ? 'CHN' : codes[0];
-  const cs = DATA.countries[state.country], cb = (DATA.central_banks || {}).series || [];
-  const pts = flowModel(cs);
-  h += `<div class="picker"><label for="country-pick">الدولة</label><select id="country-pick" data-act="country">${codes.map(c =>
-    `<option value="${c}" ${c === state.country ? 'selected' : ''}>${esc(nameOf(c))}</option>`).join('')}</select></div>`;
-  h += reportView('c-' + state.country, `${esc(nameOf(state.country))}: آخر ${WINDOW} شهرًا`, pts, kgCfg({
-    monthly:true, buy:'شراء', sell:'بيع', line:'الحيازة',
-    cells: q => {
-      const tot = cb.length ? (cb.filter(x => x[0] <= q.d).slice(-1)[0] || [0, 0])[1] : 0;
-      return [
-        {label:'الحيازة', v: TN(q.line), sub: KG(q.line)},
-        {label:'التغير عن الشهر السابق', v: `<span class="${q.delta > 0 ? 'up' : q.delta < 0 ? 'down' : 'flat'}">${sTN(q.delta)}</span>`, sub: `${sKG(q.delta)} ${sPCT(q.pct)}`},
-        {label:'الحصة من إجمالي الدول المُبلِّغة', v: tot ? bd(nf2.format(q.line / tot * 100) + '%') : '—', sub: tot ? `من ${TN(tot)}` : ''},
-      ];
-    }}));
-
-  h += controls(id, true);
-  if (state.mode[id] === 'stock'){
-    const rows = entries.map(([code, s]) => ({code, l: last(s), c: change(s, PERIODS[p].days)})).sort((a, b) => b.l[1] - a.l[1]);
-    const total = rows.reduce((a, r) => a + r.l[1], 0);
-    const shown = state.all ? rows : rows.slice(0, 25);
-    h += `<div class="tablebox"><table><thead><tr><th class="rank">#</th><th>الدولة</th><th class="n">الحيازة</th><th class="n">بالكيلوغرام</th>
-      <th class="n">الحصة</th><th class="n">التغير خلال ${PERIODS[p].label}</th><th>آخر قراءة</th></tr></thead><tbody>
-      ${shown.map((r, i) => {
-        const cls = !r.c ? 'na' : r.c.d > 0 ? 'up' : r.c.d < 0 ? 'down' : 'flat';
-        return `<tr><td class="rank">${i + 1}</td><td><button class="linkish" data-act="country-go" data-v="${r.code}">${esc(nameOf(r.code))}</button></td><td class="n">${TN(r.l[1])}</td><td class="n">${KG(r.l[1])}</td>
-          <td class="n">${bd(nf1.format(r.l[1] / total * 100) + '%')}</td>
-          <td class="n ${cls}">${r.c ? `${sTN(r.c.d)} ${sPCT(r.c.pct)}` : 'غير متاح'}</td><td>${fMonth.format(toDate(r.l[0]))}</td></tr>`;
-      }).join('')}</tbody></table></div>`;
-    if (rows.length > 25) h += `<button class="more" data-act="all">${state.all ? 'عرض أكبر 25 دولة فقط' : `عرض كل الدول (${rows.length})`}</button>`;
-    h += `<p class="explain">اضغط اسم أي دولة لعرض مخططها. دول لا ترفع النموذج الشهري، مثل كندا والإمارات وقطر والكويت وباكستان، لا تظهر في هذا المصدر.</p>`;
-    return h;
-  }
-  const rows = countryChanges(p);
-  const buyers = rows.filter(r => r.c.d > 0).sort((a, b) => b.c.d - a.c.d);
-  const sellers = rows.filter(r => r.c.d < 0).sort((a, b) => a.c.d - b.c.d);
-  const bought = buyers.reduce((a, r) => a + r.c.d, 0), sold = sellers.reduce((a, r) => a + r.c.d, 0);
-  const net = bought + sold, maxAbs = Math.max(1, ...rows.map(r => Math.abs(r.c.d)));
-  h += `<div class="figs">
-    <div class="fig"><h3>اشترت ${buyers.length} دولة</h3><div class="v ${bought ? 'up' : 'flat'}">${sTN(bought)}</div><div class="sub">${sKG(bought)}</div></div>
-    <div class="fig"><h3>باعت ${sellers.length} دولة</h3><div class="v ${sold ? 'down' : 'flat'}">${sTN(sold)}</div><div class="sub">${sKG(sold)}</div></div>
-    <div class="fig"><h3>الصافي خلال ${PERIODS[p].label}</h3><div class="v ${net >= 0 ? 'up' : 'down'}">${sTN(net)}</div><div class="sub">${sKG(net)}</div></div>
-  </div>
-  <div class="cols">${rankedList('المشترون', buyers, 'up', maxAbs, true)}${rankedList('البائعون', sellers, 'down', maxAbs, true)}</div>`;
-  return h;
-};
+function countryChanges(period){
+  const days = PERIODS[period].days;
+  return Object.entries(DATA.countries || {}).map(([code, s]) => ({code, s, c: change(s, days)})).filter(r => r.c && r.c.d !== 0);
+}
 
 function grossByMonth(){
   const g = {};
@@ -567,100 +551,171 @@ function grossByMonth(){
   return g;
 }
 
+const ABOUT = {};
+ABOUT.countries = () => [
+  [L('ماذا يعرض؟', 'What it shows'), L('حيازة كل دولة من الذهب الرسمي شهرًا بشهر، والتغير بين الأشهر: الموجب شراء والسالب بيع. اختر دولة لترى مخطط آخر 20 شهرًا، أو قارن الدول في الجدول وقوائم المشترين والبائعين.',
+    'Each country’s official gold holdings month by month and the change between months: positive means buying, negative means selling. Pick a country to see its last 20 months, or compare countries in the table and the buyer and seller lists.')],
+  [L('المصدر وطريقة الحساب', 'Source and method'), L('قاعدة IRFCL في صندوق النقد الدولي، وهي ما ترفعه البنوك المركزية شهريًا. تصل الكمية بالأونصة الذهبية (Troy ounce)، فنحوّلها إلى كيلوغرام (الأونصة = 31.1035 غرامًا)، ونستبعد آليًا القيم غير المنطقية الناتجة عن أخطاء وحدات في بعض البلاغات.',
+    'The IMF’s IRFCL database, which central banks report to every month. Quantities arrive in troy ounces and are converted to kilograms (1 oz = 31.1035 g). Implausible values caused by unit errors in some reports are rejected automatically.')],
+  [L('التحديث', 'Updates'), L('يُفحص المصدر تلقائيًا في كل تشغيل، ثلاث مرات يوميًا في أيام العمل. تصل بيانات كل شهر عادةً بعد نحو 50 يومًا من نهايته.',
+    'The source is checked automatically on every run, three times a day on weekdays. Each month’s data usually arrives about 50 days after the month ends.')],
+  [L('الحدود', 'Limits'), L('الدول التي لا ترفع النموذج الشهري، مثل كندا والإمارات وقطر والكويت وباكستان، لا تظهر هنا. والمشتريات غير المعلنة لا تظهر في أي مصدر رسمي.',
+    'Countries that do not file the monthly template, such as Canada, the UAE, Qatar, Kuwait and Pakistan, do not appear here. Unreported purchases do not appear in any official source.')],
+];
+
+R.countries = () => {
+  const id = 'countries', p = state.period[id];
+  const entries = Object.entries(DATA.countries || {});
+  const latest = entries.reduce((a, [, s]) => last(s)[0] > a ? last(s)[0] : a, '');
+  let h = head(L('مشتريات الدول من الذهب', 'Gold purchases by country'), '',
+    [L('شهري', 'Monthly'), L('تأخير نحو 50 يومًا', 'About 50 days delay'), `${entries.length} ${L('دولة', 'countries')}`], 'imf', fresh(latest, 80));
+  h += about(id, ABOUT.countries());
+  if (!entries.length) return h + noData();
+
+  const codes = entries.map(([c]) => c).sort((a, b) => nameOf(a).localeCompare(nameOf(b), state.lang));
+  if (!state.country || !DATA.countries[state.country]) state.country = DATA.countries.CHN ? 'CHN' : codes[0];
+  const cs = DATA.countries[state.country], cb = (DATA.central_banks || {}).series || [];
+  h += `<div class="picker"><label for="country-pick">${flag(state.country)}${L('الدولة', 'Country')}</label><select id="country-pick" data-act="country">${codes.map(c =>
+    `<option value="${c}" ${c === state.country ? 'selected' : ''}>${esc(nameOf(c))}</option>`).join('')}</select></div>`;
+  h += reportView('c-' + state.country, `${cName(state.country)}: ${L('آخر 20 شهرًا', 'last 20 months')}`, flowModel(cs), kgCfg({
+    monthly:true, buy: L('شراء', 'Bought'), sell: L('بيع', 'Sold'), line: L('الحيازة', 'Holdings'),
+    cells: q => {
+      const tot = cb.length ? (cb.filter(x => x[0] <= q.d).slice(-1)[0] || [0, 0])[1] : 0;
+      return [
+        {label: L('الحيازة', 'Holdings'), v: TN(q.line), sub: KG(q.line)},
+        {label: L('التغير عن الشهر السابق', 'Change vs previous month'), v: `<span class="${cls(q.delta)}">${sTN(q.delta)}</span>`, sub: `${sKG(q.delta)} ${sPCT(q.pct)}`},
+        {label: L('الحصة من إجمالي الدول المُبلِّغة', 'Share of all reporting countries'), v: tot ? bd(nf2.format(q.line / tot * 100) + '%') : '—', sub: tot ? `${L('من', 'of')} ${TN(tot)}` : ''},
+      ];
+    }}));
+
+  h += controls(id, true);
+  if (state.mode[id] === 'stock'){
+    const rows = entries.map(([code, s]) => ({code, l: last(s), c: change(s, PERIODS[p].days)})).sort((a, b) => b.l[1] - a.l[1]);
+    const total = rows.reduce((a, r) => a + r.l[1], 0), shown = state.all ? rows : rows.slice(0, 25);
+    h += `<div class="tablebox"><table><thead><tr><th class="rank">#</th><th>${L('الدولة', 'Country')}</th><th class="n">${L('الحيازة', 'Holdings')}</th><th class="n">${L('بالكيلوغرام', 'In kilograms')}</th>
+      <th class="n">${L('الحصة', 'Share')}</th><th class="n">${L('التغير خلال', 'Change over')} ${pLabel(p)}</th><th>${L('آخر قراءة', 'Latest report')}</th></tr></thead><tbody>
+      ${shown.map((r, i) => `<tr><td class="rank">${i + 1}</td><td><button class="linkish" data-act="country-go" data-v="${r.code}">${cName(r.code)}</button></td>
+        <td class="n">${TN(r.l[1])}</td><td class="n">${KG(r.l[1])}</td><td class="n">${bd(nf1.format(r.l[1] / total * 100) + '%')}</td>
+        <td class="n ${r.c ? cls(r.c.d) : 'na'}">${r.c ? `${sTN(r.c.d)} ${sPCT(r.c.pct)}` : L('غير متاح', 'n/a')}</td><td>${fMonth.format(toDate(r.l[0]))}</td></tr>`).join('')}</tbody></table></div>`;
+    if (rows.length > 25) h += `<button class="more" data-act="all">${state.all ? L('عرض أكبر 25 دولة فقط', 'Show the top 25 only') : L(`عرض كل الدول (${rows.length})`, `Show all countries (${rows.length})`)}</button>`;
+    h += `<p class="explain">${L('اضغط اسم أي دولة لعرض مخططها.', 'Click any country to see its chart.')}</p>`;
+    return h;
+  }
+  const rows = countryChanges(p);
+  const buyers = rows.filter(r => r.c.d > 0).sort((a, b) => b.c.d - a.c.d), sellers = rows.filter(r => r.c.d < 0).sort((a, b) => a.c.d - b.c.d);
+  const bought = buyers.reduce((a, r) => a + r.c.d, 0), sold = sellers.reduce((a, r) => a + r.c.d, 0), net = bought + sold;
+  const maxAbs = Math.max(1, ...rows.map(r => Math.abs(r.c.d)));
+  const nm = r => `<button class="linkish" data-act="country-go" data-v="${r.code}">${cName(r.code)}</button>`;
+  h += `<div class="figs">
+    <div class="fig"><h3>${L(`اشترت ${buyers.length} دولة`, `${buyers.length} countries bought`)}</h3><div class="v ${bought ? 'up' : 'flat'}">${sTN(bought)}</div><div class="sub">${sKG(bought)}</div></div>
+    <div class="fig"><h3>${L(`باعت ${sellers.length} دولة`, `${sellers.length} countries sold`)}</h3><div class="v ${sold ? 'down' : 'flat'}">${sTN(sold)}</div><div class="sub">${sKG(sold)}</div></div>
+    <div class="fig"><h3>${L('الصافي خلال', 'Net over')} ${pLabel(p)}</h3><div class="v ${net >= 0 ? 'up' : 'down'}">${sTN(net)}</div><div class="sub">${sKG(net)}</div></div></div>
+    <p class="explain">${L('تُقارَن آخر قراءة لكل دولة بقراءتها قبل المدة المختارة تقريبًا، لأن الدول لا ترفع بياناتها في الشهر نفسه.', 'Each country’s latest report is compared with its report roughly one period earlier, since countries do not all report in the same month.')}</p>
+    <div class="cols">${rankedList(L('المشترون', 'Buyers'), buyers, 'up', maxAbs, true, nm)}${rankedList(L('البائعون', 'Sellers'), sellers, 'down', maxAbs, true, nm)}</div>`;
+  return h;
+};
+
+ABOUT.cb = () => [
+  [L('ماذا يعرض؟', 'What it shows'), L('مجموع ذهب البنوك المركزية المُبلِّغة كل شهر، وما اشتراه المشترون منها وما باعه البائعون، وأكبر خمسة مشترين وأكبر خمسة بائعين.',
+    'The combined gold of reporting central banks each month, the gross amount bought by buyers and sold by sellers, and the five largest buyers and sellers.')],
+  [L('طريقة الحساب', 'Method'), L('نجمع آخر حيازة مُبلَّغة لكل دولة، ونحمل قيمتها إلى الأمام إن تأخرت دولة في الإبلاغ. ولا ندخل في الإجمالي إلا الدول المتوفرة بياناتها منذ بداية السجل، كي لا يقفز الإجمالي عند انضمام دولة. المشتريات الإجمالية = مجموع الزيادات، والمبيعات = مجموع الانخفاضات.',
+    'We add up each country’s latest reported holding and carry it forward if a country reports late. Only countries with data since the start of the record are included, so the total does not jump when a country joins. Gross buying is the sum of increases; gross selling is the sum of decreases.')],
+  [L('التحديث', 'Updates'), L('من مصدر قسم الدول نفسه (IMF IRFCL)، ويُفحص تلقائيًا في كل تشغيل.', 'Same source as the countries section (IMF IRFCL), checked automatically on every run.')],
+  [L('الحدود', 'Limits'), L('يغطي البنوك المركزية التي ترفع بياناتها شهريًا فقط، لذلك يقل الإجمالي عن الاحتياطي الرسمي العالمي الكامل.', 'Covers only central banks that report monthly, so the total is below the full global official reserve.')],
+];
+
 R.cb = () => {
   const id = 'cb', p = state.period[id], cb = DATA.central_banks || {}, s = cb.series || [];
-  let h = head('البنوك المركزية: الإجمالي العالمي',
-    'مجموع حيازات البنوك المركزية التي ترفع بياناتها شهريًا إلى صندوق النقد الدولي، مع إجمالي ما اشتراه المشترون وما باعه البائعون كل شهر.',
-    ['شهري', cb.as_of ? `حتى ${fMonth.format(toDate(cb.as_of))}` : '', cb.reporting ? `${cb.reporting} بنكًا مركزيًا أبلغ عن هذا الشهر` : ''], 'imf');
-  if (!s.length) return h + noData;
-  h += reportView('cb', `آخر ${WINDOW} شهرًا`, flowModel(s, grossByMonth()), kgCfg({
-    monthly:true, buy:'إجمالي المشتريات', sell:'إجمالي المبيعات', line:'الحيازة الإجمالية', deltaLabel:'الصافي (الدلتا)',
-    extra: q => q.g ? `<div><span>عدد المشترين / البائعين</span><b>${bd(q.g.nb + ' / ' + q.g.ns)}</b></div>` : '',
+  let h = head(L('البنوك المركزية: الإجمالي العالمي', 'Central banks: global total'), '',
+    [L('شهري', 'Monthly'), cb.as_of ? `${L('حتى', 'to')} ${fMonth.format(toDate(cb.as_of))}` : '', cb.reporting ? L(`${cb.reporting} بنكًا مركزيًا أبلغ عن هذا الشهر`, `${cb.reporting} central banks reported this month`) : ''], 'imf', fresh(cb.as_of, 80));
+  h += about(id, ABOUT.cb());
+  if (!s.length) return h + noData();
+  h += reportView('cb', L(`آخر ${WINDOW} شهرًا`, `Last ${WINDOW} months`), flowModel(s, grossByMonth()), kgCfg({
+    monthly:true, buy: L('إجمالي المشتريات', 'Gross buying'), sell: L('إجمالي المبيعات', 'Gross selling'), line: L('الحيازة الإجمالية', 'Total holdings'), deltaLabel: L('الصافي (الدلتا)', 'Net (delta)'),
+    extra: q => q.g ? `<div><span>${L('عدد المشترين / البائعين', 'Buyers / sellers')}</span><b>${bd(q.g.nb + ' / ' + q.g.ns)}</b></div>` : '',
     cells: q => [
-      {label:'الحيازة الإجمالية', v: TN(q.line), sub: `${sKG(q.delta)} ${sPCT(q.pct)}`},
-      {label:`إجمالي المشتريات${q.g ? ` (${q.g.nb} دولة)` : ''}`, v: `<span class="up">${TN(q.buy)}</span>`, sub: KG(q.buy)},
-      {label:`إجمالي المبيعات${q.g ? ` (${q.g.ns} دولة)` : ''}`, v: `<span class="down">${TN(q.sell)}</span>`, sub: KG(q.sell)},
+      {label: L('الحيازة الإجمالية', 'Total holdings'), v: TN(q.line), sub: `${sKG(q.delta)} ${sPCT(q.pct)}`},
+      {label: L('إجمالي المشتريات', 'Gross buying') + (q.g ? ` (${q.g.nb} ${L('دولة', 'countries')})` : ''), v: `<span class="up">${TN(q.buy)}</span>`, sub: KG(q.buy)},
+      {label: L('إجمالي المبيعات', 'Gross selling') + (q.g ? ` (${q.g.ns} ${L('دولة', 'countries')})` : ''), v: `<span class="down">${TN(q.sell)}</span>`, sub: KG(q.sell)},
     ]}));
   h += controls(id, false);
-  h += `<div class="figs">${figure('الحيازة الإجمالية المُبلَّغة', s, p, ['صافي شراء', 'صافي بيع'],
-    `<div class="note">تشمل ${cb.in_total || '؟'} دولة متوفرة البيانات منذ بداية السجل.</div>`)}</div>`;
+  h += `<div class="figs">${figure(L('الحيازة الإجمالية المُبلَّغة', 'Total reported holdings'), s, p, [L('صافي شراء', 'Net buying'), L('صافي بيع', 'Net selling')],
+    `<div class="note">${L(`تشمل ${cb.in_total || '?'} دولة متوفرة البيانات منذ بداية السجل.`, `Includes ${cb.in_total || '?'} countries with data since the start of the record.`)}</div>`)}</div>`;
   const rows = countryChanges(p);
-  const buyers = rows.filter(r => r.c.d > 0).sort((a, b) => b.c.d - a.c.d).slice(0, 5);
-  const sellers = rows.filter(r => r.c.d < 0).sort((a, b) => a.c.d - b.c.d).slice(0, 5);
+  const buyers = rows.filter(r => r.c.d > 0).sort((a, b) => b.c.d - a.c.d).slice(0, 5), sellers = rows.filter(r => r.c.d < 0).sort((a, b) => a.c.d - b.c.d).slice(0, 5);
   const maxAbs = Math.max(1, ...buyers.concat(sellers).map(r => Math.abs(r.c.d)));
-  h += `<div class="cols">${rankedList(`أكبر 5 مشترين خلال ${PERIODS[p].label}`, buyers, 'up', maxAbs, true)}${rankedList(`أكبر 5 بائعين خلال ${PERIODS[p].label}`, sellers, 'down', maxAbs, true)}</div>`;
-  h += `<p class="explain">المشتريات غير المُعلنة لا تظهر في أي مصدر رسمي؛ يقدّرها World Gold Council في تقريره الربعي Gold Demand Trends.</p>`;
+  const nm = r => cName(r.code);
+  h += `<div class="cols">${rankedList(L('أكبر 5 مشترين خلال', 'Top 5 buyers over') + ' ' + pLabel(p), buyers, 'up', maxAbs, true, nm)}${rankedList(L('أكبر 5 بائعين خلال', 'Top 5 sellers over') + ' ' + pLabel(p), sellers, 'down', maxAbs, true, nm)}</div>`;
   return h;
 };
 
-R.noncomm = () => {
-  const recs = DATA.noncomm || [];
-  let h = head('COT Non-Commercial: المضاربون الكبار',
-    'مراكز فئة Non-Commercial في تقرير CFTC Legacy لعقود COMEX Gold، وهي صناديق التحوط ومديرو الأموال والمضاربون الكبار. Long شراء، Short بيع، وSpread مراكز متقابلة.',
-    ['أسبوعي', 'يصدر الجمعة عن بيانات الثلاثاء', recs.length ? `آخر تقرير ${fDay.format(toDate(last(recs)[0]))}` : ''], 'cot_legacy');
-  if (!recs.length) return h + noData;
-  const L = last(recs), net = L[1] - L[2], oi = L[4];
-  h += `<div class="figs">
-    <div class="fig"><h3>صافي المركز (Long − Short)</h3><div class="v ${net >= 0 ? 'up' : 'down'}">${sCT(net)}</div><div class="sub">≈ ${sTN(net * KG_PER_CT)}</div></div>
-    <div class="fig"><h3>Long من إجمالي العقود المفتوحة</h3><div class="v">${oi ? bd(nf1.format(L[1] / oi * 100) + '%') : '—'}</div><div class="sub">Open Interest ${CT(oi)}</div></div>
-    <div class="fig"><h3>Short من إجمالي العقود المفتوحة</h3><div class="v">${oi ? bd(nf1.format(L[2] / oi * 100) + '%') : '—'}</div><div class="sub">العقد = 100 أونصة ≈ 3.11 كغ</div></div>
-  </div>`;
-  h += reportView('noncomm', `آخر ${WINDOW} تقريرًا أسبوعيًا`, lsModel(recs), ctCfg({
-    buy:'Long (شراء)', sell:'Short (بيع)', line:'صافي المركز', pctLabel:'نسبة تغير الصافي', deltaLabel:'دلتا الصافي',
-    extra: lsExtra, cells: lsCells()}));
-  h += `<p class="explain">الدلتا = تغير صافي المركز عن التقرير السابق. دلتا آخر 3 تقارير = مجموع التغير خلال آخر ثلاثة أسابيع: الأزرق تراكم شرائي، والأحمر تراكم بيعي. التقرير رقم 21 يخرج من المخطط تلقائيًا عند صدور تقرير جديد.</p>`;
-  return h;
-};
+/* ---------- commercial banks ---------- */
+function deliveriesByBank(){
+  const daily = (DATA.deliveries || {}).daily || {}, days = Object.keys(daily).sort(), banks = {};
+  days.forEach(d => Object.entries(daily[d] || {}).forEach(([raw, acc]) => {
+    const b = bankName(raw), rec = ((banks[b] = banks[b] || {})[d] = banks[b][d] || {iss:0, stp:0, H:[0, 0], C:[0, 0]});
+    Object.entries(acc).forEach(([org, [i, s]]) => { rec.iss += i; rec.stp += s; if (rec[org]){ rec[org][0] += i; rec[org][1] += s; } });
+  }));
+  return {days, banks};
+}
+const star = b => GLOBAL_BANKS.has(b) ? ' ★' : '';
+
+ABOUT.banks = () => [
+  [L('ماذا يعرض؟', 'What it shows'), L('ثلاث نوافذ رسمية على نشاط البنوك في الذهب: مراكز Swap Dealers في تقرير COT، وتسليمات الذهب الفعلي في COMEX لكل بنك بالاسم، وحيازات خزائن البنوك في COMEX.',
+    'Three official windows on bank activity in gold: Swap Dealer positions in the COT report, physical gold deliveries on COMEX by named bank, and the gold held in bank vaults at COMEX.')],
+  [L('المصادر وطريقة الحساب', 'Sources and method'), L('COT من واجهة CFTC الرسمية لعقود COMEX Gold (الرمز 088691). التسليمات من تقرير CME اليومي Issues and Stops (ملف PDF نقرؤه آليًا)، والعقد = 100 أونصة ≈ 3.11 كغ. الخزائن من تقرير CME اليومي Gold Warehouse Stocks لكل مستودع على حدة.',
+    'COT comes from the official CFTC API for COMEX Gold (code 088691). Deliveries come from CME’s daily Issues and Stops report (a PDF read automatically); one contract = 100 oz ≈ 3.11 kg. Vaults come from CME’s daily Gold Warehouse Stocks report, depository by depository.')],
+  [L('التحديث', 'Updates'), L('COT أسبوعي يصدر الجمعة عن بيانات الثلاثاء. التسليمات والخزائن يومية بعد إغلاق السوق، ويُبنى سجلهما يومًا بيوم منذ أول تشغيل.',
+    'COT is weekly, released on Friday for Tuesday’s data. Deliveries and vaults are daily after the close, and their history builds day by day from the first run.')],
+  [L('الحدود', 'Limits'), L('COT لا يسمّي البنوك. التسليمات تشمل حسابات العملاء (Customer) إلى جانب حساب البنك (House). والخزنة تحفظ ذهب البنك وعملائه معًا.',
+    'COT does not name banks. Deliveries include customer accounts as well as the bank’s own (house) account. A vault holds the bank’s and its clients’ metal together.')],
+];
 
 R.banks = () => {
-  const id = 'banks';
-  let h = head('البنوك التجارية',
-    'ثلاث نوافذ رسمية على نشاط البنوك في الذهب: مراكز Swap Dealers في تقرير COT، وتسليمات COMEX الفعلية لكل بنك بالاسم، وحيازات خزائن البنوك في COMEX.',
-    [], 'cot');
-  h += chips('bankview', [['cot', 'COT: Swap Dealers'], ['deliv', 'التسليمات حسب البنك'], ['vault', 'خزائن البنوك']], state.bankView);
+  let h = head(L('البنوك التجارية', 'Commercial banks'), '', [], null, '');
+  h += about('banks', ABOUT.banks());
+  h += chips('bankview', [['cot', 'COT: Swap Dealers'], ['deliv', L('التسليمات حسب البنك', 'Deliveries by bank')], ['vault', L('خزائن البنوك', 'Bank vaults')]], state.bankView);
 
   if (state.bankView === 'cot'){
-    const dis = DATA.cot_disagg || {};
-    const recs = state.cotCat === 'prod' ? dis.prod : dis.swap;
-    if (!recs || !recs.length) return h + noData;
-    h += chips('cotcat', [['swap', 'Swap Dealers (البنوك الكبرى)'], ['prod', 'Producer/Merchant']], state.cotCat);
-    h += reportView('cot-' + state.cotCat, `آخر ${WINDOW} تقريرًا أسبوعيًا`, lsModel(recs), ctCfg({
-      buy:'Long (شراء)', sell:'Short (بيع)', line:'صافي المركز', pctLabel:'نسبة تغير الصافي', deltaLabel:'دلتا الصافي',
-      extra: lsExtra, cells: lsCells(state.cotCat === 'prod' ? false : undefined)}));
-    h += `<p class="explain">تقرير COT لا يسمّي البنوك؛ فئة Swap Dealers تجمع مراكز البنوك الكبرى وصنّاع السوق معًا. للأسماء الصريحة افتح «التسليمات حسب البنك».</p>`;
-    return h + sourceWarn('cot');
+    const dis = DATA.cot_disagg || {}, recs = state.cotCat === 'prod' ? dis.prod : dis.swap;
+    h += sourceWarn('cot');
+    if (!recs || !recs.length) return h + noData();
+    h += `<div class="meta">${fresh(last(recs)[0], 10)}</div>`;
+    h += chips('cotcat', [['swap', L('Swap Dealers (البنوك الكبرى)', 'Swap Dealers (major banks)')], ['prod', 'Producer/Merchant']], state.cotCat);
+    h += reportView('cot-' + state.cotCat, L(`آخر ${WINDOW} تقريرًا أسبوعيًا`, `Last ${WINDOW} weekly reports`), lsModel(recs), ctCfg({
+      buy: L('Long (شراء)', 'Long (buy)'), sell: L('Short (بيع)', 'Short (sell)'), line: L('صافي المركز', 'Net position'),
+      pctLabel: L('نسبة تغير الصافي', 'Net change %'), deltaLabel: L('دلتا الصافي', 'Net delta'), extra: lsExtra, cells: lsCells(state.cotCat === 'prod')}));
+    return h;
   }
 
   if (state.bankView === 'deliv'){
     h += sourceWarn('deliveries');
     const {days, banks} = deliveriesByBank();
-    if (!days.length) return h + '<p class="empty">يُبنى سجل التسليمات يوميًا من أول تشغيل؛ لا توجد أيام مسجلة بعد.</p>';
+    if (!days.length) return h + `<p class="empty">${L('يُبنى سجل التسليمات يوميًا من أول تشغيل؛ لا توجد أيام مسجلة بعد.', 'The delivery history builds daily from the first run; no days recorded yet.')}</p>`;
+    h += `<div class="meta">${fresh(last(days), 6)}</div>`;
     const totals = Object.entries(banks).map(([b, byDay]) => {
       const t = Object.values(byDay).reduce((a, r) => ({iss: a.iss + r.iss, stp: a.stp + r.stp}), {iss:0, stp:0});
       return {b, ...t, vol: t.iss + t.stp};
     }).sort((a, b) => b.vol - a.vol);
     if (!state.bank || !banks[state.bank]) state.bank = totals[0] ? totals[0].b : null;
-    h += `<div class="chips">${totals.slice(0, 14).map(t => `<button class="chip-btn" data-act="bank" data-v="${esc(t.b)}" aria-pressed="${t.b === state.bank}">${esc(t.b)}${GLOBAL_BANKS.has(t.b) ? ' ★' : ''}</button>`).join('')}</div>`;
+    h += `<div class="chips">${totals.slice(0, 14).map(t => `<button class="chip-btn" data-act="bank" data-v="${esc(t.b)}" aria-pressed="${t.b === state.bank}"><bdi>${esc(t.b)}</bdi>${star(t.b)}</button>`).join('')}</div>`;
     const byDay = banks[state.bank] || {}, dayTot = {};
     days.forEach(d => { dayTot[d] = Object.values(banks).reduce((a, x) => a + (x[d] ? x[d].iss + x[d].stp : 0), 0); });
-    const ser = days.map(d => { const r = byDay[d] || {iss:0, stp:0}; return {d, stp: r.stp * KG_PER_CT, iss: r.iss * KG_PER_CT, H: r.H, C: r.C}; }).slice(-(WINDOW + 3));
-    const pts = ser.map((r, i) => {
-      const net = r.stp - r.iss;
-      const d3 = i >= 2 ? ser.slice(i - 2, i + 1).reduce((a, x) => a + x.stp - x.iss, 0) : null;
-      return {d: r.d, buy: r.stp, sell: r.iss, delta: net, d3, line: null, H: r.H, C: r.C,
-        pct: dayTot[r.d] ? (r.stp + r.iss) / KG_PER_CT / dayTot[r.d] * 100 : null};
-    }).slice(-WINDOW);
-    h += reportView('dl-' + state.bank, `${esc(state.bank)}: آخر ${pts.length} يوم تسليم مسجَّل`, pts, kgCfg({
-      buy:'استلام Stopped (شراء فعلي)', sell:'تسليم Issued (بيع فعلي)', pctLabel:'حصته من حجم اليوم', deltaLabel:'الصافي (استلام − تسليم)',
-      empty:'يلزم يوم تسليم واحد على الأقل.',
-      extra: q => q.H && (q.H[0] + q.H[1] + q.C[0] + q.C[1]) ? `<div><span>House / Customer</span><b>${bd(nf0.format(q.H[1] - q.H[0]) + ' / ' + nf0.format(q.C[1] - q.C[0]))} عقد</b></div>` : '',
+    const ser = days.map(d => { const r = byDay[d] || {iss:0, stp:0, H:[0, 0], C:[0, 0]}; return {d, stp: r.stp * CONTRACT_KG, iss: r.iss * CONTRACT_KG, H: r.H, C: r.C}; }).slice(-(WINDOW + 3));
+    const pts = ser.map((r, i) => ({d: r.d, buy: r.stp, sell: r.iss, delta: r.stp - r.iss, H: r.H, C: r.C,
+      d3: i >= 2 ? ser.slice(i - 2, i + 1).reduce((a, x) => a + x.stp - x.iss, 0) : null,
+      pct: dayTot[r.d] ? (r.stp + r.iss) / CONTRACT_KG / dayTot[r.d] * 100 : null})).slice(-WINDOW);
+    h += reportView('dl-' + state.bank, `<bdi>${esc(state.bank)}</bdi>: ${L(`آخر ${pts.length} يوم تسليم مسجَّل`, `last ${pts.length} recorded delivery days`)}`, pts, kgCfg({
+      buy: L('استلام Stopped (شراء فعلي)', 'Stopped (taking delivery)'), sell: L('تسليم Issued (بيع فعلي)', 'Issued (making delivery)'),
+      pctLabel: L('حصته من حجم اليوم', 'Share of the day’s volume'), deltaLabel: L('الصافي (استلام − تسليم)', 'Net (stopped − issued)'),
+      extra: q => q.H && (q.H[0] + q.H[1] + q.C[0] + q.C[1]) ? `<div><span>House / Customer</span><b>${bd(nf0.format(q.H[1] - q.H[0]) + ' / ' + nf0.format(q.C[1] - q.C[0]))} ${U.ct()}</b></div>` : '',
       cells: q => [
-        {label:'استلم (Stopped)', v: `<span class="up">${KG(q.buy)}</span>`, sub: CT(q.buy / KG_PER_CT)},
-        {label:'سلّم (Issued)', v: `<span class="down">${KG(q.sell)}</span>`, sub: CT(q.sell / KG_PER_CT)},
-        {label:'الصافي', v: `<span class="${q.delta > 0 ? 'up' : q.delta < 0 ? 'down' : 'flat'}">${sKG(q.delta)}</span>`, sub: sCT(q.delta / KG_PER_CT)},
+        {label: L('استلم (Stopped)', 'Stopped'), v: `<span class="up">${KG(q.buy)}</span>`, sub: CT(q.buy / CONTRACT_KG)},
+        {label: L('سلّم (Issued)', 'Issued'), v: `<span class="down">${KG(q.sell)}</span>`, sub: CT(q.sell / CONTRACT_KG)},
+        {label: L('الصافي', 'Net'), v: `<span class="${cls(q.delta)}">${sKG(q.delta)}</span>`, sub: sCT(q.delta / CONTRACT_KG)},
       ]}));
     const mtd = (DATA.deliveries || {}).mtd || {};
-    let rows = [];
+    let rows;
     if (mtd.firms){
       const agg = {};
       Object.entries(mtd.firms).forEach(([raw, acc]) => {
@@ -670,13 +725,12 @@ R.banks = () => {
       rows = Object.entries(agg).map(([b, e]) => ({b, ...e}));
     } else rows = totals.map(t => ({b: t.b, iss: t.iss, stp: t.stp}));
     rows.sort((a, b) => (b.stp - b.iss) - (a.stp - a.iss));
-    h += `<h3 class="rv-title">${mtd.firms ? `ترتيب البنوك منذ بداية الشهر (حتى ${fDay.format(toDate(mtd.date))})` : 'ترتيب البنوك في الأيام المسجلة'}</h3>
-      <div class="tablebox"><table><thead><tr><th>البنك</th><th class="n">استلم (شراء)</th><th class="n">سلّم (بيع)</th><th class="n">الصافي</th><th class="n">House</th><th class="n">Customer</th></tr></thead><tbody>
-      ${rows.map(r => { const net = r.stp - r.iss, cls = net > 0 ? 'up' : net < 0 ? 'down' : 'flat';
-        return `<tr><td><button class="linkish" data-act="bank" data-v="${esc(r.b)}">${esc(r.b)}${GLOBAL_BANKS.has(r.b) ? ' ★' : ''}</button></td>
-        <td class="n up">${KG(r.stp * KG_PER_CT)}</td><td class="n down">${KG(r.iss * KG_PER_CT)}</td><td class="n ${cls}">${sKG(net * KG_PER_CT)}</td>
-        <td class="n">${r.H == null ? '—' : sCT(r.H)}</td><td class="n">${r.C == null ? '—' : sCT(r.C)}</td></tr>`; }).join('')}</tbody></table></div>`;
-    h += `<p class="explain">المصدر تقرير CME اليومي Issues and Stops، وهو الإفصاح الرسمي الوحيد الذي يسمّي البنوك بالاسم. Stopped = استلام ذهب فعلي مقابل العقود (شراء)، Issued = تسليم ذهب (بيع). House حساب البنك نفسه، وCustomer حسابات عملائه. ★ بنك عالمي. السجل اليومي يتراكم من أول تشغيل.</p>`;
+    h += `<h3 class="rv-title">${mtd.firms ? L(`ترتيب البنوك منذ بداية الشهر (حتى ${fDay.format(toDate(mtd.date))})`, `Banks ranked month to date (to ${fDay.format(toDate(mtd.date))})`) : L('ترتيب البنوك في الأيام المسجلة', 'Banks ranked over the recorded days')}</h3>
+      <div class="tablebox"><table><thead><tr><th>${L('البنك', 'Bank')}</th><th class="n">${L('استلم (شراء)', 'Stopped (bought)')}</th><th class="n">${L('سلّم (بيع)', 'Issued (sold)')}</th><th class="n">${L('الصافي', 'Net')}</th><th class="n">House</th><th class="n">Customer</th></tr></thead><tbody>
+      ${rows.map(r => { const net = r.stp - r.iss; return `<tr><td><button class="linkish" data-act="bank" data-v="${esc(r.b)}"><bdi>${esc(r.b)}</bdi>${star(r.b)}</button></td>
+        <td class="n up">${KG(r.stp * CONTRACT_KG)}</td><td class="n down">${KG(r.iss * CONTRACT_KG)}</td><td class="n ${cls(net)}">${sKG(net * CONTRACT_KG)}</td>
+        <td class="n">${r.H == null ? '—' : sCT(r.H)}</td><td class="n">${r.C == null ? '—' : sCT(r.C)}</td></tr>`; }).join('')}</tbody></table></div>
+      <p class="explain">${L('Stopped = استلام ذهب فعلي مقابل العقود (شراء)، وIssued = تسليمه (بيع). House حساب البنك نفسه، وCustomer حسابات عملائه. ★ بنك عالمي.', 'Stopped = taking physical gold against contracts (buying); Issued = delivering it (selling). House is the bank’s own account; Customer is its clients’ accounts. ★ global bank.')}</p>`;
     return h;
   }
 
@@ -684,256 +738,490 @@ R.banks = () => {
   const deps = ((DATA.comex || {}).depositories) || {};
   const list = Object.entries(deps).map(([raw, s]) => ({raw, name: bankName(raw), s, l: last(s)})).filter(x => x.l)
     .sort((a, b) => (GLOBAL_BANKS.has(b.name) - GLOBAL_BANKS.has(a.name)) || (b.l[1] + b.l[2]) - (a.l[1] + a.l[2]));
-  if (!list.length) return h + '<p class="empty">تفصيل الخزائن يبدأ من أول تحديث بعد هذا الإصدار.</p>';
+  if (!list.length) return h + `<p class="empty">${L('تفصيل الخزائن يبدأ من أول تحديث بعد تفعيل هذه الميزة.', 'The vault breakdown starts with the first update after this feature was enabled.')}</p>`;
+  h += `<div class="meta">${fresh(list[0].l[0], 6)}</div>`;
   if (!state.vault || !deps[state.vault]) state.vault = list[0].raw;
-  h += `<div class="chips">${list.map(x => `<button class="chip-btn" data-act="vault" data-v="${esc(x.raw)}" aria-pressed="${x.raw === state.vault}">${esc(x.name)}${GLOBAL_BANKS.has(x.name) ? ' ★' : ''}</button>`).join('')}</div>`;
+  h += `<div class="chips">${list.map(x => `<button class="chip-btn" data-act="vault" data-v="${esc(x.raw)}" aria-pressed="${x.raw === state.vault}"><bdi>${esc(x.name)}</bdi>${star(x.name)}</button>`).join('')}</div>`;
   const vs = deps[state.vault], tot = vs.map(r => [r[0], r[1] + r[2]]), byD = Object.fromEntries(vs.map(r => [r[0], r]));
-  h += reportView('v-' + state.vault, `${esc(bankName(state.vault))}: آخر ${WINDOW} تقريرًا يوميًا`, flowModel(tot), kgCfg({
-    buy:'دخول ذهب', sell:'خروج ذهب', line:'إجمالي الخزنة',
+  h += reportView('v-' + state.vault, `<bdi>${esc(bankName(state.vault))}</bdi>: ${L(`آخر ${WINDOW} تقريرًا يوميًا`, `last ${WINDOW} daily reports`)}`, flowModel(tot), kgCfg({
+    buy: L('دخول ذهب', 'Gold in'), sell: L('خروج ذهب', 'Gold out'), line: L('إجمالي الخزنة', 'Vault total'),
+    empty: L('يكتمل المخطط بعد يومين على الأقل من التسجيل.', 'The chart needs at least two recorded days.'),
     cells: q => { const r = byD[q.d] || [q.d, 0, 0]; return [
-      {label:'Registered', v: TN(r[1]), sub: KG(r[1])},
-      {label:'Eligible', v: TN(r[2]), sub: KG(r[2])},
-      {label:'الإجمالي', v: TN(q.line), sub: `${sKG(q.delta)} ${sPCT(q.pct)}`},
-    ]; }}));
+      {label: 'Registered', v: TN(r[1]), sub: KG(r[1])}, {label: 'Eligible', v: TN(r[2]), sub: KG(r[2])},
+      {label: L('الإجمالي', 'Total'), v: TN(q.line), sub: `${sKG(q.delta)} ${sPCT(q.pct)}`}]; }}));
   const all = list.reduce((a, x) => a + x.l[1] + x.l[2], 0);
-  h += `<div class="tablebox"><table><thead><tr><th>الخزنة</th><th class="n">Registered</th><th class="n">Eligible</th><th class="n">الإجمالي</th><th class="n">الحصة</th></tr></thead><tbody>
-    ${list.map(x => `<tr><td><button class="linkish" data-act="vault" data-v="${esc(x.raw)}">${esc(x.name)}${GLOBAL_BANKS.has(x.name) ? ' ★' : ''}</button></td><td class="n">${TN(x.l[1])}</td><td class="n">${TN(x.l[2])}</td><td class="n">${TN(x.l[1] + x.l[2])}</td><td class="n">${bd(nf1.format((x.l[1] + x.l[2]) / all * 100) + '%')}</td></tr>`).join('')}
+  h += `<div class="tablebox"><table><thead><tr><th>${L('الخزنة', 'Vault')}</th><th class="n">Registered</th><th class="n">Eligible</th><th class="n">${L('الإجمالي', 'Total')}</th><th class="n">${L('الحصة', 'Share')}</th></tr></thead><tbody>
+    ${list.map(x => `<tr><td><button class="linkish" data-act="vault" data-v="${esc(x.raw)}"><bdi>${esc(x.name)}</bdi>${star(x.name)}</button></td><td class="n">${TN(x.l[1])}</td><td class="n">${TN(x.l[2])}</td><td class="n">${TN(x.l[1] + x.l[2])}</td><td class="n">${bd(nf1.format((x.l[1] + x.l[2]) / all * 100) + '%')}</td></tr>`).join('')}
     </tbody></table></div>`;
-  h += `<p class="explain">الخزنة تحفظ ذهب البنك وعملائه معًا، فالدخول والخروج يعكسان حركة الذهب في خزنة البنك وليس بالضرورة مشترياته لحسابه الخاص.</p>`;
   return h;
 };
 
-function comexGross(){
-  const deps = ((DATA.comex || {}).depositories) || {}, g = {};
-  Object.values(deps).forEach(s => {
-    for (let i = 1; i < s.length; i++){
-      const dv = (s[i][1] + s[i][2]) - (s[i - 1][1] + s[i - 1][2]), e = (g[s[i][0]] = g[s[i][0]] || {buy:0, sell:0});
-      if (dv > 0) e.buy += dv; else e.sell -= dv;
-    }
-  });
-  return Object.keys(g).length ? g : null;
+/* ---------- COT Non-Commercial ---------- */
+ABOUT.noncomm = () => [
+  [L('ماذا يعرض؟', 'What it shows'), L('مراكز فئة Non-Commercial في عقود الذهب، أي صناديق التحوط ومديري الأموال والمضاربين الكبار: Long شراء، وShort بيع، وSpread مراكز متقابلة. ومعها الصافي ودلتاه لآخر 20 أسبوعًا.',
+    'Non-Commercial positions in gold futures, meaning hedge funds, money managers and large speculators: Long is buying, Short is selling, and Spread is offsetting positions. Includes the net and its delta for the last 20 weeks.')],
+  [L('المصدر وطريقة الحساب', 'Source and method'), L('تقرير CFTC Legacy لعقود COMEX Gold (الرمز 088691) من الواجهة الرسمية. الصافي = Long − Short. الدلتا = تغير الصافي عن التقرير السابق، ودلتا آخر 3 تقارير = تغيره خلال ثلاثة أسابيع.',
+    'The CFTC Legacy report for COMEX Gold (code 088691) from the official API. Net = Long − Short. Delta = change in net vs the previous report; the 3-report delta = its change over three weeks.')],
+  [L('التحديث', 'Updates'), L('أسبوعي: تنشر CFTC التقرير الجمعة الساعة 3:30 مساءً بتوقيت نيويورك عن بيانات الثلاثاء، ويلتقطه التشغيل التالي تلقائيًا. التقرير الحادي والعشرون يخرج من المخطط تلقائيًا.',
+    'Weekly: CFTC publishes on Friday at 3:30 pm New York time for Tuesday’s data, and the next run picks it up automatically. The 21st report drops out of the chart automatically.')],
+  [L('الحدود', 'Limits'), L('التصنيف تضعه CFTC بحسب نشاط المتداول المعلن، وقد تقع بعض المراكز في فئة غير متوقعة.', 'The classification is CFTC’s, based on each trader’s declared business, so some positions may sit in an unexpected group.')],
+];
+
+R.noncomm = () => {
+  const recs = DATA.noncomm || [];
+  let h = head(L('COT Non-Commercial: المضاربون الكبار', 'COT Non-Commercial: large speculators'), '',
+    [L('أسبوعي', 'Weekly'), recs.length ? `${L('آخر تقرير', 'Latest report')} ${fDay.format(toDate(last(recs)[0]))}` : ''], 'cot_legacy', recs.length ? fresh(last(recs)[0], 10) : '');
+  h += about('noncomm', ABOUT.noncomm());
+  if (!recs.length) return h + noData();
+  const Lr = last(recs), net = Lr[1] - Lr[2], oi = Lr[4];
+  h += `<div class="figs">
+    <div class="fig"><h3>${L('صافي المركز (Long − Short)', 'Net position (Long − Short)')}</h3><div class="v ${cls(net)}">${sCT(net)}</div><div class="sub">≈ ${sTN(net * CONTRACT_KG)}</div></div>
+    <div class="fig"><h3>${L('Long من إجمالي العقود المفتوحة', 'Long as share of open interest')}</h3><div class="v">${oi ? bd(nf1.format(Lr[1] / oi * 100) + '%') : '—'}</div><div class="sub">Open Interest ${CT(oi)}</div></div>
+    <div class="fig"><h3>${L('Short من إجمالي العقود المفتوحة', 'Short as share of open interest')}</h3><div class="v">${oi ? bd(nf1.format(Lr[2] / oi * 100) + '%') : '—'}</div><div class="sub">${L('العقد = 100 أونصة ≈ 3.11 كغ', 'One contract = 100 oz ≈ 3.11 kg')}</div></div></div>`;
+  h += reportView('noncomm', L(`آخر ${WINDOW} تقريرًا أسبوعيًا`, `Last ${WINDOW} weekly reports`), lsModel(recs), ctCfg({
+    buy: L('Long (شراء)', 'Long (buy)'), sell: L('Short (بيع)', 'Short (sell)'), line: L('صافي المركز', 'Net position'),
+    pctLabel: L('نسبة تغير الصافي', 'Net change %'), deltaLabel: L('دلتا الصافي', 'Net delta'), extra: lsExtra, cells: lsCells(false)}));
+  return h;
+};
+
+/* ---------- COT extreme signals ---------- */
+const SIG_CATS = () => {
+  const d = DATA.cot_disagg || {};
+  return [
+    {id:'mm', recs: d.mm || [], type:'spec', name: L('Managed Money (صناديق التحوط)', 'Managed Money (hedge funds)')},
+    {id:'nc', recs: DATA.noncomm || [], type:'spec', name: L('Non-Commercial (المضاربون الكبار)', 'Non-Commercial (large speculators)')},
+    {id:'swap', recs: d.swap || [], type:'comm', name: L('Swap Dealers (البنوك الكبرى)', 'Swap Dealers (major banks)')},
+    {id:'prod', recs: d.prod || [], type:'comm', name: L('Producer/Merchant (المنتجون والتجار)', 'Producer/Merchant (producers and merchants)')},
+  ].filter(c => c.recs.length > 10);
+};
+function cotIndexAt(recs, endIdx, weeks){
+  const r = recs.slice(Math.max(0, endIdx - weeks + 1), endIdx + 1), nets = r.map(x => x[1] - x[2]);
+  const lo = Math.min(...nets), hi = Math.max(...nets), cur = nets[nets.length - 1];
+  return {idx: hi === lo ? 50 : (cur - lo) / (hi - lo) * 100, lo, hi, cur, n: r.length};
+}
+function sigText(type, v){
+  if (v >= 90) return type === 'spec'
+    ? [L('تموضع شرائي مزدحم', 'Crowded long'), 'sig-hot', L('المضاربون قرب أعلى صافي شراء لهم منذ 3 سنوات. تاريخيًا يرتفع خطر التصحيح في هذه الحالة، لأن المشترين الجدد قليلون وقد يكون الخروج جماعيًا عند أي خبر سلبي.', 'Speculators are near their largest net long in 3 years. Historically this raises pullback risk: few buyers are left and exits can be crowded on any negative news.')]
+    : [L('إشارة إيجابية تاريخيًا', 'Historically bullish'), 'sig-cold', L('هذه الفئة في أقل مستوى تحوط بيعي منذ 3 سنوات. لأنها تبيع عادةً في الارتفاعات وتشتري في الانخفاضات، يُقرأ هذا تاريخيًا إشارة إيجابية للسعر.', 'This group is at its lightest short hedge in 3 years. Because it usually sells into rallies and buys dips, this has historically been read as bullish for price.')];
+  if (v <= 10) return type === 'spec'
+    ? [L('تموضع بيعي متطرف', 'Extreme short'), 'sig-cold', L('المضاربون قرب أضعف صافي مركز لهم منذ 3 سنوات. تاريخيًا يزيد هذا احتمال ارتداد صاعد عند تغطية المراكز المكشوفة (Short covering).', 'Speculators are near their weakest net position in 3 years. Historically this raises the odds of a rebound as shorts cover.')]
+    : [L('إشارة تحذيرية تاريخيًا', 'Historically bearish'), 'sig-hot', L('هذه الفئة في أكبر تحوط بيعي منذ 3 سنوات، أي أنها تبيع الارتفاع بقوة. تاريخيًا يُقرأ هذا تحذيرًا للسعر.', 'This group is at its heaviest short hedge in 3 years, selling into strength. Historically this has been read as a warning for price.')];
+  if (v >= 80 || v <= 20) return [L('قريب من التطرف', 'Near an extreme'), 'sig-mid', L('قريب من حدود نطاقه خلال 3 سنوات، دون أن يبلغ منطقة الإشارة بعد.', 'Close to the edge of its 3-year range, but not yet in signal territory.')];
+  return [L('نطاق طبيعي', 'Normal range'), 'sig-mid', L('ضمن نطاقه المعتاد خلال 3 سنوات، ولا إشارة تطرف الآن.', 'Within its usual 3-year range; no extreme signal now.')];
 }
 
-R.comex = () => {
-  const id = 'comex', p = state.period[id], c = DATA.comex || {};
-  const reg = c.registered || [], eli = c.eligible || [], tot = c.total || [];
-  let h = head('مخزون بورصة COMEX',
-    'الذهب المخزّن في مستودعات COMEX المعتمدة. Registered جاهز للتسليم مقابل العقود، وEligible يستوفي المواصفات لكنه غير مسجَّل للتسليم.',
-    ['يومي', tot.length ? `${tot.length} يومًا في السجل` : ''], 'comex');
-  if (!tot.length) return h + noData;
-  const byR = Object.fromEntries(reg), byE = Object.fromEntries(eli);
-  h += reportView('comex', `آخر ${WINDOW} تقريرًا يوميًا`, flowModel(tot, comexGross()), kgCfg({
-    buy:'دخول ذهب', sell:'خروج ذهب', line:'الإجمالي', deltaLabel:'الصافي (الدلتا)',
-    empty:'CME تنشر لقطة اليوم فقط، لذلك يُبنى المخطط يوميًا منذ أول تشغيل ويكتمل بعد 20 يوم تداول.',
-    cells: q => [
-      {label:'Registered', v: TN(byR[q.d] || 0), sub: KG(byR[q.d] || 0)},
-      {label:'Eligible', v: TN(byE[q.d] || 0), sub: KG(byE[q.d] || 0)},
-      {label:'الإجمالي', v: TN(q.line), sub: `${sKG(q.delta)} ${sPCT(q.pct)}`},
-    ]}));
-  h += controls(id, false);
-  const words = ['دخول ذهب', 'خروج ذهب'];
-  h += `<div class="figs">${figure('الإجمالي', tot, p, words)}${figure('Registered', reg, p, words)}${figure('Eligible', eli, p, words)}</div>`;
-  return h;
-};
+ABOUT.signals = () => [
+  [L('ماذا يعرض؟', 'What it shows'), L('مؤشر COT لأربع فئات: أين يقع صافي مركز كل فئة الآن داخل نطاقه خلال آخر 3 سنوات، من 0 (أدنى مستوى) إلى 100 (أعلى مستوى)، مع المؤشر نفسه على مدى 6 أشهر.',
+    'The COT Index for four groups: where each group’s net position sits within its range over the last 3 years, from 0 (lowest) to 100 (highest), plus the same index over 6 months.')],
+  [L('طريقة الحساب', 'Method'), L('مؤشر COT = (الصافي الآن − أدنى صافٍ خلال المدة) ÷ (أعلى صافٍ − أدنى صافٍ) × 100. القراءة 90 فما فوق أو 10 فما دون منطقة تطرف. البيانات من تقريري CFTC الأسبوعيين Disaggregated وLegacy المستعملين في الأقسام الأخرى.',
+    'COT Index = (net now − lowest net in the window) ÷ (highest net − lowest net) × 100. A reading of 90 or more, or 10 or less, is an extreme. Data comes from the weekly CFTC Disaggregated and Legacy reports used in the other sections.')],
+  [L('كيف تقرؤه؟', 'How to read it'), L('تطرف المضاربين (Managed Money وNon-Commercial) يُقرأ عكسيًا: الشراء المزدحم يزيد خطر التصحيح، والبيع المتطرف يزيد احتمال الارتداد. أما المتحوطون التجاريون (Swap Dealers وProducer/Merchant) فيتحركون عادةً عكس الاتجاه، لذلك يُقرأ ارتفاع مؤشرهم إيجابيًا وانخفاضه سلبيًا.',
+    'Speculator extremes (Managed Money and Non-Commercial) are read contrarian: a crowded long raises pullback risk, and an extreme short raises rebound odds. Commercial hedgers (Swap Dealers and Producer/Merchant) usually trade against the trend, so a high index is read as bullish and a low one as bearish.')],
+  [L('الحدود', 'Limits'), L('المؤشر يقيس التموضع لا التوقيت: قد يبقى التطرف أسابيع قبل أن ينعكس السعر. استعمله سياقًا مع حركة السعر والـ Order Flow، لا إشارة دخول وحده. يتحدث أسبوعيًا مع تقرير COT.',
+    'The index measures positioning, not timing: an extreme can last for weeks before price turns. Use it as context alongside price action and order flow, not as an entry signal on its own. It updates weekly with the COT report.')],
+];
 
-R.etf = () => {
-  const id = 'etf', p = state.period[id], gld = (DATA.etf || {}).GLD || [];
-  let h = head('صناديق الذهب المتداولة',
-    'الذهب الفعلي داخل صندوق SPDR Gold Shares (GLD)، أكبر صندوق ذهب في العالم. الدخول يعني شراء المستثمرين، والخروج يعني بيعهم.',
-    ['يومي', gld.length ? `آخر قراءة ${fDay.format(toDate(last(gld)[0]))}` : ''], 'etf');
-  if (!gld.length) return h + noData;
-  h += reportView('etf', `آخر ${WINDOW} يوم تداول`, flowModel(gld), kgCfg({
-    buy:'تدفق داخل (شراء)', sell:'تدفق خارج (بيع)', line:'حيازة GLD',
+R.signals = () => {
+  const cats = SIG_CATS();
+  let h = head(L('إشارات التطرف في COT', 'COT extreme signals'), '', [L('أسبوعي', 'Weekly'), L('نطاق 3 سنوات', '3-year range')], 'cot',
+    cats.length ? fresh(last(cats[0].recs)[0], 10) : '');
+  h += about('signals', ABOUT.signals());
+  if (!cats.length) return h + noData();
+  if (!cats.find(c => c.id === state.sig)) state.sig = cats[0].id;
+  const scored = cats.map(c => {
+    const i = c.recs.length - 1, k3 = cotIndexAt(c.recs, i, 156), k6 = cotIndexAt(c.recs, i, 26);
+    return {...c, k3, k6, txt: sigText(c.type, k3.idx)};
+  });
+  const hot = scored.filter(c => c.k3.idx >= 90 || c.k3.idx <= 10);
+  h += `<div class="brief"><h3>${L('الخلاصة الآن', 'Where things stand')}</h3><p>${hot.length
+    ? hot.map(c => `<b>${c.name}</b>: <span class="${c.txt[1]}">${c.txt[0]}</span> (${L('المؤشر', 'index')} ${bd(nf0.format(c.k3.idx))}).`).join(' ')
+    : L('لا توجد فئة في منطقة تطرف هذا الأسبوع؛ كل الفئات ضمن نطاقها المعتاد خلال 3 سنوات.', 'No group is at an extreme this week; all are within their usual 3-year range.')}</p></div>`;
+  h += `<div class="gauges">${scored.map(c => `<button class="gauge" data-act="sig" data-v="${c.id}" aria-pressed="${c.id === state.sig}">
+      <h3>${c.name}</h3><div class="gv">${bd(nf0.format(c.k3.idx))}<small style="font-size:14px;color:var(--muted)"> / 100</small></div>
+      <div class="gbar"><b style="left:${c.k6.idx.toFixed(1)}%"></b><i style="left:${c.k3.idx.toFixed(1)}%"></i></div>
+      <div class="gscale">${[0, 10, 50, 90, 100].map(v => `<span style="left:${v}%">${v}</span>`).join('')}</div>
+      <div class="gtxt"><span class="${c.txt[1]}">${c.txt[0]}</span>. ${L('مؤشر 6 أشهر', '6-month index')}: ${bd(nf0.format(c.k6.idx))}</div>
+      <div class="gtxt" style="color:var(--muted)">${c.txt[2]}</div></button>`).join('')}</div>
+    <p class="explain">${L('الخط الأسود موضع مؤشر 3 سنوات، والدائرة موضع مؤشر 6 أشهر. المنطقة الحمراء (0–10) والخضراء (90–100) منطقتا التطرف.', 'The black line marks the 3-year index and the circle marks the 6-month index. The red (0–10) and green (90–100) bands are the extreme zones.')}</p>`;
+  const c = scored.find(x => x.id === state.sig), offset = c.recs.length;
+  const pts = lsModel(c.recs).map(q => { const idx = c.recs.findIndex(r => r[0] === q.d); return {...q, k3: cotIndexAt(c.recs, idx, 156).idx, k6: cotIndexAt(c.recs, idx, 26).idx}; });
+  h += reportView('sig-' + c.id, `${c.name}: ${L(`آخر ${WINDOW} أسبوعًا`, `last ${WINDOW} weeks`)}`, pts, ctCfg({
+    buy: L('Long (شراء)', 'Long (buy)'), sell: L('Short (بيع)', 'Short (sell)'), line: L('صافي المركز', 'Net position'),
+    pctLabel: L('نسبة تغير الصافي', 'Net change %'), deltaLabel: L('دلتا الصافي', 'Net delta'),
+    extra: q => `<div><span>${L('مؤشر COT (3 سنوات)', 'COT Index (3y)')}</span><b>${bd(nf0.format(q.k3))}</b></div><div><span>${L('مؤشر COT (6 أشهر)', 'COT Index (6m)')}</span><b>${bd(nf0.format(q.k6))}</b></div>`,
     cells: q => [
-      {label:'الحيازة', v: TN(q.line), sub: KG(q.line)},
-      {label:'التغير اليومي', v: `<span class="${q.delta > 0 ? 'up' : q.delta < 0 ? 'down' : 'flat'}">${sKG(q.delta)}</span>`, sub: sTN(q.delta)},
-      {label:'نسبة التغير', v: q.pct == null ? '—' : sPCT(q.pct), sub: q.d3 == null ? '' : `آخر 3 أيام: ${sKG(q.d3)}`},
+      {label: L('مؤشر COT (3 سنوات)', 'COT Index (3 years)'), v: bd(nf0.format(q.k3)), sub: `<span class="${sigText(c.type, q.k3)[1]}">${sigText(c.type, q.k3)[0]}</span>`},
+      {label: L('مؤشر COT (6 أشهر)', 'COT Index (6 months)'), v: bd(nf0.format(q.k6)), sub: L('يلتقط التطرف قصير المدى', 'Captures short-term extremes')},
+      {label: L('صافي المركز', 'Net position'), v: sCT(q.line), sub: chgSub(q.delta, sCT)},
     ]}));
-  h += controls(id, false);
-  h += `<div class="figs">${figure('الذهب داخل GLD', gld, p, ['تدفق داخل (شراء)', 'تدفق خارج (بيع)'])}</div>`;
+  h += `<p class="explain">${L(`السجل المتاح: ${offset} أسبوعًا.`, `History available: ${offset} weeks.`)}</p>`;
   return h;
 };
 
 /* ---------- 13F institutions ---------- */
-const F13_STATUS = {new:['مركز جديد','st-new'], first:['أول إفصاح','st-new'], up:['زيادة','st-up'], down:['تخفيض','st-down'], closed:['أغلق المركز','st-closed'], same:['دون تغيير','st-same']};
-const badge = s => s && F13_STATUS[s] ? `<span class="badge ${F13_STATUS[s][1]}">${F13_STATUS[s][0]}</span>` : '';
+const F13_STATUS = {new:['مركز جديد', 'New position', 'st-new'], first:['أول إفصاح', 'First filing', 'st-new'], up:['زيادة', 'Increased', 'st-up'],
+  down:['تخفيض', 'Reduced', 'st-down'], closed:['أغلق المركز', 'Closed out', 'st-closed'], same:['دون تغيير', 'Unchanged', 'st-same']};
+const stLabel = s => F13_STATUS[s] ? L(F13_STATUS[s][0], F13_STATUS[s][1]) : '—';
+const badge = s => s && F13_STATUS[s] ? `<span class="badge ${F13_STATUS[s][2]}">${stLabel(s)}</span>` : '';
 const F13_FUNDS = ['GLD', 'IAU', 'IAUM', 'GLDM', 'SGOL', 'AAAU', 'BAR'];
 function f13Name(raw){
   const u = String(raw).toUpperCase();
   for (const [re, n] of BANK_RULES) if (GLOBAL_BANKS.has(n) && re.test(u)) return n;
-  return String(raw).toLowerCase().replace(/\b\w/g, c => c.toUpperCase()).replace(/\s+\/[a-z]{2,3}\/?$/i, '')
-    .replace(/\b(Llc|Lp|Llp|Plc|Ag|Sa|Nv|Ltd|Lllp|Na|Usa|Us|Uk)\b/g, w => w.toUpperCase()).replace(/[,.\s]+$/, '');
+  return titleCase(raw);
 }
-const nm = raw => `<bdi>${esc(f13Name(raw))}</bdi>`;
-const mgrBtn = (cik, name) => `<button class="linkish" data-act="mgr" data-v="${esc(cik)}">${nm(name)}</button>`;
-const moveTxt = m => `${nm(m.n)} (${sTN(m.b - m.a)}${m.s === 'new' || m.s === 'first' ? '، مركز جديد' : m.s === 'closed' ? '، أغلق مركزه بالكامل' : ''})`;
+const nm13 = raw => `<bdi>${esc(f13Name(raw))}</bdi>`;
+const mgrBtn = (cik, name) => `<button class="linkish" data-act="mgr" data-v="${esc(cik)}">${nm13(name)}</button>`;
+const moveTxt = m => `${nm13(m.n)} (${sTN(m.b - m.a)}${m.s === 'new' || m.s === 'first' ? L('، مركز جديد', ', new position') : m.s === 'closed' ? L('، أغلق مركزه بالكامل', ', closed out completely') : ''})`;
 
 function f13Intro(){
   return `<div class="dossier">
     <div class="dossier-head"><span class="stamp">13F</span>
-      <div><h2>المؤسسات الكبرى: إفصاحات 13F</h2><p>ما تملكه البنوك وصناديق التحوط ومديرو الأصول من صناديق الذهب، بالاسم وبالكمية.</p></div></div>
+      <div><h2>${L('المؤسسات الكبرى: إفصاحات 13F', 'Major institutions: 13F filings')}</h2><p>${L('ما تملكه البنوك وصناديق التحوط ومديرو الأصول من صناديق الذهب، بالاسم وبالكمية.', 'What banks, hedge funds and asset managers hold in gold ETFs, by name and by quantity.')}</p></div></div>
     <div class="dossier-body">
-      <section><h3>ما هو تقرير 13F؟</h3>
-        <p>إفصاح إلزامي تقدّمه إلى هيئة الأوراق المالية الأمريكية (SEC) كل مؤسسة تدير أكثر من 100 مليون دولار من الأوراق المالية الأمريكية، مرة كل ربع سنة. يذكر كل مركز تملكه المؤسسة باسمه وعدد أسهمه، ويشمل البنوك مثل Goldman Sachs وJPMorgan وMorgan Stanley، وصناديق التحوط مثل Bridgewater وCitadel، ومديري الأصول مثل BlackRock وVanguard.</p></section>
-      <section><h3>ماذا يرصد هذا القسم؟</h3>
-        <p>حيازات المؤسسات في صناديق الذهب المدعومة بذهب فعلي: GLD وIAU وIAUM وGLDM وSGOL وAAAU وBAR. حوّلنا عدد الأسهم إلى أطنان ذهب بضربه في كمية الذهب التي يمثّلها السهم يوم نهاية الربع، فتظهر كل مؤسسة بكمية ذهب قابلة للمقارنة.</p></section>
-      <section><h3>حدود التقرير</h3>
-        <p>يصدر بعد نهاية الربع بمدة تصل إلى 45 يومًا. يرصد المراكز الطويلة فقط، ولا يشمل العقود الآجلة ولا مشتقات OTC ولا المراكز المكشوفة (Short) ولا الذهب الفعلي في الخزائن، واستبعدنا منه عقود الخيارات Put وCall. وحيازة البنك تشمل ما يديره لعملائه، لا ما يملكه لحسابه فقط.</p></section>
-      <section><h3>كيف تقرأ هذا القسم؟</h3>
+      <section><h3>${L('ما هو تقرير 13F؟', 'What is a 13F report?')}</h3>
+        <p>${L('إفصاح إلزامي تقدّمه إلى هيئة الأوراق المالية الأمريكية (SEC) كل مؤسسة تدير أكثر من 100 مليون دولار من الأوراق المالية الأمريكية، مرة كل ربع سنة. يذكر كل مركز تملكه المؤسسة باسمه وعدد أسهمه، ويشمل البنوك مثل Goldman Sachs وJPMorgan وMorgan Stanley، وصناديق التحوط مثل Bridgewater وCitadel، ومديري الأصول مثل BlackRock وVanguard.',
+          'A mandatory quarterly filing to the US Securities and Exchange Commission (SEC) by every institution managing more than $100 million in US securities. It lists every position by name and share count, and covers banks such as Goldman Sachs, JPMorgan and Morgan Stanley, hedge funds such as Bridgewater and Citadel, and asset managers such as BlackRock and Vanguard.')}</p></section>
+      <section><h3>${L('ماذا يرصد هذا القسم وكيف؟', 'What this section tracks, and how')}</h3>
+        <p>${L('حيازات المؤسسات في صناديق الذهب المدعومة بذهب فعلي: GLD وIAU وIAUM وGLDM وSGOL وAAAU وBAR. ننزّل ملفات SEC الرسمية (Form 13F Data Sets)، ونحوّل عدد الأسهم إلى أطنان بضربه في كمية الذهب التي يمثّلها السهم يوم نهاية الربع، فتظهر كل مؤسسة بكمية ذهب قابلة للمقارنة.',
+          'Institutional holdings of physically backed gold ETFs: GLD, IAU, IAUM, GLDM, SGOL, AAAU and BAR. We download the official SEC files (Form 13F Data Sets) and convert share counts into tonnes by multiplying by the gold each share represented at quarter-end, so every institution appears as a comparable quantity of gold.')}</p></section>
+      <section><h3>${L('التحديث والحدود', 'Updates and limits')}</h3>
+        <p>${L('تنشر SEC الملفات كل ثلاثة أشهر، ويضيف الـ Dashboard كل ربع جديد تلقائيًا ويحتفظ بكل الأرباع السابقة. يصدر التقرير بعد نهاية الربع بمدة تصل إلى 45 يومًا، ويرصد المراكز الطويلة فقط، ولا يشمل العقود الآجلة ولا مشتقات OTC ولا المراكز المكشوفة ولا عقود الخيارات. وحيازة البنك تشمل ما يديره لعملائه.',
+          'The SEC publishes the files every three months; the dashboard adds each new quarter automatically and keeps every earlier quarter. Filings arrive up to 45 days after quarter-end and show long positions only: no futures, no OTC derivatives, no short positions and no options. A bank’s holding includes what it manages for clients.')}</p></section>
+      <section><h3>${L('كيف تقرأ الشارات؟', 'How to read the badges')}</h3>
         <ul class="legend-list">
-          <li>${badge('new')} لم تكن تملك شيئًا في الربع السابق ثم فتحت مركزًا.</li>
-          <li>${badge('up')} زادت حيازتها، ${badge('down')} خفّضتها.</li>
-          <li>${badge('closed')} باعت كل ما تملك وخرجت تمامًا.</li>
-          <li>${badge('first')} أول إفصاح 13F لها في السجل، فلا توجد مقارنة.</li>
-        </ul>
-        <p>تنشر SEC الملفات كل ثلاثة أشهر، فيضيف الـ Dashboard كل ربع جديد تلقائيًا ويحتفظ بكل الأرباع السابقة.</p></section>
+          <li>${badge('new')} ${L('لم تكن تملك شيئًا في الربع السابق ثم فتحت مركزًا.', 'Held nothing last quarter and opened a position.')}</li>
+          <li>${badge('up')} ${L('زادت حيازتها.', 'Increased its holding.')} ${badge('down')} ${L('خفّضتها.', 'Reduced it.')}</li>
+          <li>${badge('closed')} ${L('باعت كل ما تملك وخرجت تمامًا.', 'Sold everything and exited.')}</li>
+          <li>${badge('first')} ${L('أول إفصاح لها في السجل، فلا توجد مقارنة.', 'Its first filing in the record, so there is no comparison.')}</li>
+        </ul></section>
     </div></div>`;
 }
 
 function f13Brief(P, first){
   const nb = P.n.new + P.n.first + P.n.up, ns = P.n.down + P.n.closed, net = P.buy - P.sell;
-  let h = `<div class="brief"><h3>قراءة التقرير: الربع المنتهي في ${fDay.format(toDate(P.p))}</h3>
-    <p>أفصحت ${bd(nf0.format(P.holders))} مؤسسة عن حيازة ${TN(P.total)} من الذهب عبر صناديق الذهب المتداولة.`;
-  if (first) h += ' هذا أول ربع في السجل، فلا توجد مقارنة بربع سابق.</p>';
-  else h += ` ${net >= 0 ? 'زادت المؤسسات حيازتها بصافي' : 'خفّضت المؤسسات حيازتها بصافي'} ${sTN(net)}: اشترت ${bd(nf0.format(nb))} مؤسسة ما مجموعه ${TN(P.buy)}، وباعت ${bd(nf0.format(ns))} مؤسسة ما مجموعه ${TN(P.sell)}.</p>`;
-  if (P.buyers.length) h += `<p><b class="up">أكبر المشترين:</b> ${P.buyers.slice(0, 5).map(moveTxt).join('، ')}.</p>`;
-  if (P.sellers.length) h += `<p><b class="down">أكبر البائعين:</b> ${P.sellers.slice(0, 5).map(moveTxt).join('، ')}.</p>`;
-  if (!first && P.n.new + P.n.first) h += `<p>فتحت ${bd(nf0.format(P.n.new + P.n.first))} مؤسسة مراكز جديدة${P.opened.length ? `، أبرزها ${P.opened.slice(0, 3).map(m => `${nm(m.n)} (${TN(m.b)})`).join('، ')}` : ''}.</p>`;
-  if (!first && P.n.closed) h += `<p>أغلقت ${bd(nf0.format(P.n.closed))} مؤسسة مراكزها بالكامل${P.closed.length ? `، أبرزها ${P.closed.slice(0, 3).map(m => `${nm(m.n)} (كانت تملك ${TN(m.a)})`).join('، ')}` : ''}.</p>`;
-  if (!P.complete) h += `<p class="note-warn">مهلة الإفصاح عن هذا الربع لم تكتمل في الملفات المنشورة بعد، فقد تتغير الأرقام عند إضافة الإيداعات المتأخرة.</p>`;
+  let h = `<div class="brief"><h3>${L('قراءة التقرير: الربع المنتهي في', 'Reading the report: quarter ended')} ${fDay.format(toDate(P.p))}</h3><p>${L(
+    `أفصحت ${bd(nf0.format(P.holders))} مؤسسة عن حيازة ${TN(P.total)} من الذهب عبر صناديق الذهب المتداولة.`,
+    `${bd(nf0.format(P.holders))} institutions reported holding ${TN(P.total)} of gold through gold ETFs.`)}`;
+  if (first) h += ' ' + L('هذا أول ربع في السجل، فلا توجد مقارنة بربع سابق.', 'This is the first quarter in the record, so there is no comparison.') + '</p>';
+  else h += ' ' + L(`${net >= 0 ? 'زادت المؤسسات حيازتها بصافي' : 'خفّضت المؤسسات حيازتها بصافي'} ${sTN(net)}: اشترت ${bd(nf0.format(nb))} مؤسسة ما مجموعه ${TN(P.buy)}، وباعت ${bd(nf0.format(ns))} مؤسسة ما مجموعه ${TN(P.sell)}.`,
+    `Institutions ${net >= 0 ? 'added' : 'cut'} a net ${sTN(net)}: ${bd(nf0.format(nb))} bought a total of ${TN(P.buy)}, and ${bd(nf0.format(ns))} sold a total of ${TN(P.sell)}.`) + '</p>';
+  if (P.buyers.length) h += `<p><b class="up">${L('أكبر المشترين', 'Largest buyers')}:</b> ${P.buyers.slice(0, 5).map(moveTxt).join(L('، ', '; '))}.</p>`;
+  if (P.sellers.length) h += `<p><b class="down">${L('أكبر البائعين', 'Largest sellers')}:</b> ${P.sellers.slice(0, 5).map(moveTxt).join(L('، ', '; '))}.</p>`;
+  const newN = P.n.new + P.n.first;
+  if (!first && newN) h += `<p>${L(`فتحت ${bd(nf0.format(newN))} مؤسسة مراكز جديدة`, `${bd(nf0.format(newN))} institutions opened new positions`)}${P.opened.length ? L('، أبرزها ', ', led by ') + P.opened.slice(0, 3).map(m => `${nm13(m.n)} (${TN(m.b)})`).join(L('، ', '; ')) : ''}.</p>`;
+  if (!first && P.n.closed) h += `<p>${L(`أغلقت ${bd(nf0.format(P.n.closed))} مؤسسة مراكزها بالكامل`, `${bd(nf0.format(P.n.closed))} institutions closed out completely`)}${P.closed.length ? L('، أبرزها ', ', led by ') + P.closed.slice(0, 3).map(m => `${nm13(m.n)} (${L('كانت تملك', 'held')} ${TN(m.a)})`).join(L('، ', '; ')) : ''}.</p>`;
+  if (!P.complete) h += `<p class="note-warn">${L('مهلة الإفصاح عن هذا الربع لم تكتمل في الملفات المنشورة بعد، فقد تتغير الأرقام عند إضافة الإيداعات المتأخرة.', 'The filing deadline for this quarter is not fully covered by the published files yet, so figures may change as late filings arrive.')}</p>`;
   return h + '</div>';
 }
 
-function f13List(title, rows, cls){
-  if (!rows.length) return `<div class="ranked wide"><h3>${title}</h3><p class="empty">لا توجد مؤسسات في هذه الفئة.</p></div>`;
+function f13List(title, rows, k){
+  if (!rows.length) return `<div class="ranked wide"><h3>${title}</h3><p class="empty">${L('لا توجد مؤسسات في هذه الفئة.', 'No institutions in this group.')}</p></div>`;
   const maxAbs = Math.max(1, ...rows.map(m => Math.abs(m.b - m.a)));
-  return `<div class="ranked wide"><h3>${title}</h3>${rows.map(m => {
-    const d = m.b - m.a, pct = m.a ? d / m.a * 100 : null;
+  return `<div class="ranked wide"><h3>${title}</h3>${rows.map(m => { const d = m.b - m.a, pct = m.a ? d / m.a * 100 : null;
     return `<div class="row"><span>${mgrBtn(m.c, m.n)}</span>
-      <span class="track"><span class="bar ${cls}" style="display:block;width:${Math.max(2, Math.abs(d) / maxAbs * 100).toFixed(1)}%"></span></span>
-      <span class="val ${cls}">${sTN(d)}</span>
-      <span class="det">${badge(m.s)} ${sKG(d)}${pct == null ? '' : ' ' + sPCT(pct)}، من ${TN(m.a)} إلى ${TN(m.b)}</span></div>`;
-  }).join('')}</div>`;
+      <span class="track"><span class="bar ${k}" style="display:block;width:${Math.max(2, Math.abs(d) / maxAbs * 100).toFixed(1)}%"></span></span>
+      <span class="val ${k}">${sTN(d)}</span>
+      <span class="det">${badge(m.s)} ${sKG(d)}${pct == null ? '' : ' ' + sPCT(pct)}${L('، من', ', from')} ${TN(m.a)} ${L('إلى', 'to')} ${TN(m.b)}</span></div>`; }).join('')}</div>`;
 }
 
 R.f13 = () => {
   const f = DATA.f13;
   let h = f13Intro() + sourceWarn('f13');
-  if (!f || !f.periods || !f.periods.length) return h + '<p class="empty">يُنزَّل أرشيف SEC في أول تشغيل بعد هذا التحديث، وقد يستغرق التشغيل عدة دقائق. أعد تحميل الصفحة بعد انتهائه.</p>';
+  if (!f || !f.periods || !f.periods.length) return h + `<p class="empty">${L('يُنزَّل أرشيف SEC في أول تشغيل، وقد يستغرق عدة دقائق. أعد تحميل الصفحة بعد انتهائه.', 'The SEC archive downloads on the first run and can take several minutes. Reload the page when it finishes.')}</p>`;
   const P = f.periods;
+  h += `<div class="meta" style="margin-bottom:10px">${fresh(last(P).p, 150)}</div>`;
   const pts = P.map((q, i) => ({d: q.p, line: q.total, buy: q.buy, sell: q.sell, P: q, idx: i,
     delta: i ? q.total - P[i - 1].total : 0, pct: i && P[i - 1].total ? (q.total - P[i - 1].total) / P[i - 1].total * 100 : null,
     d3: i >= 3 ? q.total - P[i - 3].total : null})).slice(-WINDOW);
   const si = rvSel('f13', pts), Q = pts[si].P, first = pts[si].idx === 0;
-  h += reportView('f13', 'حيازة المؤسسات عبر الأرباع (اختر الربع من القائمة)', pts, kgCfg({
-    monthly:true, buy:'مشتريات المؤسسات', sell:'مبيعات المؤسسات', line:'إجمالي الحيازة',
-    extra: q => `<div><span>عدد المؤسسات</span><b>${bd(nf0.format(q.P.holders))}</b></div>`,
+  h += reportView('f13', L('حيازة المؤسسات عبر الأرباع (اختر الربع من القائمة)', 'Institutional holdings by quarter (pick a quarter from the list)'), pts, kgCfg({
+    monthly:true, buy: L('مشتريات المؤسسات', 'Institutional buying'), sell: L('مبيعات المؤسسات', 'Institutional selling'), line: L('إجمالي الحيازة', 'Total holdings'),
+    extra: q => `<div><span>${L('عدد المؤسسات', 'Institutions')}</span><b>${bd(nf0.format(q.P.holders))}</b></div>`,
     cells: q => [
-      {label:'إجمالي حيازة المؤسسات', v: TN(q.line), sub: `${bd(nf0.format(q.P.holders))} مؤسسة`},
-      {label:'اشترت', v: `<span class="up">${TN(q.buy)}</span>`, sub: `${bd(nf0.format(q.P.n.new + q.P.n.first + q.P.n.up))} مؤسسة، منها ${bd(nf0.format(q.P.n.new + q.P.n.first))} مركزًا جديدًا`},
-      {label:'باعت', v: `<span class="down">${TN(q.sell)}</span>`, sub: `${bd(nf0.format(q.P.n.down + q.P.n.closed))} مؤسسة، منها ${bd(nf0.format(q.P.n.closed))} أغلقت مركزها`},
+      {label: L('إجمالي حيازة المؤسسات', 'Total institutional holdings'), v: TN(q.line), sub: `${bd(nf0.format(q.P.holders))} ${L('مؤسسة', 'institutions')}`},
+      {label: L('اشترت', 'Bought'), v: `<span class="up">${TN(q.buy)}</span>`, sub: L(`${bd(nf0.format(q.P.n.new + q.P.n.first + q.P.n.up))} مؤسسة، منها ${bd(nf0.format(q.P.n.new + q.P.n.first))} مركزًا جديدًا`, `${bd(nf0.format(q.P.n.new + q.P.n.first + q.P.n.up))} institutions, ${bd(nf0.format(q.P.n.new + q.P.n.first))} of them new`)},
+      {label: L('باعت', 'Sold'), v: `<span class="down">${TN(q.sell)}</span>`, sub: L(`${bd(nf0.format(q.P.n.down + q.P.n.closed))} مؤسسة، منها ${bd(nf0.format(q.P.n.closed))} أغلقت مركزها`, `${bd(nf0.format(q.P.n.down + q.P.n.closed))} institutions, ${bd(nf0.format(q.P.n.closed))} closed out`)},
     ]}));
   h += f13Brief(Q, first);
   const funds = F13_FUNDS.filter(k => Q.funds[k]).map(k => `<span class="chip">${k}: ${TN(Q.funds[k])}</span>`).join('');
   if (funds) h += `<div class="meta" style="margin-bottom:16px">${funds}</div>`;
-  if (!first) h += `<div class="cols">${f13List('أكبر 15 مشتريًا', Q.buyers, 'up')}${f13List('أكبر 15 بائعًا', Q.sellers, 'down')}</div>`;
-
-  // known banks & institutions
+  if (!first) h += `<div class="cols">${f13List(L('أكبر 15 مشتريًا', 'Top 15 buyers'), Q.buyers, 'up')}${f13List(L('أكبر 15 بائعًا', 'Top 15 sellers'), Q.sellers, 'down')}</div>`;
   const M = f.managers || {}, pi = P.findIndex(x => x.p === Q.p);
   const majors = Object.entries(M).filter(([, m]) => m.m).map(([cik, m]) => {
     const s = m.s[pi] || [], prev = pi ? (m.s.slice(0, pi).reverse().find(x => x[1] != null) || [])[1] : null;
     return {cik, m, v: s[1], st: s[2], h: s[3] || {}, prev};
   }).filter(x => x.v != null && (x.v > 0 || x.st === 'closed')).sort((a, b) => b.v - a.v);
-  if (majors.length) h += `<h3 class="rv-title">البنوك والمؤسسات المعروفة في هذا الربع</h3>
-    <div class="tablebox"><table><thead><tr><th>المؤسسة</th><th class="n">الحيازة</th><th class="n">التغير</th><th>الحالة</th><th class="n">GLD (سهم)</th><th class="n">IAU (سهم)</th></tr></thead><tbody>
-    ${majors.map(x => { const d = x.prev == null ? null : x.v - x.prev, cls = d > 0 ? 'up' : d < 0 ? 'down' : 'flat';
-      return `<tr><td>${mgrBtn(x.cik, x.m.n)}</td><td class="n">${TN(x.v)}</td><td class="n ${cls}">${d == null ? '—' : sTN(d)}</td><td>${badge(x.st)}</td>
+  if (majors.length) h += `<h3 class="rv-title">${L('البنوك والمؤسسات المعروفة في هذا الربع', 'Well-known banks and institutions this quarter')}</h3>
+    <div class="tablebox"><table><thead><tr><th>${L('المؤسسة', 'Institution')}</th><th class="n">${L('الحيازة', 'Holdings')}</th><th class="n">${L('التغير', 'Change')}</th><th>${L('الحالة', 'Status')}</th><th class="n">GLD</th><th class="n">IAU</th></tr></thead><tbody>
+    ${majors.map(x => { const d = x.prev == null ? null : x.v - x.prev;
+      return `<tr><td>${mgrBtn(x.cik, x.m.n)}</td><td class="n">${TN(x.v)}</td><td class="n ${d == null ? 'flat' : cls(d)}">${d == null ? '—' : sTN(d)}</td><td>${badge(x.st)}</td>
         <td class="n">${x.h.GLD ? bd(nf0.format(x.h.GLD)) : '—'}</td><td class="n">${x.h.IAU ? bd(nf0.format(x.h.IAU)) : '—'}</td></tr>`; }).join('')}
-    </tbody></table></div>`;
-
-  // drill-down per institution
-  const list = Object.entries(M).map(([cik, m]) => ({cik, m, last: (m.s.slice().reverse().find(x => x[1] != null) || [])[1] || 0}))
-    .sort((a, b) => b.last - a.last);
+    </tbody></table></div><p class="explain">${L('أعمدة GLD وIAU بعدد الأسهم.', 'GLD and IAU columns are in shares.')}</p>`;
+  const list = Object.entries(M).map(([cik, m]) => ({cik, m, last: (m.s.slice().reverse().find(x => x[1] != null) || [])[1] || 0})).sort((a, b) => b.last - a.last);
   if (list.length){
     if (!state.mgr || !M[state.mgr]) state.mgr = (list.find(x => /GOLDMAN/i.test(x.m.n)) || list[0]).cik;
     const mm = M[state.mgr], ser = mm.s.filter(x => x[1] != null);
     const mpts = ser.map((x, i) => ({d: x[0], line: x[1], st: x[2], h: x[3] || {},
       delta: i ? x[1] - ser[i - 1][1] : 0, pct: i && ser[i - 1][1] ? (x[1] - ser[i - 1][1]) / ser[i - 1][1] * 100 : null,
       d3: i >= 3 ? x[1] - ser[i - 3][1] : null})).map(q => ({...q, buy: Math.max(q.delta, 0), sell: Math.max(-q.delta, 0)})).slice(-WINDOW);
-    h += `<div class="picker" id="mgr-anchor"><label for="mgr-pick">مؤسسة بعينها</label><select id="mgr-pick" data-act="mgr-pick">${list.map(x =>
+    h += `<div class="picker" id="mgr-anchor"><label for="mgr-pick">${L('مؤسسة بعينها', 'A specific institution')}</label><select id="mgr-pick" data-act="mgr-pick">${list.map(x =>
       `<option value="${esc(x.cik)}" ${x.cik === state.mgr ? 'selected' : ''}>${esc(f13Name(x.m.n))}</option>`).join('')}</select></div>`;
-    h += reportView('mg-' + state.mgr, `${nm(mm.n)}: حيازتها ربعًا بربع`, mpts, kgCfg({
-      monthly:true, buy:'شراء', sell:'بيع', line:'الحيازة',
-      extra: q => `<div><span>الحالة</span><b>${q.st ? F13_STATUS[q.st][0] : '—'}</b></div>`,
+    h += reportView('mg-' + state.mgr, `${nm13(mm.n)}: ${L('حيازتها ربعًا بربع', 'holdings quarter by quarter')}`, mpts, kgCfg({
+      monthly:true, buy: L('شراء', 'Bought'), sell: L('بيع', 'Sold'), line: L('الحيازة', 'Holdings'),
+      extra: q => `<div><span>${L('الحالة', 'Status')}</span><b>${stLabel(q.st)}</b></div>`,
       cells: q => [
-        {label:'أسهم GLD', v: q.h.GLD ? bd(nf0.format(q.h.GLD)) : '—', sub: 'SPDR Gold Shares'},
-        {label:'أسهم IAU', v: q.h.IAU ? bd(nf0.format(q.h.IAU)) : '—', sub: Object.keys(q.h).filter(k => k !== 'GLD' && k !== 'IAU').map(k => `${k}: ${nf0.format(q.h[k])}`).join('، ') || 'iShares Gold Trust'},
-        {label:'الإجمالي بالذهب', v: TN(q.line), sub: `${KG(q.line)} ${badge(q.st)}`},
+        {label: L('أسهم GLD', 'GLD shares'), v: q.h.GLD ? bd(nf0.format(q.h.GLD)) : '—', sub: 'SPDR Gold Shares'},
+        {label: L('أسهم IAU', 'IAU shares'), v: q.h.IAU ? bd(nf0.format(q.h.IAU)) : '—', sub: Object.keys(q.h).filter(k => k !== 'GLD' && k !== 'IAU').map(k => `${k}: ${nf0.format(q.h[k])}`).join(', ') || 'iShares Gold Trust'},
+        {label: L('الإجمالي بالذهب', 'Total in gold'), v: TN(q.line), sub: `${KG(q.line)} ${badge(q.st)}`},
       ]}));
   }
-  h += `<p class="explain">المصدر: ملفات SEC Form 13F Data Sets. الأسماء كما أودعتها المؤسسات، والكميات محوَّلة إلى ذهب بتاريخ نهاية كل ربع.</p>`;
   return h;
 };
 
-/* ---------- shell ---------- */
-function renderTabs(){
-  document.getElementById('tabs').innerHTML = TABS.map(t =>
-    `<button class="tab" role="tab" data-act="tab" data-v="${t.id}" aria-selected="${t.id === state.tab}">${t.label}</button>`).join('');
+/* ---------- COMEX ---------- */
+function comexGross(){
+  const deps = ((DATA.comex || {}).depositories) || {}, g = {};
+  Object.values(deps).forEach(s => { for (let i = 1; i < s.length; i++){
+    const dv = (s[i][1] + s[i][2]) - (s[i - 1][1] + s[i - 1][2]), e = (g[s[i][0]] = g[s[i][0]] || {buy:0, sell:0});
+    if (dv > 0) e.buy += dv; else e.sell -= dv; } });
+  return Object.keys(g).length ? g : null;
+}
+ABOUT.comex = () => [
+  [L('ماذا يعرض؟', 'What it shows'), L('الذهب المخزّن في مستودعات COMEX المعتمدة في نيويورك: Registered جاهز للتسليم مقابل العقود، وEligible يستوفي المواصفات لكنه غير مسجَّل للتسليم. ومعه الداخل والخارج يوميًا.',
+    'Gold stored in COMEX-approved vaults in New York: Registered is ready to be delivered against contracts; Eligible meets the specification but is not registered for delivery. Includes daily inflows and outflows.')],
+  [L('المصدر وطريقة الحساب', 'Source and method'), L('تقرير CME اليومي Gold Warehouse Stocks. نجمع التغير في كل مستودع على حدة: الزيادات = ذهب داخل، والانخفاضات = ذهب خارج، ونحوّل الأونصات إلى كيلوغرامات.',
+    'CME’s daily Gold Warehouse Stocks report. We sum the change in each depository separately: increases are gold in, decreases are gold out, converted from ounces to kilograms.')],
+  [L('التحديث', 'Updates'), L('يومي بعد إغلاق السوق. CME تنشر لقطة اليوم فقط، لذلك يُبنى السجل يومًا بيوم منذ أول تشغيل.', 'Daily after the close. CME publishes only the current day’s snapshot, so the history builds day by day from the first run.')],
+  [L('الحدود', 'Limits'), L('حركة الذهب بين الخزائن لا تعني بالضرورة شراءً أو بيعًا؛ قد تكون نقلًا لملكية قائمة أو تحويلًا بين Registered وEligible.', 'Gold moving in or out of vaults is not necessarily buying or selling; it can be a transfer of existing ownership or a shift between Registered and Eligible.')],
+];
+R.comex = () => {
+  const id = 'comex', p = state.period[id], c = DATA.comex || {};
+  const reg = c.registered || [], eli = c.eligible || [], tot = c.total || [];
+  let h = head(L('مخزون بورصة COMEX', 'COMEX vault stocks'), '', [L('يومي', 'Daily'), tot.length ? L(`${tot.length} يومًا في السجل`, `${tot.length} days recorded`) : ''], 'comex', tot.length ? fresh(last(tot)[0], 6) : '');
+  h += about(id, ABOUT.comex());
+  if (!tot.length) return h + noData();
+  const byR = Object.fromEntries(reg), byE = Object.fromEntries(eli);
+  h += reportView('comex', L(`آخر ${WINDOW} تقريرًا يوميًا`, `Last ${WINDOW} daily reports`), flowModel(tot, comexGross()), kgCfg({
+    buy: L('دخول ذهب', 'Gold in'), sell: L('خروج ذهب', 'Gold out'), line: L('الإجمالي', 'Total'), deltaLabel: L('الصافي (الدلتا)', 'Net (delta)'),
+    empty: L('يُبنى المخطط يوميًا منذ أول تشغيل ويكتمل بعد 20 يوم تداول.', 'The chart builds daily from the first run and fills in after 20 trading days.'),
+    cells: q => [
+      {label: 'Registered', v: TN(byR[q.d] || 0), sub: KG(byR[q.d] || 0)}, {label: 'Eligible', v: TN(byE[q.d] || 0), sub: KG(byE[q.d] || 0)},
+      {label: L('الإجمالي', 'Total'), v: TN(q.line), sub: `${sKG(q.delta)} ${sPCT(q.pct)}`}]}));
+  h += controls(id, false);
+  const words = [L('دخول ذهب', 'Gold in'), L('خروج ذهب', 'Gold out')];
+  h += `<div class="figs">${figure(L('الإجمالي', 'Total'), tot, p, words)}${figure('Registered', reg, p, words)}${figure('Eligible', eli, p, words)}</div>`;
+  return h;
+};
+
+/* ---------- gold ETFs ---------- */
+const ETF_INFO = {GLD: 'SPDR Gold Shares', IAU: 'iShares Gold Trust', GLDM: 'SPDR Gold MiniShares'};
+function etfSeries(){
+  const out = {}, a = DATA.etf || {}, b = DATA.etf2 || {};
+  ['GLD', 'IAU', 'GLDM'].forEach(k => { const s = a[k] || b[k]; if (s && s.length) out[k] = s; });
+  return out;
+}
+function etfTotal(funds){
+  const use = Object.keys(funds).filter(k => funds[k].length >= 25), maps = use.map(k => Object.fromEntries(funds[k]));
+  if (!use.length) return {use, series: []};
+  const dates = funds[use[0]].map(x => x[0]).filter(d => maps.every(m => m[d] != null));
+  return {use, series: dates.map(d => [d, maps.reduce((a, m) => a + m[d], 0)])};
+}
+ABOUT.etf = () => [
+  [L('ماذا يعرض؟', 'What it shows'), L('الذهب الفعلي داخل أكبر صناديق الذهب الأمريكية المدعومة بالذهب: GLD وIAU وGLDM، وتدفقاتها اليومية. الدخول يعني شراء المستثمرين، والخروج يعني بيعهم.',
+    'Physical gold held by the largest US physically backed gold ETFs, GLD, IAU and GLDM, and their daily flows. Inflows mean investors are buying; outflows mean they are selling.')],
+  [L('المصادر وطريقة الحساب', 'Sources and method'), L('GLD وGLDM من الأرشيف التاريخي الرسمي لـ SPDR (عمود الأطنان في الصندوق). IAU من صفحة iShares الرسمية (Tonnes in Trust)، ويُبنى سجله يومًا بيوم منذ أول تشغيل. التدفق اليومي = تغير الحيازة عن اليوم السابق.',
+    'GLD and GLDM come from SPDR’s official historical archive (tonnes in trust). IAU comes from the official iShares page (Tonnes in Trust), and its history builds day by day from the first run. Daily flow = change in holdings vs the previous day.')],
+  [L('التحديث', 'Updates'), L('يومي. SPDR تحدّث ملفها صباح نيويورك عن اليوم السابق، لذلك أضفنا تشغيلًا صباحيًا يلتقطه في يومه.', 'Daily. SPDR updates its file in the New York morning for the previous day, so a morning run picks it up the same day.')],
+  [L('الحدود', 'Limits'), L('لا يشمل صناديق الذهب الأوروبية والآسيوية ولا الصناديق الأمريكية الأصغر. الإجمالي يجمع فقط الصناديق التي يتوفر لها سجل كافٍ.', 'European and Asian gold ETFs and smaller US funds are not included. The total only adds funds with enough history.')],
+];
+R.etf = () => {
+  const id = 'etf', p = state.period[id], funds = etfSeries(), keys = Object.keys(funds);
+  const latest = keys.reduce((a, k) => last(funds[k])[0] > a ? last(funds[k])[0] : a, '');
+  let h = head(L('صناديق الذهب المتداولة', 'Gold ETFs'), '', [L('يومي', 'Daily'), keys.join(' · ')], 'etf', fresh(latest, 6)) + sourceWarn('etf2');
+  h += about(id, ABOUT.etf());
+  if (!keys.length) return h + noData();
+  const tot = etfTotal(funds);
+  const opts = keys.map(k => [k, k]);
+  if (tot.series.length > 2) opts.unshift(['ALL', L('الإجمالي', 'Total')]);
+  if (!opts.find(o => o[0] === state.etfFund)) state.etfFund = opts[0][0];
+  h += chips('etffund', opts, state.etfFund);
+  const s = state.etfFund === 'ALL' ? tot.series : funds[state.etfFund];
+  const title = state.etfFund === 'ALL' ? `${L('الإجمالي', 'Total')} (${tot.use.join(' + ')})` : `${state.etfFund}: ${ETF_INFO[state.etfFund]}`;
+  h += reportView('etf-' + state.etfFund, `${title}, ${L(`آخر ${WINDOW} يوم تداول`, `last ${WINDOW} trading days`)}`, flowModel(s), kgCfg({
+    buy: L('تدفق داخل (شراء)', 'Inflow (buying)'), sell: L('تدفق خارج (بيع)', 'Outflow (selling)'), line: L('الحيازة', 'Holdings'),
+    empty: L('يُبنى سجل هذا الصندوق يومًا بيوم؛ يظهر المخطط بعد يومين من التسجيل.', 'This fund’s history builds day by day; the chart appears after two recorded days.'),
+    cells: q => [
+      {label: L('الحيازة', 'Holdings'), v: TN(q.line), sub: KG(q.line)},
+      {label: L('التدفق اليومي', 'Daily flow'), v: `<span class="${cls(q.delta)}">${sKG(q.delta)}</span>`, sub: sTN(q.delta)},
+      {label: L('نسبة التغير', 'Change %'), v: q.pct == null ? '—' : sPCT(q.pct), sub: q.d3 == null ? '' : `${L('آخر 3 أيام', 'Last 3 days')}: ${sKG(q.d3)}`},
+    ]}));
+  const all = keys.reduce((a, k) => a + last(funds[k])[1], 0);
+  h += `<div class="tablebox"><table><thead><tr><th>${L('الصندوق', 'Fund')}</th><th class="n">${L('الحيازة', 'Holdings')}</th><th class="n">${L('آخر يوم', 'Last day')}</th><th class="n">${L('التغير خلال', 'Change over')} ${pLabel(p)}</th><th class="n">${L('الحصة', 'Share')}</th><th>${L('آخر قراءة', 'Latest')}</th></tr></thead><tbody>
+    ${keys.map(k => { const s2 = funds[k], l = last(s2), d1 = s2.length > 1 ? l[1] - s2[s2.length - 2][1] : null, c = change(s2, PERIODS[p].days);
+      return `<tr><td><b>${k}</b> <span style="color:var(--muted)">${ETF_INFO[k]}</span></td><td class="n">${TN(l[1])}</td><td class="n ${d1 == null ? 'flat' : cls(d1)}">${d1 == null ? '—' : sKG(d1)}</td>
+      <td class="n ${c ? cls(c.d) : 'na'}">${c ? `${sTN(c.d)} ${sPCT(c.pct)}` : L('يُبنى السجل', 'Building history')}</td><td class="n">${bd(nf1.format(l[1] / all * 100) + '%')}</td><td>${fDay.format(toDate(l[0]))}</td></tr>`; }).join('')}
+    </tbody></table></div>`;
+  h += controls(id, false);
+  return h;
+};
+
+/* ---------- physical market: EFP & Shanghai premium ---------- */
+function pctRank(vals, v){ const a = vals.filter(x => x != null); return a.length ? a.filter(x => x <= v).length / a.length * 100 : null; }
+ABOUT.physical = () => [
+  [L('ماذا يعرض؟', 'What it shows'), L('مقياسان لتوتر سوق الذهب الفعلي: (1) فرق سعر عقود COMEX في نيويورك عن سعر لندن الفوري، وهو مؤشر تقريبي لـ EFP. (2) علاوة شنغهاي: فرق سعر الذهب في الصين عن سعر لندن.',
+    'Two gauges of stress in the physical gold market: (1) the gap between COMEX futures in New York and the London spot price, an approximate EFP gauge; (2) the Shanghai premium: the gap between the gold price in China and the London price.')],
+  [L('طريقة الحساب', 'Method'), L('فرق COMEX = سعر إغلاق العقد الأقرب (GC) − سعر LBMA Gold Price PM. علاوة شنغهاي = سعر Shanghai Gold Benchmark (يوان للغرام) محوَّلًا إلى دولار للأونصة بسعر صرف البنك المركزي الأوروبي − سعر LBMA AM. ونحسب ترتيب القراءة الحالية بين قراءات آخر سنة (الشريحة المئوية).',
+    'COMEX gap = front-month futures close (GC) − LBMA Gold Price PM. Shanghai premium = the Shanghai Gold Benchmark (yuan per gram) converted to dollars per ounce at the ECB reference rate − LBMA AM. We also rank today’s reading against the last year (percentile).')],
+  [L('كيف تقرؤه؟', 'How to read it'), L('فرق COMEX موجب عادةً بقدر صغير بسبب تكلفة الفائدة حتى استحقاق العقد؛ اتساعه الحاد يعني طلبًا استثنائيًا لنقل الذهب إلى نيويورك أو ضغطًا على البائعين. علاوة شنغهاي الموجبة تعني طلبًا صينيًا قويًا يدفع فوق سعر لندن، والخصم يعني طلبًا محليًا ضعيفًا.',
+    'The COMEX gap is normally small and positive because of interest carry until expiry; a sharp widening means unusual demand to move metal to New York or pressure on sellers. A positive Shanghai premium means strong Chinese demand paying above London; a discount means weak local demand.')],
+  [L('التحديث والحدود', 'Updates and limits'), L('يومي. الأسعار مأخوذة في أوقات مختلفة من اليوم، لذلك فيها ضجيج يومي بضعة دولارات: اقرأ الاتجاه والقراءات المتطرفة لا يومًا واحدًا. المصادر: LBMA وYahoo Finance (GC=F) وبورصة شنغهاي للذهب وFrankfurter (أسعار صرف البنك المركزي الأوروبي).',
+    'Daily. Prices are taken at different times of day, so there is a few dollars of daily noise: read the trend and the extremes, not a single day. Sources: LBMA, Yahoo Finance (GC=F), the Shanghai Gold Exchange and Frankfurter (ECB exchange rates).')],
+];
+R.physical = () => {
+  const ph = DATA.physical || {};
+  const avail = [['efp', L('فرق COMEX عن لندن (EFP)', 'COMEX vs London (EFP)')], ['sh', L('علاوة شنغهاي', 'Shanghai premium')]].filter(([k]) => (ph[k] || []).length);
+  let h = head(L('السوق الفعلي: EFP وعلاوة شنغهاي', 'Physical market: EFP and Shanghai premium'), '', [L('يومي', 'Daily'), '$/oz'], 'physical',
+    avail.length ? fresh(last(ph[avail[0][0]])[0], 6) : '');
+  h += about('physical', ABOUT.physical());
+  if (!avail.length) return h + noData();
+  if (!avail.find(a => a[0] === state.phys)) state.phys = avail[0][0];
+  h += chips('phys', avail, state.phys);
+  const rows = ph[state.phys], isE = state.phys === 'efp', vals = rows.slice(-250).map(r => r[1]);
+  const lr = last(rows), pr = pctRank(vals, lr[1]);
+  const aName = isE ? 'COMEX (GC)' : L('شنغهاي', 'Shanghai'), bName = isE ? 'LBMA PM' : 'LBMA AM';
+  let verdict;
+  if (pr >= 90) verdict = isE ? L('الفرق في أعلى 10% من مستوياته خلال سنة: طلب غير عادي على الذهب في نيويورك أو ضغط على المراكز المكشوفة.', 'The gap is in the top 10% of its one-year range: unusual demand for metal in New York or pressure on short positions.')
+    : L('العلاوة في أعلى 10% من مستوياتها خلال سنة: طلب صيني قوي على الذهب الفعلي.', 'The premium is in the top 10% of its one-year range: strong Chinese demand for physical gold.');
+  else if (pr <= 10) verdict = isE ? L('الفرق في أدنى 10% من مستوياته خلال سنة: سوق نيويورك هادئة أو فائض في المعروض.', 'The gap is in the bottom 10% of its one-year range: a calm New York market or ample supply.')
+    : L('العلاوة في أدنى 10% من مستوياتها خلال سنة: طلب صيني ضعيف أو بيع محلي.', 'The premium is in the bottom 10% of its one-year range: weak Chinese demand or local selling.');
+  else verdict = L('القراءة ضمن نطاقها المعتاد خلال سنة.', 'The reading is within its usual one-year range.');
+  h += `<div class="brief"><h3>${L('القراءة الحالية', 'Current reading')}: ${sUSD(lr[1])} / oz</h3><p>${L('الشريحة المئوية خلال سنة', 'One-year percentile')}: <b>${pr == null ? '—' : bd(nf0.format(pr))}</b>. ${verdict}</p></div>`;
+  const pts = spreadModel(rows).map(q => ({...q, pr: pctRank(rows.filter(r => r[0] <= q.d).slice(-250).map(r => r[1]), q.line)}));
+  h += reportView('phys-' + state.phys, L(`آخر ${WINDOW} يوم تداول`, `Last ${WINDOW} trading days`), pts, {
+    fmt: USD, sfmt: sUSD, buy: L('علاوة (موجب)', 'Premium (positive)'), sell: L('خصم (سالب)', 'Discount (negative)'), line: L('الفرق', 'Spread'),
+    panel: (q, row) => row(L('الفرق', 'Spread'), sUSD(q.line), q.line >= 0 ? 'up' : 'down') + row(aName, USD(q.a), '') + row(bName, USD(q.b), '')
+      + row(L('نسبة الفرق', 'Spread %'), sPCT(q.pct), 'ink') + row(L('الدلتا', 'Delta'), sUSD(q.delta), 'orange')
+      + row(L('دلتا آخر 3 تقارير', 'Delta, last 3 reports'), q.d3 == null ? '—' : sUSD(q.d3), q.d3 >= 0 ? 'blue' : 'down')
+      + row(L('الشريحة المئوية (سنة)', 'Percentile (1y)'), q.pr == null ? '—' : bd(nf0.format(q.pr)), ''),
+    cells: q => [
+      {label: L('الفرق', 'Spread'), v: `<span class="${cls(q.line)}">${sUSD(q.line)}</span>`, sub: `${sPCT(q.pct)} ${L('من سعر لندن', 'of the London price')}`},
+      {label: `${aName} / ${bName}`, v: USD(q.a), sub: USD(q.b)},
+      {label: L('الشريحة المئوية (سنة)', 'Percentile (1 year)'), v: q.pr == null ? '—' : bd(nf0.format(q.pr)), sub: `${L('الدلتا', 'Delta')}: <span class="orange">${sUSD(q.delta)}</span>`},
+    ]});
+  if ((ph.errors || []).length) h += `<p class="explain">${L('ملاحظة المصدر', 'Source note')}: <bdi dir="ltr">${esc(ph.errors.join(' | ').slice(0, 200))}</bdi></p>`;
+  return h;
+};
+
+/* ================= shell ================= */
+const TABS = () => [
+  ['countries', L('الدول', 'Countries')], ['cb', L('البنوك المركزية', 'Central banks')], ['banks', L('البنوك التجارية', 'Commercial banks')],
+  ['noncomm', 'COT Non-Commercial'], ['signals', L('إشارات COT', 'COT signals')], ['f13', L('المؤسسات (13F)', 'Institutions (13F)')],
+  ['comex', 'COMEX'], ['etf', L('صناديق ETF', 'Gold ETFs')], ['physical', L('السوق الفعلي', 'Physical market')],
+];
+TABS().forEach(([id]) => { state.mode[id] = 'stock'; state.period[id] = 'm'; });
+state.aboutClosed = {};
+
+function renderTop(){
+  document.getElementById('lang').innerHTML = [['ar', 'sa', 'العربية'], ['en', 'gb', 'English']].map(([k, f, t]) =>
+    `<button data-act="lang" data-v="${k}" aria-pressed="${state.lang === k}" lang="${k}"><img src="https://flagcdn.com/w40/${f}.png" alt="" width="20" height="14">${t}</button>`).join('');
+  document.getElementById('title').textContent = L('تدفقات الذهب', 'Gold Flows');
+  document.title = L('تدفقات الذهب', 'Gold Flows');
+  document.getElementById('foot').innerHTML = L(
+    'المصادر: IMF IRFCL، وCFTC COT (Legacy وDisaggregated)، وCME (مخزون COMEX وتقرير Issues and Stops)، وSPDR وiShares، وSEC Form 13F، وLBMA، وبورصة شنغهاي للذهب، وYahoo Finance، وFrankfurter. تُحدَّث البيانات تلقائيًا عبر GitHub Actions ثلاث مرات يوميًا في أيام العمل ومرة يوم السبت.',
+    'Sources: IMF IRFCL, CFTC COT (Legacy and Disaggregated), CME (COMEX vault stocks and the Issues and Stops report), SPDR and iShares, SEC Form 13F, LBMA, the Shanghai Gold Exchange, Yahoo Finance and Frankfurter. Data updates automatically via GitHub Actions three times a day on weekdays and once on Saturday.');
 }
 
 function renderMast(){
+  if (!DATA) return;
   const cb = DATA.central_banks, l = cb && last(cb.series || []);
-  const gld = DATA.etf && last(DATA.etf.GLD || []);
-  const com = DATA.comex && last(DATA.comex.total || []);
+  const gld = DATA.etf && last(DATA.etf.GLD || []), com = DATA.comex && last(DATA.comex.total || []);
   const parts = [];
-  if (l) parts.push(`<span><b>${bd(nf0.format(l[1] / 1000))}</b>طن لدى البنوك المركزية المُبلِّغة</span>`);
-  if (com) parts.push(`<span><b>${bd(nf0.format(com[1] / 1000))}</b>طن في COMEX</span>`);
-  if (gld) parts.push(`<span><b>${bd(nf0.format(gld[1] / 1000))}</b>طن في GLD</span>`);
-  document.getElementById('assay').innerHTML = parts.join('') || 'لا توجد بيانات بعد';
-  document.getElementById('updated').textContent = DATA.generated_utc
-    ? `آخر تشغيل للتحديث التلقائي: ${fStamp.format(new Date(DATA.generated_utc))}` : '';
+  if (l) parts.push(`<span><b>${bd(nf0.format(l[1] / 1000))}</b>${L('طن لدى البنوك المركزية المُبلِّغة', 't held by reporting central banks')}</span>`);
+  if (com) parts.push(`<span><b>${bd(nf0.format(com[1] / 1000))}</b>${L('طن في COMEX', 't in COMEX vaults')}</span>`);
+  if (gld) parts.push(`<span><b>${bd(nf0.format(gld[1] / 1000))}</b>${L('طن في GLD', 't in GLD')}</span>`);
+  document.getElementById('assay').innerHTML = parts.join('') || L('لا توجد بيانات بعد', 'No data yet');
+  let up = '';
+  if (DATA.generated_utc){
+    const g = new Date(DATA.generated_utc), age = (Date.now() - g.getTime()) / 864e5;
+    up = `${L('آخر تشغيل للتحديث التلقائي', 'Last automatic update')}: ${fStamp.format(g)}`;
+    if (age > 3) up += ` <span class="fresh stale">${L(`التحديث التلقائي متوقف منذ ${Math.floor(age)} أيام؛ افتح تبويب Actions في GitHub.`, `Automatic updates have not run for ${Math.floor(age)} days; check the Actions tab on GitHub.`)}</span>`;
+    else up += ` <span class="fresh ok">${L('التحديث التلقائي يعمل ✓', 'Automatic updates running ✓')}</span>`;
+  }
+  document.getElementById('updated').innerHTML = up;
+}
+
+function renderTabs(){
+  document.getElementById('tabs').innerHTML = TABS().map(([id, t]) =>
+    `<button class="tab" role="tab" data-act="tab" data-v="${id}" aria-selected="${id === state.tab}">${t}</button>`).join('');
 }
 
 function render(){
   renderTabs();
-  document.getElementById('view').innerHTML = R[state.tab]();
+  document.getElementById('view').innerHTML = DATA ? R[state.tab]() : '';
 }
+
+function applyLang(){
+  document.documentElement.lang = state.lang;
+  document.documentElement.dir = isAr() ? 'rtl' : 'ltr';
+  try { regionNames = new Intl.DisplayNames([state.lang], {type:'region'}); } catch (e) { regionNames = null; }
+  setFormatters();
+  renderTop();
+  renderMast();
+  render();
+}
+
+const rerender = () => { const y = window.scrollY; render(); window.scrollTo(0, y); };
 
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-act]');
-  if (!b || !DATA || b.tagName === 'SELECT') return;
+  if (!b || b.tagName === 'SELECT') return;
   const act = b.dataset.act, v = b.dataset.v;
-  if (act === 'tab'){ state.tab = v; state.all = false; history.replaceState(null, '', '#' + v); }
-  else if (act === 'mode') state.mode[state.tab] = v;
+  if (act === 'lang'){
+    state.lang = v;
+    try { localStorage.setItem('gold-lang', v); } catch (err) {}
+    const u = new URL(location.href); u.searchParams.delete('lang'); history.replaceState(null, '', u.pathname + u.hash);
+    const y = window.scrollY; applyLang(); window.scrollTo(0, y);
+    return;
+  }
+  if (!DATA) return;
+  if (act === 'tab'){ state.tab = v; state.all = false; history.replaceState(null, '', location.pathname + location.search + '#' + v); render();
+    document.getElementById('tabs').scrollIntoView({block:'nearest'}); return; }
+  if (act === 'mode') state.mode[state.tab] = v;
   else if (act === 'period') state.period[state.tab] = v;
   else if (act === 'all') state.all = !state.all;
-  else if (act === 'sel' || (b.classList.contains('hit'))) state.sel[b.dataset.rv] = +b.dataset.i;
-  else if (act === 'country-go'){ state.country = v; }
+  else if (act === 'sel') state.sel[b.dataset.rv] = +b.dataset.i;
+  else if (act === 'country-go') state.country = v;
   else if (act === 'bankview') state.bankView = v;
   else if (act === 'cotcat') state.cotCat = v;
   else if (act === 'bank'){ state.bank = v; state.bankView = 'deliv'; }
   else if (act === 'vault') state.vault = v;
-  else if (act === 'mgr'){ state.mgr = v; }
-  const y = window.scrollY;
-  render();
-  if (act === 'tab') document.getElementById('tabs').scrollIntoView({block:'nearest'});
-  else if (act === 'country-go'){ const el = document.getElementById('country-pick'); if (el) el.scrollIntoView({block:'center'}); }
-  else if (act === 'mgr'){ const el = document.getElementById('mgr-anchor'); if (el) el.scrollIntoView({block:'start'}); }
-  else window.scrollTo(0, y);
+  else if (act === 'mgr') state.mgr = v;
+  else if (act === 'sig') state.sig = v;
+  else if (act === 'etffund') state.etfFund = v;
+  else if (act === 'phys') state.phys = v;
+  rerender();
+  if (act === 'country-go'){ const el = document.getElementById('country-pick'); if (el) el.scrollIntoView({block:'center'}); }
+  if (act === 'mgr'){ const el = document.getElementById('mgr-anchor'); if (el) el.scrollIntoView({block:'start'}); }
 });
 
 document.addEventListener('click', e => {
   const r = e.target.closest('rect.hit');
   if (!r || !DATA) return;
   state.sel[r.dataset.rv] = +r.dataset.i;
-  const y = window.scrollY; render(); window.scrollTo(0, y);
+  rerender();
   showTip(document.querySelector(`rect.hit[data-rv="${CSS.escape(r.dataset.rv)}"][data-i="${r.dataset.i}"]`));
 });
 
 document.addEventListener('change', e => {
-  if (e.target.dataset.act === 'mgr-pick'){ state.mgr = e.target.value; const y = window.scrollY; render(); window.scrollTo(0, y); }
-  if (e.target.dataset.act === 'country'){ state.country = e.target.value; const y = window.scrollY; render(); window.scrollTo(0, y); }
+  const a = e.target.dataset.act;
+  if (a === 'mgr-pick'){ state.mgr = e.target.value; rerender(); }
+  if (a === 'country'){ state.country = e.target.value; rerender(); }
 });
+
+document.addEventListener('toggle', e => {
+  const d = e.target;
+  if (d.matches && d.matches('details.about')) state.aboutClosed[d.dataset.about] = !d.open;
+}, true);
 
 function showTip(r){
   if (!r) return;
@@ -955,9 +1243,15 @@ document.addEventListener('mouseout', e => {
   if (plot && !plot.contains(e.relatedTarget)){ const tt = plot.querySelector('.tt'); if (tt) tt.hidden = true; }
 });
 
+window.addEventListener('hashchange', () => {
+  const h = location.hash.slice(1);
+  if (TABS().some(([id]) => id === h) && h !== state.tab){ state.tab = h; render(); }
+});
+
 (async () => {
   const fromHash = location.hash.slice(1);
-  if (TABS.some(t => t.id === fromHash)) state.tab = fromHash;
+  if (TABS().some(([id]) => id === fromHash)) state.tab = fromHash;
+  applyLang();
   try {
     const r = await fetch('data.json?t=' + Date.now(), {cache:'no-store'});
     if (!r.ok) throw new Error(r.status);
@@ -965,10 +1259,11 @@ document.addEventListener('mouseout', e => {
     renderMast();
     render();
   } catch (err){
-    document.getElementById('assay').textContent = 'لم يُعثر على البيانات';
-    document.getElementById('view').innerHTML = `<p class="warn">تعذّر قراءة الملف data.json (${esc(err.message)}). إذا كان هذا أول تشغيل، افتح تبويب Actions في GitHub، شغّل «تحديث بيانات الذهب»، وانتظر حتى ينتهي ثم أعد تحميل الصفحة.</p>`;
+    document.getElementById('assay').textContent = L('لم يُعثر على البيانات', 'Data not found');
+    document.getElementById('view').innerHTML = `<p class="warn">${L('تعذّر قراءة الملف data.json', 'Could not read data.json')} (${esc(err.message)}). ${L('إذا كان هذا أول تشغيل، افتح تبويب Actions في GitHub، شغّل «تحديث بيانات الذهب»، وانتظر حتى ينتهي ثم أعد تحميل الصفحة.', 'If this is the first run, open the Actions tab on GitHub, run the update workflow, wait for it to finish, then reload the page.')}</p>`;
   }
 })();
+
 </script>
 </body>
 </html>
