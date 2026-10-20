@@ -33,6 +33,7 @@ START_DAY = "2022-01-01"
 
 OUT = "data.json"
 COMEX_HIST = os.path.join("data", "comex_history.json")
+DELIV_HIST = os.path.join("data", "deliveries_history.json")
 
 IMF_URL = "https://api.imf.org/external/sdmx/2.1/data/IRFCL/.IRFCLDT1_IRFCL56V_FTO..M"
 COT_URLS = [
@@ -40,7 +41,13 @@ COT_URLS = [
     "https://publicreporting.cftc.gov/resource/kh3c-gbw2.json",   # Disaggregated, Futures + Options
 ]
 GOLD_CODE = "088691"
+LEGACY_URLS = [
+    "https://publicreporting.cftc.gov/resource/6dca-aqww.json",   # Legacy, Futures only
+    "https://publicreporting.cftc.gov/resource/jun7-fc8e.json",   # Legacy, Futures + Options
+]
 CME_URL = "https://www.cmegroup.com/delivery_reports/Gold_Stocks.xls"
+CME_ISSUES_URL = "https://www.cmegroup.com/delivery_reports/MetalsIssuesAndStopsReport.pdf"
+CME_ISSUES_MTD_URL = "https://www.cmegroup.com/delivery_reports/MetalsIssuesAndStopsMTDReport.pdf"
 GLD_PAGE = "https://www.spdrgoldshares.com/usa/historical-data/"
 GLD_PAGES = [GLD_PAGE, "https://www.spdrgoldshares.com/usa/"]
 GLD_CANDIDATES = [
@@ -302,62 +309,98 @@ def fetch_imf():
 
 
 # ---------------------------------------------------------------- CFTC COT
-def find_key(row, must, avoid=("change", "pct", "traders", "conc", "old", "other")):
+AVOID = ("change", "pct", "traders", "conc", "old", "other")
+
+
+def find_key(row, must, avoid=AVOID):
     keys = [k for k in row
             if all(m in k.lower() for m in must) and not any(a in k.lower() for a in avoid)]
     keys.sort(key=len)
     return keys[0] if keys else None
 
 
-def fetch_cot():
+def socrata_gold(urls, limit=170):
     params = {
         "$where": f"cftc_contract_market_code='{GOLD_CODE}'",
         "$order": "report_date_as_yyyy_mm_dd DESC",
-        "$limit": "170",
+        "$limit": str(limit),
     }
-    rows, errors = [], []
-    for url in COT_URLS:
+    errors = []
+    for url in urls:
         try:
             rows = get(url, params=params, headers={"Accept": "application/json"}).json()
             if rows:
-                break
-            errors.append(f"{url}: empty")
+                return rows
+            errors.append(f"{url.rsplit('/', 1)[-1]}: empty")
         except Exception as e:
-            errors.append(f"{url}: {e}")
+            errors.append(f"{url.rsplit('/', 1)[-1]}: {e}")
             log("COT", url, e)
-    if not rows:
-        raise RuntimeError("COT: no data — " + (errors[-1] if errors else "")[:200])
+    raise RuntimeError("no data — " + " | ".join(errors)[:220])
 
-    sample = rows[0]
-    k = {
-        "sl": find_key(sample, ("swap", "positions", "long")),
-        "ss": find_key(sample, ("swap", "positions", "short")),
-        "pl": find_key(sample, ("prod_merc", "positions", "long")),
-        "ps": find_key(sample, ("prod_merc", "positions", "short")),
-    }
-    if not all(k.values()):
-        raise RuntimeError(f"COT: fields not found {k}")
 
-    to_kg = CONTRACT_OZ * OZ_KG
-    swap, prod = [], []
-    latest = None
+def cot_records(rows, keys):
+    """[[date, v1, v2, ...]] بالعقود، مرتبة تصاعديًا."""
+    out = {}
     for r in rows:
         d = str(r.get("report_date_as_yyyy_mm_dd", ""))[:10]
-        vals = {n: num(r.get(f)) for n, f in k.items()}
-        if not d or any(v is None for v in vals.values()):
-            continue
-        swap.append([d, round((vals["sl"] - vals["ss"]) * to_kg)])
-        prod.append([d, round((vals["pl"] - vals["ps"]) * to_kg)])
-        if latest is None or d > latest["date"]:
-            latest = {"date": d,
-                      "swap_long": round(vals["sl"] * to_kg), "swap_short": round(vals["ss"] * to_kg),
-                      "prod_long": round(vals["pl"] * to_kg), "prod_short": round(vals["ps"] * to_kg)}
-    swap.sort()
-    prod.sort()
+        vals = [num(r.get(k)) if k else 0.0 for k in keys]
+        if d and all(v is not None for v in vals):
+            out[d] = [d] + [int(v) for v in vals]
+    return [out[d] for d in sorted(out)]
+
+
+def fetch_cot():
+    rows = socrata_gold(COT_URLS)
+    s = rows[0]
+    k = {
+        "sl": find_key(s, ("swap", "positions", "long")),
+        "ss": find_key(s, ("swap", "positions", "short")),
+        "sp": find_key(s, ("swap", "positions", "spread")),
+        "pl": find_key(s, ("prod_merc", "positions", "long")),
+        "ps": find_key(s, ("prod_merc", "positions", "short")),
+        "ml": find_key(s, ("m_money", "positions", "long")),
+        "ms": find_key(s, ("m_money", "positions", "short")),
+        "msp": find_key(s, ("m_money", "positions", "spread")),
+    }
+    if not all(k[x] for x in ("sl", "ss", "pl", "ps")):
+        raise RuntimeError(f"COT: fields not found {k}")
+    swap = cot_records(rows, [k["sl"], k["ss"], k["sp"]])          # [d, long, short, spread]
+    prod = cot_records(rows, [k["pl"], k["ps"], None])
+    mm = cot_records(rows, [k["ml"], k["ms"], k["msp"]]) if k["ml"] and k["ms"] else []
     if not swap:
         raise RuntimeError("COT: parsed 0 rows")
-    log(f"COT ok: {len(swap)} weeks, latest {swap[-1][0]}")
-    return {"banks": {"swap_net": swap, "prod_net": prod, "latest": latest}}
+    to_kg = CONTRACT_OZ * OZ_KG
+    last = swap[-1]
+    banks = {
+        "swap_net": [[r[0], round((r[1] - r[2]) * to_kg)] for r in swap],
+        "prod_net": [[r[0], round((r[1] - r[2]) * to_kg)] for r in prod],
+        "latest": {"date": last[0], "swap_long": round(last[1] * to_kg), "swap_short": round(last[2] * to_kg),
+                   "prod_long": round(prod[-1][1] * to_kg), "prod_short": round(prod[-1][2] * to_kg)},
+    }
+    log(f"COT ok: {len(swap)} weeks, latest {last[0]}")
+    return {"banks": banks, "cot_disagg": {"swap": swap, "prod": prod, "mm": mm}}
+
+
+def fetch_cot_legacy():
+    rows = socrata_gold(LEGACY_URLS, limit=80)
+    s = rows[0]
+    k = [
+        find_key(s, ("noncomm", "long")),
+        find_key(s, ("noncomm", "short")),
+        find_key(s, ("noncomm", "spread")),
+        find_key(s, ("open_interest",)),
+        find_key(s, ("comm", "long"), AVOID + ("noncomm",)),
+        find_key(s, ("comm", "short"), AVOID + ("noncomm",)),
+        find_key(s, ("nonrept", "long")),
+        find_key(s, ("nonrept", "short")),
+    ]
+    if not all(k[:3]):
+        raise RuntimeError(f"COT legacy: fields not found {k[:3]} in {list(s)[:12]}")
+    recs = cot_records(rows, k)     # [d, long, short, spread, oi, comm_l, comm_s, nonrept_l, nonrept_s]
+    if not recs:
+        raise RuntimeError("COT legacy: parsed 0 rows")
+    log(f"COT non-commercial ok: {len(recs)} weeks, latest {recs[-1][0]}")
+    return {"noncomm": recs}
 
 
 # ---------------------------------------------------------------- CME COMEX
@@ -383,11 +426,17 @@ def fetch_comex():
             break
     report_date = report_date or dt.date.today().isoformat()
 
-    vals = {}
+    vals, deps, current = {}, {}, None
     for i in range(sh.nrows):
-        t = re.sub(r"\s+", " ", row_text(i)).strip()
-        nums = [c for c in sh.row_values(i) if isinstance(c, float)]
+        row = sh.row_values(i)
+        strs = [c.strip() for c in row if isinstance(c, str) and c.strip()]
+        t = re.sub(r"\s+", " ", " ".join(strs).upper()).strip()
+        nums = [c for c in row if isinstance(c, float)]
         if not nums:
+            # سطر يحوي نصًا واحدًا فقط = اسم مستودع (عناوين الأعمدة تحوي عدة نصوص)
+            if (len(strs) == 1 and len(t) > 3 and not re.search(r"\d{1,2}/\d{1,2}/\d{4}", t)
+                    and not any(w in t for w in ("TROY", "OUNCE", "WAREHOUSE STOCKS", "COMEX", "DISCLAIMER", "INFORMATION"))):
+                current = strs[0]
             continue
         if "TOTAL REGISTERED" in t:
             vals["registered"] = nums[-1]
@@ -395,6 +444,10 @@ def fetch_comex():
             vals["eligible"] = nums[-1]
         elif "COMBINED TOTAL" in t:
             vals["total"] = nums[-1]
+        elif current and "REGISTERED" in t and "TOTAL" not in t:
+            deps.setdefault(current, {})["registered"] = nums[-1]
+        elif current and "ELIGIBLE" in t and "TOTAL" not in t:
+            deps.setdefault(current, {})["eligible"] = nums[-1]
     if "registered" not in vals or "eligible" not in vals:
         raise RuntimeError(f"CME: totals not found in sheet (found {list(vals)})")
     vals.setdefault("total", vals["registered"] + vals["eligible"])
@@ -402,8 +455,94 @@ def fetch_comex():
     hist = load(COMEX_HIST, {"registered": [], "eligible": [], "total": []})
     for name in ("registered", "eligible", "total"):
         upsert(hist.setdefault(name, []), report_date, round(vals[name] * OZ_KG))
+    dh = hist.setdefault("depositories", {})
+    for name, v in deps.items():
+        reg, eli = v.get("registered", 0.0), v.get("eligible", 0.0)
+        series = dh.setdefault(name, [])
+        series[:] = [x for x in series if x[0] != report_date] + [[report_date, round(reg * OZ_KG), round(eli * OZ_KG)]]
+        series.sort()
     save(COMEX_HIST, hist)
-    log(f"COMEX ok: {report_date}, total {vals['total']:,.0f} oz")
+    log(f"COMEX ok: {report_date}, total {vals['total']:,.0f} oz, {len(deps)} depositories")
+
+
+# ---------------------------------------------------------------- CME Issues & Stops (per bank)
+def _is_num(w):
+    return re.fullmatch(r"[\d,]+", w) is not None
+
+
+def parse_issues_pdf(content):
+    """يقرأ تقرير Issues and Stops ويعيد {date, firms: {name: {H:[issued, stopped], C:[...]}}} لعقود الذهب."""
+    pdfplumber = ensure("pdfplumber")
+    report_date, firms, gold_sections = None, {}, 0
+    in_gold, cols = False, None
+    with pdfplumber.open(io.BytesIO(content)) as pdf:
+        for page in pdf.pages:
+            words = page.extract_words(keep_blank_chars=False, use_text_flow=False)
+            lines = {}
+            for w in words:
+                lines.setdefault(round(w["top"] / 3), []).append(w)
+            for key in sorted(lines):
+                ws = sorted(lines[key], key=lambda w: w["x0"])
+                toks = [w["text"] for w in ws]
+                text = " ".join(toks).upper()
+                if report_date is None:
+                    m = re.search(r"BUSINESS DATE:?\s*(\d{1,2})/(\d{1,2})/(\d{4})", text)
+                    if m:
+                        report_date = dt.date(int(m.group(3)), int(m.group(1)), int(m.group(2))).isoformat()
+                if "CONTRACT:" in text:
+                    in_gold = ("GOLD" in text and not any(x in text for x in ("MICRO", "KILO", "MINI", "SILVER")))
+                    gold_sections += in_gold
+                    cols = None
+                    continue
+                if "ISSUED" in text and "STOPPED" in text:
+                    cols = {w["text"].upper(): (w["x0"] + w["x1"]) / 2 for w in ws if w["text"].upper() in ("ISSUED", "STOPPED")}
+                    continue
+                if not in_gold or len(toks) < 3:
+                    continue
+                if not (re.fullmatch(r"\d{3}", toks[0]) and toks[1].upper() in ("H", "C")):
+                    continue
+                j = len(ws)
+                while j > 2 and _is_num(ws[j - 1]["text"]):
+                    j -= 1
+                name = " ".join(toks[2:j]).strip().upper()
+                if not name:
+                    continue
+                iss = stp = 0
+                for w in ws[j:]:
+                    v = int(w["text"].replace(",", ""))
+                    xc = (w["x0"] + w["x1"]) / 2
+                    if cols and "ISSUED" in cols and "STOPPED" in cols:
+                        if abs(xc - cols["ISSUED"]) <= abs(xc - cols["STOPPED"]):
+                            iss += v
+                        else:
+                            stp += v
+                    else:
+                        stp += v
+                rec = firms.setdefault(name, {}).setdefault(toks[1].upper(), [0, 0])
+                rec[0] += iss
+                rec[1] += stp
+    return {"date": report_date, "firms": firms, "gold_sections": gold_sections}
+
+
+def fetch_deliveries():
+    hist = load(DELIV_HIST, {"daily": {}, "mtd": {}})
+    ref = {"Referer": "https://www.cmegroup.com/clearing/operations-and-deliveries/nymex-delivery-notices.html"}
+    daily = parse_issues_pdf(browser_get(CME_ISSUES_URL, headers=ref).content)
+    if not daily["date"]:
+        raise RuntimeError("Issues&Stops: business date not found in PDF")
+    hist["daily"][daily["date"]] = daily["firms"]
+    for d in sorted(hist["daily"])[:-400]:
+        del hist["daily"][d]
+    msg = f"{daily['date']}: {len(daily['firms'])} firms in {daily['gold_sections']} gold sections"
+    try:
+        mtd = parse_issues_pdf(browser_get(CME_ISSUES_MTD_URL, headers=ref).content)
+        if mtd["firms"]:
+            hist["mtd"] = {"date": mtd["date"] or daily["date"], "firms": mtd["firms"]}
+            msg += f"; MTD {len(mtd['firms'])} firms"
+    except Exception as e:
+        log("Issues&Stops MTD skipped:", e)
+    save(DELIV_HIST, hist)
+    log("Issues&Stops ok:", msg)
 
 
 # ---------------------------------------------------------------- SPDR GLD
@@ -523,7 +662,9 @@ def fetch_gld():
 # ---------------------------------------------------------------- main
 SECTIONS = {
     "imf": (fetch_imf, ("countries", "central_banks")),
-    "cot": (fetch_cot, ("banks",)),
+    "cot": (fetch_cot, ("banks", "cot_disagg")),
+    "cot_legacy": (fetch_cot_legacy, ("noncomm",)),
+    "deliveries": (fetch_deliveries, ()),
     "comex": (fetch_comex, ()),
     "etf": (fetch_gld, ("etf",)),
 }
@@ -547,6 +688,8 @@ def main():
                 if key in prev:
                     data[key] = prev[key]
     data["comex"] = load(COMEX_HIST, {"registered": [], "eligible": [], "total": []})
+    dh = load(DELIV_HIST, {"daily": {}, "mtd": {}})
+    data["deliveries"] = {"daily": {d: dh["daily"][d] for d in sorted(dh["daily"])[-120:]}, "mtd": dh.get("mtd", {})}
     save(OUT, data)
     ok = [n for n, s in data["sources"].items() if s["ok"]]
     log(f"done. ok: {ok}")

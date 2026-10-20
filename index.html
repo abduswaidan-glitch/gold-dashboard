@@ -12,7 +12,7 @@
 :root{
   --bg:#E8EBE9; --surface:#F5F6F4; --ink:#18232B; --muted:#56646C; --rule:#C7CEC9;
   --metal:#8E661C; --metal-hi:#D9B35E; --metal-lo:#9C7428; --ingot-ink:#2A1E07;
-  --buy:#1F7049; --sell:#A93A26; --alt:#3D6C8C;
+  --buy:#1F7049; --sell:#A93A26; --alt:#3D6C8C; --orange:#C2620A; --blue:#2458C6;
   --kufi:"Reem Kufi","IBM Plex Sans Arabic",system-ui,sans-serif;
   --sans:"IBM Plex Sans Arabic","Segoe UI",Tahoma,system-ui,sans-serif;
   color-scheme:light;
@@ -24,13 +24,13 @@
   :root:not([data-theme="light"]){
     --bg:#131B21; --surface:#1B252C; --ink:#E4E7E3; --muted:#93A1A8; --rule:#2C3940;
     --metal:#D8AB4F; --metal-hi:#E2BE6E; --metal-lo:#8A6421; --ingot-ink:#1E1505;
-    --buy:#4DB383; --sell:#E2735B; --alt:#7FB0D1; color-scheme:dark;
+    --buy:#4DB383; --sell:#E2735B; --alt:#7FB0D1; --orange:#F0A04B; --blue:#7FA8FF; color-scheme:dark;
   }
 }
 :root[data-theme="dark"]{
   --bg:#131B21; --surface:#1B252C; --ink:#E4E7E3; --muted:#93A1A8; --rule:#2C3940;
   --metal:#D8AB4F; --metal-hi:#E2BE6E; --metal-lo:#8A6421; --ingot-ink:#1E1505;
-  --buy:#4DB383; --sell:#E2735B; --alt:#7FB0D1; color-scheme:dark;
+  --buy:#4DB383; --sell:#E2735B; --alt:#7FB0D1; --orange:#F0A04B; --blue:#7FA8FF; color-scheme:dark;
 }
 *,*::before,*::after{box-sizing:inherit}
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
@@ -125,6 +125,49 @@ tr:last-child td{border-bottom:0}
 .row .det{grid-column:1/-1;font-size:12.5px;color:var(--muted)}
 .empty{color:var(--muted);padding:12px 0;margin:0}
 .explain{color:var(--muted);font-size:14px;max-width:72ch;margin:0 0 10px}
+
+/* report viewer */
+.rv{background:var(--surface);border:1px solid var(--rule);padding:14px 14px 12px;margin:0 0 20px}
+.rv-title{font-size:16px;font-weight:600;margin:0 0 6px}
+.rv-plot{position:relative;direction:ltr}
+.rvc{display:block;width:100%;height:230px}
+.rvc .b-up{fill:var(--buy)} .rvc .b-down{fill:var(--sell)}
+.rvc .zero{stroke:var(--muted);stroke-width:1}
+.rvc .l-net{fill:none;stroke:var(--ink);stroke-width:2}
+.rvc .hit{fill:transparent;cursor:pointer}
+.rvc .hit.hover{fill:color-mix(in srgb,var(--ink) 7%,transparent)}
+.rvc .selcol{fill:color-mix(in srgb,var(--metal) 18%,transparent)}
+.ticks{display:flex;font-size:11.5px;color:var(--muted);padding-top:4px}
+.ticks span{flex:1;text-align:center;white-space:nowrap;overflow:visible}
+.tt{position:absolute;top:8px;z-index:3;direction:rtl;min-width:230px;max-width:290px;background:var(--surface);color:var(--ink);
+  border:1px solid var(--rule);box-shadow:0 6px 18px rgba(0,0,0,.18);padding:8px 10px;font-size:13px;pointer-events:none}
+.tt-d{font-weight:600;margin-bottom:4px;border-bottom:1px solid var(--rule);padding-bottom:4px}
+.tt div:not(.tt-d){display:flex;justify-content:space-between;gap:12px;padding:1px 0}
+.tt .ink{color:var(--ink)} .orange{color:var(--orange)} .blue{color:var(--blue)}
+.rv-bottom{display:grid;grid-template-columns:1fr 230px;gap:14px;margin-top:12px}
+.rv-sel{font-size:13.5px;color:var(--muted);margin-bottom:6px}
+.cells{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--rule);border:1px solid var(--rule)}
+.cell{background:var(--bg);padding:10px 12px}
+.cell h4{margin:0;font-size:13px;font-weight:500;color:var(--muted)}
+.cell .cv{font-family:var(--kufi);font-size:20px;font-weight:700;line-height:1.35}
+.cell .cs{font-size:12.5px;color:var(--muted)}
+.rv-list{max-height:250px;overflow-y:auto;border:1px solid var(--rule);background:var(--bg)}
+.rep{display:flex;justify-content:space-between;gap:8px;width:100%;border:0;border-bottom:1px solid var(--rule);background:none;padding:6px 10px;cursor:pointer;font-size:13px;text-align:start}
+.rep[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.rep[aria-pressed="true"] .up,.rep[aria-pressed="true"] .down,.rep[aria-pressed="true"] .flat{color:inherit}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0}
+.chip-btn{border:1px solid var(--rule);background:var(--surface);border-radius:99px;padding:5px 12px;cursor:pointer;font-size:14px}
+.chip-btn[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.picker{display:flex;align-items:center;gap:10px;margin:16px 0 12px}
+.picker select{font:inherit;padding:6px 10px;border:1px solid var(--rule);background:var(--surface);color:var(--ink);border-radius:8px}
+.linkish{border:0;background:none;padding:0;cursor:pointer;color:inherit;text-decoration:underline;text-decoration-color:var(--rule);text-underline-offset:3px;font:inherit}
+@media (max-width:720px){
+  .rv-bottom{grid-template-columns:1fr}
+  .rv-list{display:flex;max-height:none;overflow-x:auto;overflow-y:hidden}
+  .rep{flex:none;width:auto;flex-direction:column;border-bottom:0;border-inline-end:1px solid var(--rule)}
+  .cells{grid-template-columns:1fr}
+  .tt{min-width:200px}
+}
 footer{border-top:1px solid var(--rule);color:var(--muted);font-size:13px;padding:18px 0 30px}
 footer a{color:inherit}
 @media (max-width:520px){
@@ -150,7 +193,7 @@ footer a{color:inherit}
 <main class="wrap" id="view" aria-live="polite"></main>
 
 <footer class="wrap">
-  المصادر: IMF IRFCL للحيازات الرسمية، CFTC COT لمراكز البنوك، CME لمخزون COMEX، SPDR لصندوق GLD.
+  المصادر: IMF IRFCL للحيازات الرسمية، CFTC COT (Legacy وDisaggregated)، CME لمخزون COMEX وتقرير Issues and Stops، SPDR لصندوق GLD.
   تُحدَّث البيانات تلقائيًا عبر GitHub Actions، وكل قسم يعرض تاريخ آخر قراءة رسمية له.
 </footer>
 
@@ -161,6 +204,7 @@ const TABS = [
   {id:'countries', label:'الدول'},
   {id:'cb', label:'البنوك المركزية'},
   {id:'banks', label:'البنوك التجارية'},
+  {id:'noncomm', label:'COT Non-Commercial'},
   {id:'comex', label:'COMEX'},
   {id:'etf', label:'صناديق ETF'},
 ];
@@ -182,7 +226,8 @@ MDG:'مدغشقر',BWA:'بوتسوانا',NAM:'ناميبيا',SEN:'السنغا
 MRT:'موريتانيا',YEM:'اليمن',AFG:'أفغانستان',NPL:'نيبال',LAO:'لاوس',PNG:'بابوا غينيا الجديدة',FJI:'فيجي',BRN:'بروناي',MAC:'ماكاو',
 CUB:'كوبا',PRK:'كوريا الشمالية',TWN:'تايوان',TKM:'تركمانستان',MNE:'الجبل الأسود',XKX:'كوسوفو',ETH:'إثيوبيا'};
 
-const state = {tab:'countries', mode:{}, period:{}, all:false};
+const CONTRACT_KG = 100 * 0.0311034768;
+const state = {tab:'countries', mode:{}, period:{}, all:false, sel:{}, country:null, bankView:'cot', cotCat:'swap', bank:null, vault:null};
 TABS.forEach(t => { state.mode[t.id] = 'stock'; state.period[t.id] = 'm'; });
 let DATA = null;
 
@@ -238,13 +283,13 @@ function head(title, desc, chips, src){
     <div class="meta">${chips.filter(Boolean).map(c => `<span class="chip">${c}</span>`).join('')}</div></div>${sourceWarn(src)}`;
 }
 
-function controls(id){
+function controls(id, modes){
   const m = state.mode[id], p = state.period[id];
   return `<div class="controls">
-    <div class="seg" role="group" aria-label="طريقة العرض">
+    ${modes ? `<div class="seg" role="group" aria-label="طريقة العرض">
       <button data-act="mode" data-v="stock" aria-pressed="${m === 'stock'}">المحتوى الإجمالي</button>
       <button data-act="mode" data-v="chg" aria-pressed="${m === 'chg'}">التغير</button>
-    </div>
+    </div>` : ''}
     <div class="seg" role="group" aria-label="مدة المقارنة">
       ${Object.entries(PERIODS).map(([k, v]) =>
         `<button data-act="period" data-v="${k}" aria-pressed="${p === k}">${v.label}</button>`).join('')}
@@ -268,57 +313,6 @@ function figure(label, s, period, words, extra = ''){
     ${chgLine(change(s, PERIODS[period].days), monthly, words)}${extra}</div>`;
 }
 
-function lineChart(title, lines, maxPts){
-  lines = lines.filter(l => l.s && l.s.length).map(l => ({...l, s: l.s.slice(-maxPts)}));
-  const pts = lines.flatMap(l => l.s);
-  if (pts.length < 2) return `<div class="chartbox"><h4>${title}</h4><p class="empty">لا تكفي القراءات لرسم المنحنى بعد؛ يكتمل مع التحديثات اليومية.</p></div>`;
-  const W = 600, H = 170;
-  const xs = pts.map(p => toDate(p[0]).getTime()), ys = pts.map(p => p[1]);
-  const x0 = Math.min(...xs), x1 = Math.max(...xs);
-  let y0 = Math.min(...ys), y1 = Math.max(...ys);
-  if (y0 === y1){ y0 -= Math.abs(y0) * .01 + 1; y1 += Math.abs(y1) * .01 + 1; }
-  const pad = (y1 - y0) * .08; y0 -= pad; y1 += pad;
-  const X = t => x1 === x0 ? W / 2 : (t - x0) / (x1 - x0) * W;
-  const Y = v => H - (v - y0) / (y1 - y0) * H;
-  let svg = `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(title)}">`;
-  if (y0 < 0 && y1 > 0) svg += `<line class="zero" x1="0" x2="${W}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}" vector-effect="non-scaling-stroke"/>`;
-  lines.forEach((l, i) => {
-    const p = l.s.map(q => `${X(toDate(q[0]).getTime()).toFixed(1)},${Y(q[1]).toFixed(1)}`);
-    if (i === 0 && y0 >= 0){
-      const xa = X(toDate(l.s[0][0]).getTime()).toFixed(1), xb = X(toDate(last(l.s)[0]).getTime()).toFixed(1);
-      svg += `<polygon class="area" points="${xa},${H} ${p.join(' ')} ${xb},${H}"/>`;
-    }
-    svg += `<polyline class="${i ? 'l-alt' : 'l-main'}" points="${p.join(' ')}" vector-effect="non-scaling-stroke"/>`;
-  });
-  svg += '</svg>';
-  const monthly = isMonthly(lines[0].s);
-  const legend = lines.length > 1 ? `<div class="legend">${lines.map((l, i) =>
-    `<span><i style="background:var(${i ? '--alt' : '--metal'})"></i>${l.label}</span>`).join('')}</div>` : '';
-  const lo = Math.min(...ys), hi = Math.max(...ys);
-  return `<figure class="chartbox"><h4>${title}</h4>${legend}${svg}
-    <figcaption><span>${fmtD(lines[0].s[0][0], monthly)}</span><span>المدى: ${TN(lo)} إلى ${TN(hi)}</span><span>${fmtD(last(lines[0].s)[0], monthly)}</span></figcaption></figure>`;
-}
-
-function deltaBars(title, s, n){
-  if (!s || s.length < 2) return `<div class="chartbox"><h4>${title}</h4><p class="empty">يلزم قراءتان على الأقل لحساب التغير.</p></div>`;
-  const t = s.slice(-(n + 1)), d = [];
-  for (let i = 1; i < t.length; i++) d.push([t[i][0], t[i][1] - t[i - 1][1]]);
-  const m = Math.max(...d.map(x => Math.abs(x[1]))) || 1;
-  const W = 600, H = 130, mid = H / 2, bw = W / d.length;
-  const monthly = isMonthly(s);
-  let svg = `<svg class="chart" style="height:130px" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(title)}">`;
-  svg += `<line class="zero" x1="0" x2="${W}" y1="${mid}" y2="${mid}" vector-effect="non-scaling-stroke"/>`;
-  d.forEach(([date, v], i) => {
-    const h = Math.max(1, Math.abs(v) / m * (mid - 4));
-    const y = v >= 0 ? mid - h : mid;
-    svg += `<rect class="${v >= 0 ? 'b-up' : 'b-down'}" x="${(i * bw + bw * .18).toFixed(1)}" y="${y.toFixed(1)}" width="${(bw * .64).toFixed(1)}" height="${h.toFixed(1)}"><title>${fmtD(date, monthly)}: ${plainKG(v)}</title></rect>`;
-  });
-  svg += '</svg>';
-  const buys = d.filter(x => x[1] > 0).length, sells = d.filter(x => x[1] < 0).length;
-  return `<figure class="chartbox"><h4>${title}</h4>${svg}
-    <figcaption><span>${fmtD(d[0][0], monthly)}</span><span><span class="up">${buys} ارتفاع</span> و<span class="down">${sells} انخفاض</span></span><span>${fmtD(last(d)[0], monthly)}</span></figcaption></figure>`;
-}
-
 function rankedList(title, rows, cls, maxAbs, monthly){
   if (!rows.length) return `<div class="ranked"><h3>${title}</h3><p class="empty">لا توجد دول في هذه الفئة خلال المدة.</p></div>`;
   return `<div class="ranked"><h3>${title}</h3>${rows.map(r => `
@@ -336,8 +330,150 @@ function countryChanges(period){
     .filter(r => r.c && r.c.d !== 0);
 }
 
+/* ---------- 20-report viewer (chart + hover panel + table + report list) ---------- */
+const WINDOW = 20;
+const RVM = {};
+const fShort = new Intl.DateTimeFormat('ar-u-nu-latn',{day:'numeric',month:'numeric',timeZone:'UTC'});
+const fShortM = new Intl.DateTimeFormat('ar-u-nu-latn',{month:'short',year:'2-digit',timeZone:'UTC'});
+const dm = d => { const t = toDate(d); return `${t.getUTCDate()}/${t.getUTCMonth() + 1}`; };
+const CT = v => `${bd(nf0.format(v))} عقد`;
+const sCT = v => `${bd(sg(v) + nf0.format(Math.abs(v)))} عقد`;
+const KG_PER_CT = CONTRACT_KG;
+
+function flowModel(series, gross){
+  const s = (series || []).slice(-(WINDOW + 4)), pts = [];
+  for (let i = 1; i < s.length; i++){
+    const [d, v] = s[i], prev = s[i - 1][1], delta = v - prev, g = gross && gross[d];
+    pts.push({d, line:v, delta, pct: prev ? delta / Math.abs(prev) * 100 : null,
+      d3: i >= 3 ? v - s[i - 3][1] : null,
+      buy: g ? g.buy : Math.max(delta, 0), sell: g ? g.sell : Math.max(-delta, 0), g});
+  }
+  return pts.slice(-WINDOW);
+}
+
+function lsModel(recs){
+  const r = (recs || []).slice(-(WINDOW + 4)), pts = [];
+  for (let i = 1; i < r.length; i++){
+    const [d, l, s, sp] = r[i], [, pl, ps, psp] = r[i - 1];
+    const net = l - s, pnet = pl - ps, delta = net - pnet;
+    pts.push({d, buy:l, sell:s, line:net, delta, pct: pnet ? delta / Math.abs(pnet) * 100 : null,
+      d3: i >= 3 ? net - (r[i - 3][1] - r[i - 3][2]) : null,
+      dl: l - pl, ds: s - ps, sp: sp || 0, dsp: (sp || 0) - (psp || 0), rec: r[i]});
+  }
+  return pts.slice(-WINDOW);
+}
+
+function rvSel(id, pts){
+  let i = state.sel[id];
+  if (i == null || i >= pts.length) i = pts.length - 1;
+  return i;
+}
+
+function reportView(id, title, pts, cfg){
+  if (!pts.length) return `<div class="rv"><h3 class="rv-title">${title}</h3><p class="empty">${cfg.empty || 'لا تكفي التقارير لرسم المخطط بعد؛ يكتمل مع التحديثات القادمة.'}</p></div>`;
+  RVM[id] = {pts, cfg};
+  const si = rvSel(id, pts), p = pts[si], n = pts.length;
+  const W = 640, H = 230, T = 10, B = 10, ph = H - T - B, cw = W / n;
+  const mu = Math.max(1, ...pts.map(q => q.buy)), md = Math.max(1, ...pts.map(q => q.sell));
+  const sc = ph / (mu + md), zy = T + mu * sc;
+  let svg = `<svg class="rvc" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">`;
+  svg += `<rect class="selcol" x="${(si * cw).toFixed(1)}" y="0" width="${cw.toFixed(1)}" height="${H}"/>`;
+  pts.forEach((q, i) => {
+    const x = (i * cw + cw * .2).toFixed(1), w = (cw * .6).toFixed(1);
+    if (q.buy > 0) svg += `<rect class="b-up" x="${x}" y="${(zy - q.buy * sc).toFixed(1)}" width="${w}" height="${Math.max(1, q.buy * sc).toFixed(1)}"/>`;
+    if (q.sell > 0) svg += `<rect class="b-down" x="${x}" y="${zy.toFixed(1)}" width="${w}" height="${Math.max(1, q.sell * sc).toFixed(1)}"/>`;
+  });
+  svg += `<line class="zero" x1="0" x2="${W}" y1="${zy.toFixed(1)}" y2="${zy.toFixed(1)}" vector-effect="non-scaling-stroke"/>`;
+  if (cfg.line){
+    const lv = pts.map(q => q.line); let lo = Math.min(...lv), hi = Math.max(...lv);
+    if (lo === hi){ lo -= 1; hi += 1; }
+    const Y = v => T + 8 + (hi - v) / (hi - lo) * (ph - 16);
+    const xy = pts.map((q, i) => `${((i + .5) * cw).toFixed(1)},${Y(q.line).toFixed(1)}`);
+    svg += `<polyline class="l-net" points="${xy.join(' ')}" vector-effect="non-scaling-stroke"/>`;
+  }
+  pts.forEach((q, i) => { svg += `<rect class="hit" data-rv="${id}" data-i="${i}" x="${(i * cw).toFixed(1)}" y="0" width="${cw.toFixed(1)}" height="${H}"/>`; });
+  svg += '</svg>';
+  const monthly = cfg.monthly;
+  const step = n > 12 ? 4 : n > 6 ? 2 : 1;
+  const ticks = pts.map((q, i) => `<span>${(i % step === (n - 1) % step) ? (monthly ? fShortM.format(toDate(q.d)) : dm(q.d)) : ''}</span>`).join('');
+  const legend = `<div class="legend"><span><i style="background:var(--buy)"></i>${cfg.buy}</span><span><i style="background:var(--sell)"></i>${cfg.sell}</span>${cfg.line ? `<span><i style="background:var(--ink)"></i>${cfg.line}</span>` : ''}</div>`;
+  const cells = cfg.cells(p, si, pts).map(c => `<div class="cell"><h4>${c.label}</h4><div class="cv">${c.v}</div><div class="cs">${c.sub || ''}</div></div>`).join('');
+  const list = pts.map((q, i) => ({q, i})).reverse().map(({q, i}) => {
+    const cls = q.delta > 0 ? 'up' : q.delta < 0 ? 'down' : 'flat';
+    return `<button class="rep" data-act="sel" data-rv="${id}" data-i="${i}" aria-pressed="${i === si}">
+      <span>${fmtD(q.d, monthly)}</span><span class="${cls}">${cfg.sfmt(q.delta)}</span></button>`;
+  }).join('');
+  return `<div class="rv" id="rv-${id}">
+    <h3 class="rv-title">${title}</h3>${legend}
+    <div class="rv-plot">${svg}<div class="ticks">${ticks}</div><div class="tt" hidden></div></div>
+    <div class="rv-bottom">
+      <div><div class="rv-sel">التقرير المختار: <b>${fmtD(p.d, monthly)}</b></div><div class="cells">${cells}</div></div>
+      <div class="rv-list" aria-label="آخر ${n} تقريرًا">${list}</div>
+    </div></div>`;
+}
+
+function panelHTML(id, i){
+  const m = RVM[id]; if (!m) return '';
+  const q = m.pts[i], c = m.cfg;
+  const row = (k, v, cls) => `<div><span>${k}</span><b class="${cls}">${v}</b></div>`;
+  let h = `<div class="tt-d">${fmtD(q.d, c.monthly)}</div>`;
+  h += row(c.buy, c.fmt(q.buy), 'up');
+  h += row(c.sell, c.fmt(q.sell), 'down');
+  if (c.extra) h += c.extra(q);
+  h += row(c.pctLabel || 'نسبة التغير', q.pct == null ? '—' : sPCT(q.pct), 'ink');
+  h += row(c.deltaLabel || 'الدلتا', c.sfmt(q.delta), 'orange');
+  h += row('دلتا آخر 3 تقارير', q.d3 == null ? '—' : c.sfmt(q.d3), q.d3 >= 0 ? 'blue' : 'down');
+  return h;
+}
+
+function chgSub(v, fmt){
+  const cls = v > 0 ? 'up' : v < 0 ? 'down' : 'flat';
+  return `<span class="${cls}">${fmt(v)}</span> عن التقرير السابق`;
+}
+
+const kgCfg = (o) => Object.assign({fmt: KG, sfmt: sKG}, o);
+const ctCfg = (o) => Object.assign({fmt: CT, sfmt: sCT}, o);
+const lsCells = (spreadLabel) => (p) => [
+  {label:'عقود Long', v: CT(p.buy), sub: chgSub(p.dl, sCT)},
+  {label:'عقود Short', v: CT(p.sell), sub: chgSub(p.ds, sCT)},
+  spreadLabel === false
+    ? {label:'الصافي (Long − Short)', v: CT(p.line), sub: chgSub(p.delta, sCT)}
+    : {label:'عقود Spread', v: CT(p.sp), sub: chgSub(p.dsp, sCT)},
+];
+const lsExtra = q => `<div><span>تغير Long</span><b class="up">${sCT(q.dl)}</b></div><div><span>تغير Short</span><b class="down">${sCT(q.ds)}</b></div>`;
+
+/* ---------- bank & depository names ---------- */
+const BANK_RULES = [[/J\.?\s?P\.?\s?MORGAN/,'JPMorgan'],[/HSBC/,'HSBC'],[/GOLDMAN/,'Goldman Sachs'],[/BOFA|BANC OF AMERICA|BANK OF AMERICA|MERRILL/,'Bank of America'],
+ [/CITI/,'Citigroup'],[/MORGAN STANLEY/,'Morgan Stanley'],[/WELLS FARGO/,'Wells Fargo'],[/BARCLAYS/,'Barclays'],[/RBC|ROYAL BANK OF CANADA/,'RBC'],
+ [/SCOTIA/,'Scotiabank'],[/\bUBS\b/,'UBS'],[/BNP/,'BNP Paribas'],[/SOCIETE|SG AMERICAS/,'Société Générale'],[/DEUTSCHE/,'Deutsche Bank'],
+ [/MIZUHO/,'Mizuho'],[/NOMURA/,'Nomura'],[/MACQUARIE/,'Macquarie'],[/STONEX|FCSTONE/,'StoneX'],[/MAREX/,'Marex'],[/ABN AMRO/,'ABN AMRO'],
+ [/\bADM\b/,'ADM'],[/STANDARD CHARTERED/,'Standard Chartered'],[/ICBC/,'ICBC'],[/BANK OF CHINA|BOCI/,'Bank of China'],[/\bTD\b|TORONTO/,'TD'],
+ [/BMO|BANK OF MONTREAL/,'BMO'],[/BRINK/,"Brink's"],[/LOOMIS/,'Loomis'],[/MALCA/,'Malca-Amit'],[/MANFRA/,'Manfra, Tordella & Brookes'],
+ [/ASAHI/,'Asahi'],[/INTERNATIONAL DEPOSITORY|IDS/,'IDS of Delaware'],[/DELAWARE DEPOSITORY/,'Delaware Depository'],[/DORMAN/,'Dorman'],[/ADVANTAGE/,'Advantage Futures']];
+const GLOBAL_BANKS = new Set(['JPMorgan','HSBC','Goldman Sachs','Bank of America','Citigroup','Morgan Stanley','Wells Fargo','Barclays','RBC','Scotiabank','UBS','BNP Paribas','Société Générale','Deutsche Bank','Mizuho','Nomura','Macquarie','Standard Chartered','ICBC','Bank of China','TD','BMO','ABN AMRO']);
+function bankName(raw){
+  const u = String(raw).toUpperCase();
+  for (const [re, n] of BANK_RULES) if (re.test(u)) return n;
+  return String(raw).toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/* deliveries: per display bank per day -> {stp, iss, H:[i,s], C:[i,s]} (contracts) */
+function deliveriesByBank(){
+  const daily = (DATA.deliveries || {}).daily || {}, days = Object.keys(daily).sort(), banks = {};
+  days.forEach(d => {
+    Object.entries(daily[d] || {}).forEach(([raw, acc]) => {
+      const b = bankName(raw), rec = ((banks[b] = banks[b] || {})[d] = banks[b][d] || {iss:0, stp:0, H:[0,0], C:[0,0]});
+      Object.entries(acc).forEach(([org, [i, s]]) => { rec.iss += i; rec.stp += s; if (rec[org]){ rec[org][0] += i; rec[org][1] += s; } });
+    });
+  });
+  return {days, banks};
+}
+
 /* ---------- sections ---------- */
 const R = {};
+const noData = '<p class="empty">لا توجد بيانات بعد. شغّل سير العمل من تبويب Actions في GitHub ثم أعد تحميل الصفحة.</p>';
+const chips = (act, items, cur) => `<div class="chips">${items.map(([v, l]) =>
+  `<button class="chip-btn" data-act="${act}" data-v="${esc(v)}" aria-pressed="${v === cur}">${l}</button>`).join('')}</div>`;
 
 R.countries = () => {
   const id = 'countries', p = state.period[id];
@@ -345,27 +481,42 @@ R.countries = () => {
   let h = head('مشتريات الدول من الذهب',
     'الحيازات الرسمية لكل دولة كما ترفعها إلى صندوق النقد الدولي في نموذج IRFCL الشهري. الموجب شراء والسالب بيع.',
     ['شهري', 'تأخير نحو 50 يومًا', `${entries.length} دولة`], 'imf');
-  h += controls(id);
-  if (!entries.length) return h + `<p class="empty">لا توجد بيانات دول بعد. شغّل سير العمل من تبويب Actions في GitHub ثم أعد تحميل الصفحة.</p>`;
+  if (!entries.length) return h + noData;
 
+  const codes = entries.map(([c]) => c).sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'ar'));
+  if (!state.country || !DATA.countries[state.country]) state.country = DATA.countries.CHN ? 'CHN' : codes[0];
+  const cs = DATA.countries[state.country], cb = (DATA.central_banks || {}).series || [];
+  const pts = flowModel(cs);
+  h += `<div class="picker"><label for="country-pick">الدولة</label><select id="country-pick" data-act="country">${codes.map(c =>
+    `<option value="${c}" ${c === state.country ? 'selected' : ''}>${esc(nameOf(c))}</option>`).join('')}</select></div>`;
+  h += reportView('c-' + state.country, `${esc(nameOf(state.country))}: آخر ${WINDOW} شهرًا`, pts, kgCfg({
+    monthly:true, buy:'شراء', sell:'بيع', line:'الحيازة',
+    cells: q => {
+      const tot = cb.length ? (cb.filter(x => x[0] <= q.d).slice(-1)[0] || [0, 0])[1] : 0;
+      return [
+        {label:'الحيازة', v: TN(q.line), sub: KG(q.line)},
+        {label:'التغير عن الشهر السابق', v: `<span class="${q.delta > 0 ? 'up' : q.delta < 0 ? 'down' : 'flat'}">${sTN(q.delta)}</span>`, sub: `${sKG(q.delta)} ${sPCT(q.pct)}`},
+        {label:'الحصة من إجمالي الدول المُبلِّغة', v: tot ? bd(nf2.format(q.line / tot * 100) + '%') : '—', sub: tot ? `من ${TN(tot)}` : ''},
+      ];
+    }}));
+
+  h += controls(id, true);
   if (state.mode[id] === 'stock'){
-    const rows = entries.map(([code, s]) => ({code, l: last(s), c: change(s, PERIODS[p].days)}))
-      .sort((a, b) => b.l[1] - a.l[1]);
+    const rows = entries.map(([code, s]) => ({code, l: last(s), c: change(s, PERIODS[p].days)})).sort((a, b) => b.l[1] - a.l[1]);
     const total = rows.reduce((a, r) => a + r.l[1], 0);
     const shown = state.all ? rows : rows.slice(0, 25);
     h += `<div class="tablebox"><table><thead><tr><th class="rank">#</th><th>الدولة</th><th class="n">الحيازة</th><th class="n">بالكيلوغرام</th>
       <th class="n">الحصة</th><th class="n">التغير خلال ${PERIODS[p].label}</th><th>آخر قراءة</th></tr></thead><tbody>
       ${shown.map((r, i) => {
         const cls = !r.c ? 'na' : r.c.d > 0 ? 'up' : r.c.d < 0 ? 'down' : 'flat';
-        return `<tr><td class="rank">${i + 1}</td><td>${esc(nameOf(r.code))}</td><td class="n">${TN(r.l[1])}</td><td class="n">${KG(r.l[1])}</td>
+        return `<tr><td class="rank">${i + 1}</td><td><button class="linkish" data-act="country-go" data-v="${r.code}">${esc(nameOf(r.code))}</button></td><td class="n">${TN(r.l[1])}</td><td class="n">${KG(r.l[1])}</td>
           <td class="n">${bd(nf1.format(r.l[1] / total * 100) + '%')}</td>
           <td class="n ${cls}">${r.c ? `${sTN(r.c.d)} ${sPCT(r.c.pct)}` : 'غير متاح'}</td><td>${fMonth.format(toDate(r.l[0]))}</td></tr>`;
       }).join('')}</tbody></table></div>`;
     if (rows.length > 25) h += `<button class="more" data-act="all">${state.all ? 'عرض أكبر 25 دولة فقط' : `عرض كل الدول (${rows.length})`}</button>`;
-    h += `<p class="explain">الحصة محسوبة من مجموع الدول الظاهرة هنا فقط. دول لا ترفع النموذج الشهري، مثل كندا والإمارات وقطر والكويت وباكستان، لا تظهر في هذا المصدر.</p>`;
+    h += `<p class="explain">اضغط اسم أي دولة لعرض مخططها. دول لا ترفع النموذج الشهري، مثل كندا والإمارات وقطر والكويت وباكستان، لا تظهر في هذا المصدر.</p>`;
     return h;
   }
-
   const rows = countryChanges(p);
   const buyers = rows.filter(r => r.c.d > 0).sort((a, b) => b.c.d - a.c.d);
   const sellers = rows.filter(r => r.c.d < 0).sort((a, b) => a.c.d - b.c.d);
@@ -376,56 +527,167 @@ R.countries = () => {
     <div class="fig"><h3>باعت ${sellers.length} دولة</h3><div class="v ${sold ? 'down' : 'flat'}">${sTN(sold)}</div><div class="sub">${sKG(sold)}</div></div>
     <div class="fig"><h3>الصافي خلال ${PERIODS[p].label}</h3><div class="v ${net >= 0 ? 'up' : 'down'}">${sTN(net)}</div><div class="sub">${sKG(net)}</div></div>
   </div>
-  <p class="explain">تُقارَن آخر قراءة لكل دولة بقراءتها قبل ${PERIODS[p].since} تقريبًا، لأن الدول لا ترفع بياناتها في الشهر نفسه.</p>
   <div class="cols">${rankedList('المشترون', buyers, 'up', maxAbs, true)}${rankedList('البائعون', sellers, 'down', maxAbs, true)}</div>`;
   return h;
 };
 
+function grossByMonth(){
+  const g = {};
+  Object.values(DATA.countries || {}).forEach(s => {
+    for (let i = 1; i < s.length; i++){
+      const d = s[i][0], dv = s[i][1] - s[i - 1][1], e = (g[d] = g[d] || {buy:0, sell:0, nb:0, ns:0});
+      if (dv > 0){ e.buy += dv; e.nb++; } else if (dv < 0){ e.sell -= dv; e.ns++; }
+    }
+  });
+  return g;
+}
+
 R.cb = () => {
-  const id = 'cb', p = state.period[id], cb = DATA.central_banks || {};
-  const s = cb.series || [];
+  const id = 'cb', p = state.period[id], cb = DATA.central_banks || {}, s = cb.series || [];
   let h = head('البنوك المركزية: الإجمالي العالمي',
-    'مجموع حيازات البنوك المركزية التي ترفع بياناتها شهريًا إلى صندوق النقد الدولي، مع أكبر المشترين والبائعين.',
+    'مجموع حيازات البنوك المركزية التي ترفع بياناتها شهريًا إلى صندوق النقد الدولي، مع إجمالي ما اشتراه المشترون وما باعه البائعون كل شهر.',
     ['شهري', cb.as_of ? `حتى ${fMonth.format(toDate(cb.as_of))}` : '', cb.reporting ? `${cb.reporting} بنكًا مركزيًا أبلغ عن هذا الشهر` : ''], 'imf');
-  h += controls(id);
-  if (!s.length) return h + `<p class="empty">لا توجد بيانات بعد. شغّل سير العمل من تبويب Actions في GitHub ثم أعد تحميل الصفحة.</p>`;
+  if (!s.length) return h + noData;
+  h += reportView('cb', `آخر ${WINDOW} شهرًا`, flowModel(s, grossByMonth()), kgCfg({
+    monthly:true, buy:'إجمالي المشتريات', sell:'إجمالي المبيعات', line:'الحيازة الإجمالية', deltaLabel:'الصافي (الدلتا)',
+    extra: q => q.g ? `<div><span>عدد المشترين / البائعين</span><b>${bd(q.g.nb + ' / ' + q.g.ns)}</b></div>` : '',
+    cells: q => [
+      {label:'الحيازة الإجمالية', v: TN(q.line), sub: `${sKG(q.delta)} ${sPCT(q.pct)}`},
+      {label:`إجمالي المشتريات${q.g ? ` (${q.g.nb} دولة)` : ''}`, v: `<span class="up">${TN(q.buy)}</span>`, sub: KG(q.buy)},
+      {label:`إجمالي المبيعات${q.g ? ` (${q.g.ns} دولة)` : ''}`, v: `<span class="down">${TN(q.sell)}</span>`, sub: KG(q.sell)},
+    ]}));
+  h += controls(id, false);
   h += `<div class="figs">${figure('الحيازة الإجمالية المُبلَّغة', s, p, ['صافي شراء', 'صافي بيع'],
     `<div class="note">تشمل ${cb.in_total || '؟'} دولة متوفرة البيانات منذ بداية السجل.</div>`)}</div>`;
-  if (state.mode[id] === 'stock'){
-    h += lineChart('مسار الحيازة الإجمالية', [{s, label:'الإجمالي'}], 120);
-  } else {
-    h += deltaBars('صافي الشراء أو البيع في كل شهر (آخر 12 شهرًا)', s, 12);
-    const rows = countryChanges(p);
-    const buyers = rows.filter(r => r.c.d > 0).sort((a, b) => b.c.d - a.c.d).slice(0, 5);
-    const sellers = rows.filter(r => r.c.d < 0).sort((a, b) => a.c.d - b.c.d).slice(0, 5);
-    const maxAbs = Math.max(1, ...buyers.concat(sellers).map(r => Math.abs(r.c.d)));
-    h += `<div class="cols">${rankedList(`أكبر 5 مشترين خلال ${PERIODS[p].label}`, buyers, 'up', maxAbs, true)}${rankedList(`أكبر 5 بائعين خلال ${PERIODS[p].label}`, sellers, 'down', maxAbs, true)}</div>`;
-  }
+  const rows = countryChanges(p);
+  const buyers = rows.filter(r => r.c.d > 0).sort((a, b) => b.c.d - a.c.d).slice(0, 5);
+  const sellers = rows.filter(r => r.c.d < 0).sort((a, b) => a.c.d - b.c.d).slice(0, 5);
+  const maxAbs = Math.max(1, ...buyers.concat(sellers).map(r => Math.abs(r.c.d)));
+  h += `<div class="cols">${rankedList(`أكبر 5 مشترين خلال ${PERIODS[p].label}`, buyers, 'up', maxAbs, true)}${rankedList(`أكبر 5 بائعين خلال ${PERIODS[p].label}`, sellers, 'down', maxAbs, true)}</div>`;
   h += `<p class="explain">المشتريات غير المُعلنة لا تظهر في أي مصدر رسمي؛ يقدّرها World Gold Council في تقريره الربعي Gold Demand Trends.</p>`;
   return h;
 };
 
-R.banks = () => {
-  const id = 'banks', p = state.period[id], b = DATA.banks || {};
-  const swap = b.swap_net || [], prod = b.prod_net || [], L = b.latest;
-  let h = head('البنوك التجارية وصنّاع السوق',
-    'لا تُفصح البنوك التجارية عن حيازاتها مباشرة. أقرب مقياس رسمي هو تقرير CFTC COT: فئة Swap Dealers تمثّل البنوك الكبرى، وفئة Producer/Merchant تمثّل المنتجين والمصافي والتجار.',
-    ['أسبوعي', 'يصدر الجمعة عن بيانات الثلاثاء', L ? `آخر تقرير ${fDay.format(toDate(L.date))}` : ''], 'cot');
-  h += controls(id);
-  if (!swap.length) return h + `<p class="empty">لا توجد بيانات بعد. شغّل سير العمل من تبويب Actions في GitHub ثم أعد تحميل الصفحة.</p>`;
-  const words = ['ارتفاع صافي المركز', 'انخفاض صافي المركز'];
-  const gross = L ? `<div class="note">Long ${KG(L.swap_long)}، Short ${KG(L.swap_short)}</div>` : '';
-  const grossP = L ? `<div class="note">Long ${KG(L.prod_long)}، Short ${KG(L.prod_short)}</div>` : '';
-  h += `<div class="figs">${figure('Swap Dealers: صافي المركز', swap, p, words, gross)}${figure('Producer/Merchant: صافي المركز', prod, p, words, grossP)}</div>`;
-  h += `<p class="explain">صافي المركز = Long ناقص Short في عقود COMEX Gold، محوَّلًا إلى كغ (العقد 100 أونصة). القيمة السالبة تعني صافي مكشوف (Short)، وارتفاعها يعني تغطية المكشوف أو زيادة الشراء.</p>`;
-  if (state.mode[id] === 'stock'){
-    h += lineChart('صافي المراكز عبر الوقت', [{s:swap, label:'Swap Dealers'}, {s:prod, label:'Producer/Merchant'}], 104);
-  } else {
-    h += deltaBars('التغير الأسبوعي في صافي مركز Swap Dealers (آخر 12 أسبوعًا)', swap, 12);
-    h += deltaBars('التغير الأسبوعي في صافي مركز Producer/Merchant (آخر 12 أسبوعًا)', prod, 12);
-  }
+R.noncomm = () => {
+  const recs = DATA.noncomm || [];
+  let h = head('COT Non-Commercial: المضاربون الكبار',
+    'مراكز فئة Non-Commercial في تقرير CFTC Legacy لعقود COMEX Gold، وهي صناديق التحوط ومديرو الأموال والمضاربون الكبار. Long شراء، Short بيع، وSpread مراكز متقابلة.',
+    ['أسبوعي', 'يصدر الجمعة عن بيانات الثلاثاء', recs.length ? `آخر تقرير ${fDay.format(toDate(last(recs)[0]))}` : ''], 'cot_legacy');
+  if (!recs.length) return h + noData;
+  const L = last(recs), net = L[1] - L[2], oi = L[4];
+  h += `<div class="figs">
+    <div class="fig"><h3>صافي المركز (Long − Short)</h3><div class="v ${net >= 0 ? 'up' : 'down'}">${sCT(net)}</div><div class="sub">≈ ${sTN(net * KG_PER_CT)}</div></div>
+    <div class="fig"><h3>Long من إجمالي العقود المفتوحة</h3><div class="v">${oi ? bd(nf1.format(L[1] / oi * 100) + '%') : '—'}</div><div class="sub">Open Interest ${CT(oi)}</div></div>
+    <div class="fig"><h3>Short من إجمالي العقود المفتوحة</h3><div class="v">${oi ? bd(nf1.format(L[2] / oi * 100) + '%') : '—'}</div><div class="sub">العقد = 100 أونصة ≈ 3.11 كغ</div></div>
+  </div>`;
+  h += reportView('noncomm', `آخر ${WINDOW} تقريرًا أسبوعيًا`, lsModel(recs), ctCfg({
+    buy:'Long (شراء)', sell:'Short (بيع)', line:'صافي المركز', pctLabel:'نسبة تغير الصافي', deltaLabel:'دلتا الصافي',
+    extra: lsExtra, cells: lsCells()}));
+  h += `<p class="explain">الدلتا = تغير صافي المركز عن التقرير السابق. دلتا آخر 3 تقارير = مجموع التغير خلال آخر ثلاثة أسابيع: الأزرق تراكم شرائي، والأحمر تراكم بيعي. التقرير رقم 21 يخرج من المخطط تلقائيًا عند صدور تقرير جديد.</p>`;
   return h;
 };
+
+R.banks = () => {
+  const id = 'banks';
+  let h = head('البنوك التجارية',
+    'ثلاث نوافذ رسمية على نشاط البنوك في الذهب: مراكز Swap Dealers في تقرير COT، وتسليمات COMEX الفعلية لكل بنك بالاسم، وحيازات خزائن البنوك في COMEX.',
+    [], 'cot');
+  h += chips('bankview', [['cot', 'COT: Swap Dealers'], ['deliv', 'التسليمات حسب البنك'], ['vault', 'خزائن البنوك']], state.bankView);
+
+  if (state.bankView === 'cot'){
+    const dis = DATA.cot_disagg || {};
+    const recs = state.cotCat === 'prod' ? dis.prod : dis.swap;
+    if (!recs || !recs.length) return h + noData;
+    h += chips('cotcat', [['swap', 'Swap Dealers (البنوك الكبرى)'], ['prod', 'Producer/Merchant']], state.cotCat);
+    h += reportView('cot-' + state.cotCat, `آخر ${WINDOW} تقريرًا أسبوعيًا`, lsModel(recs), ctCfg({
+      buy:'Long (شراء)', sell:'Short (بيع)', line:'صافي المركز', pctLabel:'نسبة تغير الصافي', deltaLabel:'دلتا الصافي',
+      extra: lsExtra, cells: lsCells(state.cotCat === 'prod' ? false : undefined)}));
+    h += `<p class="explain">تقرير COT لا يسمّي البنوك؛ فئة Swap Dealers تجمع مراكز البنوك الكبرى وصنّاع السوق معًا. للأسماء الصريحة افتح «التسليمات حسب البنك».</p>`;
+    return h + sourceWarn('cot');
+  }
+
+  if (state.bankView === 'deliv'){
+    h += sourceWarn('deliveries');
+    const {days, banks} = deliveriesByBank();
+    if (!days.length) return h + '<p class="empty">يُبنى سجل التسليمات يوميًا من أول تشغيل؛ لا توجد أيام مسجلة بعد.</p>';
+    const totals = Object.entries(banks).map(([b, byDay]) => {
+      const t = Object.values(byDay).reduce((a, r) => ({iss: a.iss + r.iss, stp: a.stp + r.stp}), {iss:0, stp:0});
+      return {b, ...t, vol: t.iss + t.stp};
+    }).sort((a, b) => b.vol - a.vol);
+    if (!state.bank || !banks[state.bank]) state.bank = totals[0] ? totals[0].b : null;
+    h += `<div class="chips">${totals.slice(0, 14).map(t => `<button class="chip-btn" data-act="bank" data-v="${esc(t.b)}" aria-pressed="${t.b === state.bank}">${esc(t.b)}${GLOBAL_BANKS.has(t.b) ? ' ★' : ''}</button>`).join('')}</div>`;
+    const byDay = banks[state.bank] || {}, dayTot = {};
+    days.forEach(d => { dayTot[d] = Object.values(banks).reduce((a, x) => a + (x[d] ? x[d].iss + x[d].stp : 0), 0); });
+    const ser = days.map(d => { const r = byDay[d] || {iss:0, stp:0}; return {d, stp: r.stp * KG_PER_CT, iss: r.iss * KG_PER_CT, H: r.H, C: r.C}; }).slice(-(WINDOW + 3));
+    const pts = ser.map((r, i) => {
+      const net = r.stp - r.iss;
+      const d3 = i >= 2 ? ser.slice(i - 2, i + 1).reduce((a, x) => a + x.stp - x.iss, 0) : null;
+      return {d: r.d, buy: r.stp, sell: r.iss, delta: net, d3, line: null, H: r.H, C: r.C,
+        pct: dayTot[r.d] ? (r.stp + r.iss) / KG_PER_CT / dayTot[r.d] * 100 : null};
+    }).slice(-WINDOW);
+    h += reportView('dl-' + state.bank, `${esc(state.bank)}: آخر ${pts.length} يوم تسليم مسجَّل`, pts, kgCfg({
+      buy:'استلام Stopped (شراء فعلي)', sell:'تسليم Issued (بيع فعلي)', pctLabel:'حصته من حجم اليوم', deltaLabel:'الصافي (استلام − تسليم)',
+      empty:'يلزم يوم تسليم واحد على الأقل.',
+      extra: q => q.H && (q.H[0] + q.H[1] + q.C[0] + q.C[1]) ? `<div><span>House / Customer</span><b>${bd(nf0.format(q.H[1] - q.H[0]) + ' / ' + nf0.format(q.C[1] - q.C[0]))} عقد</b></div>` : '',
+      cells: q => [
+        {label:'استلم (Stopped)', v: `<span class="up">${KG(q.buy)}</span>`, sub: CT(q.buy / KG_PER_CT)},
+        {label:'سلّم (Issued)', v: `<span class="down">${KG(q.sell)}</span>`, sub: CT(q.sell / KG_PER_CT)},
+        {label:'الصافي', v: `<span class="${q.delta > 0 ? 'up' : q.delta < 0 ? 'down' : 'flat'}">${sKG(q.delta)}</span>`, sub: sCT(q.delta / KG_PER_CT)},
+      ]}));
+    const mtd = (DATA.deliveries || {}).mtd || {};
+    let rows = [];
+    if (mtd.firms){
+      const agg = {};
+      Object.entries(mtd.firms).forEach(([raw, acc]) => {
+        const b = bankName(raw), e = (agg[b] = agg[b] || {iss:0, stp:0, H:0, C:0});
+        Object.entries(acc).forEach(([org, [i, s]]) => { e.iss += i; e.stp += s; e[org] = (e[org] || 0) + s - i; });
+      });
+      rows = Object.entries(agg).map(([b, e]) => ({b, ...e}));
+    } else rows = totals.map(t => ({b: t.b, iss: t.iss, stp: t.stp}));
+    rows.sort((a, b) => (b.stp - b.iss) - (a.stp - a.iss));
+    h += `<h3 class="rv-title">${mtd.firms ? `ترتيب البنوك منذ بداية الشهر (حتى ${fDay.format(toDate(mtd.date))})` : 'ترتيب البنوك في الأيام المسجلة'}</h3>
+      <div class="tablebox"><table><thead><tr><th>البنك</th><th class="n">استلم (شراء)</th><th class="n">سلّم (بيع)</th><th class="n">الصافي</th><th class="n">House</th><th class="n">Customer</th></tr></thead><tbody>
+      ${rows.map(r => { const net = r.stp - r.iss, cls = net > 0 ? 'up' : net < 0 ? 'down' : 'flat';
+        return `<tr><td><button class="linkish" data-act="bank" data-v="${esc(r.b)}">${esc(r.b)}${GLOBAL_BANKS.has(r.b) ? ' ★' : ''}</button></td>
+        <td class="n up">${KG(r.stp * KG_PER_CT)}</td><td class="n down">${KG(r.iss * KG_PER_CT)}</td><td class="n ${cls}">${sKG(net * KG_PER_CT)}</td>
+        <td class="n">${r.H == null ? '—' : sCT(r.H)}</td><td class="n">${r.C == null ? '—' : sCT(r.C)}</td></tr>`; }).join('')}</tbody></table></div>`;
+    h += `<p class="explain">المصدر تقرير CME اليومي Issues and Stops، وهو الإفصاح الرسمي الوحيد الذي يسمّي البنوك بالاسم. Stopped = استلام ذهب فعلي مقابل العقود (شراء)، Issued = تسليم ذهب (بيع). House حساب البنك نفسه، وCustomer حسابات عملائه. ★ بنك عالمي. السجل اليومي يتراكم من أول تشغيل.</p>`;
+    return h;
+  }
+
+  h += sourceWarn('comex');
+  const deps = ((DATA.comex || {}).depositories) || {};
+  const list = Object.entries(deps).map(([raw, s]) => ({raw, name: bankName(raw), s, l: last(s)})).filter(x => x.l)
+    .sort((a, b) => (GLOBAL_BANKS.has(b.name) - GLOBAL_BANKS.has(a.name)) || (b.l[1] + b.l[2]) - (a.l[1] + a.l[2]));
+  if (!list.length) return h + '<p class="empty">تفصيل الخزائن يبدأ من أول تحديث بعد هذا الإصدار.</p>';
+  if (!state.vault || !deps[state.vault]) state.vault = list[0].raw;
+  h += `<div class="chips">${list.map(x => `<button class="chip-btn" data-act="vault" data-v="${esc(x.raw)}" aria-pressed="${x.raw === state.vault}">${esc(x.name)}${GLOBAL_BANKS.has(x.name) ? ' ★' : ''}</button>`).join('')}</div>`;
+  const vs = deps[state.vault], tot = vs.map(r => [r[0], r[1] + r[2]]), byD = Object.fromEntries(vs.map(r => [r[0], r]));
+  h += reportView('v-' + state.vault, `${esc(bankName(state.vault))}: آخر ${WINDOW} تقريرًا يوميًا`, flowModel(tot), kgCfg({
+    buy:'دخول ذهب', sell:'خروج ذهب', line:'إجمالي الخزنة',
+    cells: q => { const r = byD[q.d] || [q.d, 0, 0]; return [
+      {label:'Registered', v: TN(r[1]), sub: KG(r[1])},
+      {label:'Eligible', v: TN(r[2]), sub: KG(r[2])},
+      {label:'الإجمالي', v: TN(q.line), sub: `${sKG(q.delta)} ${sPCT(q.pct)}`},
+    ]; }}));
+  const all = list.reduce((a, x) => a + x.l[1] + x.l[2], 0);
+  h += `<div class="tablebox"><table><thead><tr><th>الخزنة</th><th class="n">Registered</th><th class="n">Eligible</th><th class="n">الإجمالي</th><th class="n">الحصة</th></tr></thead><tbody>
+    ${list.map(x => `<tr><td><button class="linkish" data-act="vault" data-v="${esc(x.raw)}">${esc(x.name)}${GLOBAL_BANKS.has(x.name) ? ' ★' : ''}</button></td><td class="n">${TN(x.l[1])}</td><td class="n">${TN(x.l[2])}</td><td class="n">${TN(x.l[1] + x.l[2])}</td><td class="n">${bd(nf1.format((x.l[1] + x.l[2]) / all * 100) + '%')}</td></tr>`).join('')}
+    </tbody></table></div>`;
+  h += `<p class="explain">الخزنة تحفظ ذهب البنك وعملائه معًا، فالدخول والخروج يعكسان حركة الذهب في خزنة البنك وليس بالضرورة مشترياته لحسابه الخاص.</p>`;
+  return h;
+};
+
+function comexGross(){
+  const deps = ((DATA.comex || {}).depositories) || {}, g = {};
+  Object.values(deps).forEach(s => {
+    for (let i = 1; i < s.length; i++){
+      const dv = (s[i][1] + s[i][2]) - (s[i - 1][1] + s[i - 1][2]), e = (g[s[i][0]] = g[s[i][0]] || {buy:0, sell:0});
+      if (dv > 0) e.buy += dv; else e.sell -= dv;
+    }
+  });
+  return Object.keys(g).length ? g : null;
+}
 
 R.comex = () => {
   const id = 'comex', p = state.period[id], c = DATA.comex || {};
@@ -433,14 +695,19 @@ R.comex = () => {
   let h = head('مخزون بورصة COMEX',
     'الذهب المخزّن في مستودعات COMEX المعتمدة. Registered جاهز للتسليم مقابل العقود، وEligible يستوفي المواصفات لكنه غير مسجَّل للتسليم.',
     ['يومي', tot.length ? `${tot.length} يومًا في السجل` : ''], 'comex');
-  h += controls(id);
-  if (!tot.length) return h + `<p class="empty">لا توجد بيانات بعد. شغّل سير العمل من تبويب Actions في GitHub ثم أعد تحميل الصفحة.</p>`;
+  if (!tot.length) return h + noData;
+  const byR = Object.fromEntries(reg), byE = Object.fromEntries(eli);
+  h += reportView('comex', `آخر ${WINDOW} تقريرًا يوميًا`, flowModel(tot, comexGross()), kgCfg({
+    buy:'دخول ذهب', sell:'خروج ذهب', line:'الإجمالي', deltaLabel:'الصافي (الدلتا)',
+    empty:'CME تنشر لقطة اليوم فقط، لذلك يُبنى المخطط يوميًا منذ أول تشغيل ويكتمل بعد 20 يوم تداول.',
+    cells: q => [
+      {label:'Registered', v: TN(byR[q.d] || 0), sub: KG(byR[q.d] || 0)},
+      {label:'Eligible', v: TN(byE[q.d] || 0), sub: KG(byE[q.d] || 0)},
+      {label:'الإجمالي', v: TN(q.line), sub: `${sKG(q.delta)} ${sPCT(q.pct)}`},
+    ]}));
+  h += controls(id, false);
   const words = ['دخول ذهب', 'خروج ذهب'];
   h += `<div class="figs">${figure('الإجمالي', tot, p, words)}${figure('Registered', reg, p, words)}${figure('Eligible', eli, p, words)}</div>`;
-  if (tot.length < 30) h += `<p class="explain">CME تنشر لقطة اليوم فقط، لذلك يُبنى السجل يوميًا منذ أول تشغيل. يظهر تغيّر الشهر بعد نحو 30 يومًا، والربع بعد 91 يومًا، والسنة بعد 365 يومًا.</p>`;
-  h += state.mode[id] === 'stock'
-    ? lineChart('المخزون عبر الوقت', [{s:tot, label:'الإجمالي'}, {s:reg, label:'Registered'}], 400)
-    : deltaBars('التغير اليومي في الإجمالي (آخر 20 يومًا)', tot, 20) + deltaBars('التغير اليومي في Registered (آخر 20 يومًا)', reg, 20);
   return h;
 };
 
@@ -449,12 +716,16 @@ R.etf = () => {
   let h = head('صناديق الذهب المتداولة',
     'الذهب الفعلي داخل صندوق SPDR Gold Shares (GLD)، أكبر صندوق ذهب في العالم. الدخول يعني شراء المستثمرين، والخروج يعني بيعهم.',
     ['يومي', gld.length ? `آخر قراءة ${fDay.format(toDate(last(gld)[0]))}` : ''], 'etf');
-  h += controls(id);
-  if (!gld.length) return h + `<p class="empty">لا توجد بيانات بعد. شغّل سير العمل من تبويب Actions في GitHub ثم أعد تحميل الصفحة.</p>`;
+  if (!gld.length) return h + noData;
+  h += reportView('etf', `آخر ${WINDOW} يوم تداول`, flowModel(gld), kgCfg({
+    buy:'تدفق داخل (شراء)', sell:'تدفق خارج (بيع)', line:'حيازة GLD',
+    cells: q => [
+      {label:'الحيازة', v: TN(q.line), sub: KG(q.line)},
+      {label:'التغير اليومي', v: `<span class="${q.delta > 0 ? 'up' : q.delta < 0 ? 'down' : 'flat'}">${sKG(q.delta)}</span>`, sub: sTN(q.delta)},
+      {label:'نسبة التغير', v: q.pct == null ? '—' : sPCT(q.pct), sub: q.d3 == null ? '' : `آخر 3 أيام: ${sKG(q.d3)}`},
+    ]}));
+  h += controls(id, false);
   h += `<div class="figs">${figure('الذهب داخل GLD', gld, p, ['تدفق داخل (شراء)', 'تدفق خارج (بيع)'])}</div>`;
-  h += state.mode[id] === 'stock'
-    ? lineChart('حيازة GLD عبر الوقت', [{s:gld, label:'GLD'}], 800)
-    : deltaBars('التدفق اليومي (آخر 20 يوم تداول)', gld, 20);
   return h;
 };
 
@@ -484,14 +755,55 @@ function render(){
 
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-act]');
-  if (!b || !DATA) return;
+  if (!b || !DATA || b.tagName === 'SELECT') return;
   const act = b.dataset.act, v = b.dataset.v;
   if (act === 'tab'){ state.tab = v; state.all = false; history.replaceState(null, '', '#' + v); }
   else if (act === 'mode') state.mode[state.tab] = v;
   else if (act === 'period') state.period[state.tab] = v;
   else if (act === 'all') state.all = !state.all;
+  else if (act === 'sel' || (b.classList.contains('hit'))) state.sel[b.dataset.rv] = +b.dataset.i;
+  else if (act === 'country-go'){ state.country = v; }
+  else if (act === 'bankview') state.bankView = v;
+  else if (act === 'cotcat') state.cotCat = v;
+  else if (act === 'bank'){ state.bank = v; state.bankView = 'deliv'; }
+  else if (act === 'vault') state.vault = v;
+  const y = window.scrollY;
   render();
   if (act === 'tab') document.getElementById('tabs').scrollIntoView({block:'nearest'});
+  else if (act === 'country-go'){ const el = document.getElementById('country-pick'); if (el) el.scrollIntoView({block:'center'}); }
+  else window.scrollTo(0, y);
+});
+
+document.addEventListener('click', e => {
+  const r = e.target.closest('rect.hit');
+  if (!r || !DATA) return;
+  state.sel[r.dataset.rv] = +r.dataset.i;
+  const y = window.scrollY; render(); window.scrollTo(0, y);
+  showTip(document.querySelector(`rect.hit[data-rv="${CSS.escape(r.dataset.rv)}"][data-i="${r.dataset.i}"]`));
+});
+
+document.addEventListener('change', e => {
+  if (e.target.dataset.act === 'country'){ state.country = e.target.value; const y = window.scrollY; render(); window.scrollTo(0, y); }
+});
+
+function showTip(r){
+  if (!r) return;
+  const plot = r.closest('.rv-plot'), tt = plot && plot.querySelector('.tt');
+  if (!tt) return;
+  tt.innerHTML = panelHTML(r.dataset.rv, +r.dataset.i);
+  tt.hidden = false;
+  const pb = plot.getBoundingClientRect(), rb = r.getBoundingClientRect();
+  const cx = rb.left + rb.width / 2 - pb.left, tw = tt.offsetWidth;
+  let left = cx + 12;
+  if (left + tw > pb.width) left = cx - tw - 12;
+  tt.style.left = Math.max(0, left) + 'px';
+  plot.querySelectorAll('rect.hover').forEach(x => x.classList.remove('hover'));
+  r.classList.add('hover');
+}
+document.addEventListener('mouseover', e => { const r = e.target.closest && e.target.closest('rect.hit'); if (r) showTip(r); });
+document.addEventListener('mouseout', e => {
+  const plot = e.target.closest && e.target.closest('.rv-plot');
+  if (plot && !plot.contains(e.relatedTarget)){ const tt = plot.querySelector('.tt'); if (tt) tt.hidden = true; }
 });
 
 (async () => {
