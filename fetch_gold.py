@@ -673,7 +673,7 @@ F13_BASE = "https://www.sec.gov/files/structureddata/data/form-13f-data-sets/"
 F13_START = dt.date(2024, 6, 1)
 def sec_ua():
     """SEC تشترط User-Agent فيه اسم وبريد للتواصل. يُقرأ البريد من GitHub Secret اسمه SEC_CONTACT إن وُجد."""
-    c = os.environ.get("SEC_CONTACT", "").strip()
+    c = " ".join(os.environ.get("SEC_CONTACT", "").replace('"', " ").replace("'", " ").split())   # سطر واحد دون فراغات زائدة
     return f"GoldFlowsDashboard {c}" if "@" in c else "GoldFlowsDashboard abduswaidan-glitch@users.noreply.github.com"
 
 
@@ -959,7 +959,8 @@ def fetch_f13():
     windows = f13_windows(dt.date.today())
     todo = [w for w in windows if w[2] not in hist["done"]]
     errors = []
-    log(f"13F user-agent: {sec_ua()}")
+    log(f"13F user-agent: {'contact from SEC_CONTACT secret' if '@' in os.environ.get('SEC_CONTACT', '') else sec_ua()} "
+        f"(one line, {len(sec_ua())} chars)")
     for s, e, name in todo:
         url = F13_BASE + name
         path = os.path.join(tempfile.gettempdir(), name)
