@@ -770,7 +770,7 @@ def yahoo_series(symbol):
             j = browser_get(base.format(symbol), headers={"Accept": "application/json"}).json()
             res = j["chart"]["result"][0]
             ts, cl = res["timestamp"], res["indicators"]["quote"][0]["close"]
-            return {dt.datetime.utcfromtimestamp(t).date().isoformat(): float(c) for t, c in zip(ts, cl) if c}
+            return {dt.datetime.fromtimestamp(t, dt.timezone.utc).date().isoformat(): float(c) for t, c in zip(ts, cl) if c}
         except Exception as e:
             errors.append(str(e)[:80])
     raise RuntimeError(f"Yahoo {symbol}: " + " | ".join(errors))
@@ -786,7 +786,7 @@ def sge_series():
         j = r.json()
         for key in ("wp", "zp"):
             for ts, v in j.get(key, []):
-                d = dt.datetime.utcfromtimestamp(ts / 1000 + 8 * 3600).date().isoformat()
+                d = dt.datetime.fromtimestamp(ts / 1000 + 8 * 3600, dt.timezone.utc).date().isoformat()
                 if v:
                     hist.setdefault(d, {})["pm" if key == "wp" else "am"] = float(v)
         log(f"SGE API ok: {len(hist)} days")
@@ -1211,6 +1211,192 @@ def fetch_f13():
     return {"f13": out}
 
 
+# ---------------------------------------------------------------- AI daily report (Claude API)
+AI_HIST = os.path.join("data", "ai_history.json")
+AI_MODEL = os.environ.get("AI_MODEL", "claude-sonnet-5-5")
+AI_URL = "https://api.anthropic.com/v1/messages"
+
+
+def _t(kg):
+    return round(kg / 1000, 2)
+
+
+def _cot_index(recs, weeks):
+    r = recs[-weeks:]
+    nets = [x[1] - x[2] for x in r]
+    lo, hi = min(nets), max(nets)
+    return round((nets[-1] - lo) / (hi - lo) * 100) if hi > lo else 50
+
+
+def _flow(series, n):
+    if len(series) <= n:
+        return None
+    return _t(series[-1][1] - series[-1 - n][1])
+
+
+def ai_digest(d):
+    """ملخص مضغوط لكل أقسام المنصة يُرسل إلى Claude (أرقام فقط، دون بيانات شخصية)."""
+    g = {}
+    cb = d.get("central_banks") or {}
+    s = cb.get("series") or []
+    if len(s) > 13:
+        g["central_banks"] = {"as_of": cb.get("as_of"), "total_t": _t(s[-1][1]), "change_1m_t": _t(s[-1][1] - s[-2][1]),
+                              "change_3m_t": _t(s[-1][1] - s[-4][1]), "change_12m_t": _t(s[-1][1] - s[-13][1])}
+    moves = []
+    for c, ser in (d.get("countries") or {}).items():
+        if len(ser) >= 2 and ser[-1][1] != ser[-2][1]:
+            moves.append({"country": c, "month": ser[-1][0][:7], "change_t": _t(ser[-1][1] - ser[-2][1]), "holdings_t": _t(ser[-1][1])})
+    moves.sort(key=lambda m: m["change_t"])
+    g["country_moves_latest_month"] = {"top_buyers": moves[::-1][:6], "top_sellers": moves[:6]}
+    cot = {}
+    dis = d.get("cot_disagg") or {}
+    for name, recs in (("managed_money", dis.get("mm")), ("swap_dealers", dis.get("swap")),
+                       ("producer_merchant", dis.get("prod")), ("non_commercial", d.get("noncomm"))):
+        if recs and len(recs) > 4:
+            net = [x[1] - x[2] for x in recs]
+            cot[name] = {"date": recs[-1][0], "long": recs[-1][1], "short": recs[-1][2], "net": net[-1],
+                         "net_change_1w": net[-1] - net[-2], "net_change_3w": net[-1] - net[-4],
+                         "cot_index_3y": _cot_index(recs, 156), "cot_index_6m": _cot_index(recs, 26)}
+    g["cot_contracts"] = cot
+    com = d.get("comex") or {}
+    tot = com.get("total") or []
+    if tot:
+        g["comex_vaults"] = {"date": tot[-1][0], "total_t": _t(tot[-1][1]),
+                             "registered_t": _t((com.get("registered") or [[0, 0]])[-1][1]),
+                             "eligible_t": _t((com.get("eligible") or [[0, 0]])[-1][1]),
+                             "change_1d_t": _flow(tot, 1), "change_5d_t": _flow(tot, 5), "change_20d_t": _flow(tot, 20)}
+    dl = (d.get("deliveries") or {})
+    days = sorted((dl.get("daily") or {}).keys())
+    if days:
+        last = dl["daily"][days[-1]]
+        g["comex_deliveries_last_day"] = {"date": days[-1], "firms": {f: {k: {"issued": v[0], "stopped": v[1]} for k, v in acc.items()} for f, acc in last.items()}}
+    if (dl.get("mtd") or {}).get("firms"):
+        agg = []
+        for f, acc in dl["mtd"]["firms"].items():
+            i = sum(v[0] for v in acc.values()); st = sum(v[1] for v in acc.values())
+            agg.append({"firm": f, "stopped": st, "issued": i, "net_contracts": st - i})
+        agg.sort(key=lambda x: -abs(x["net_contracts"]))
+        g["comex_deliveries_month_to_date"] = {"date": dl["mtd"].get("date"), "top": agg[:8]}
+    etf = {}
+    for k, ser in {**(d.get("etf2") or {}), **(d.get("etf") or {})}.items():
+        if ser:
+            etf[k] = {"date": ser[-1][0], "holdings_t": _t(ser[-1][1]), "flow_1d_t": _flow(ser, 1), "flow_5d_t": _flow(ser, 5), "flow_20d_t": _flow(ser, 20)}
+    g["gold_etfs"] = etf
+    ph = d.get("physical") or {}
+    for key, label in (("efp", "comex_minus_london_usd_oz"), ("sh", "shanghai_premium_usd_oz")):
+        rows = ph.get(key) or []
+        if rows:
+            vals = [r[1] for r in rows[-250:]]
+            g[label] = {"date": rows[-1][0], "value": rows[-1][1], "avg_5d": round(sum(r[1] for r in rows[-5:]) / min(5, len(rows)), 2),
+                        "percentile_1y": round(sum(1 for v in vals if v <= rows[-1][1]) / len(vals) * 100)}
+    f = d.get("f13") or {}
+    if f.get("periods"):
+        q = f["periods"][-1]
+        g["institutions_13f_latest_quarter"] = {
+            "quarter_end": q["p"], "institutions": q["holders"], "total_t": _t(q["total"]), "bought_t": _t(q["buy"]), "sold_t": _t(q["sell"]),
+            "counts": q["n"], "top_buyers": [{"name": m["n"], "change_t": _t(m["b"] - m["a"]), "status": m["s"]} for m in q["buyers"][:6]],
+            "top_sellers": [{"name": m["n"], "change_t": _t(m["b"] - m["a"]), "status": m["s"]} for m in q["sellers"][:6]]}
+    return g
+
+
+AI_SYSTEM = """You are the senior gold-market analyst of a public, free, educational dashboard called "Gold Flows".
+Write today's daily report from the platform data you are given, plus today's news found with web search.
+Rules:
+- Every number about flows, positions, holdings and spreads must come from the platform data. Never invent numbers.
+- Use web search (up to 4 searches) only for today's gold-relevant events: Federal Reserve and rates, US dollar and yields,
+  geopolitics, central-bank gold news, China and India demand, major ETF or bank news. Cite each event's source URL.
+- Connect the sections: say when they agree or contradict each other (e.g. speculators crowded long while ETFs see outflows).
+- Be factual and neutral. This is not investment advice: no buy/sell recommendations, no price targets.
+- Arabic must be correct Modern Standard Arabic (فصحى) with English technical terms kept in English (COT, EFP, ETF, Long, Short).
+- English must be clear, professional British/US English.
+Return ONLY one JSON object, no markdown fences, with exactly this shape:
+{"ar": {"headline": "...", "tone": "إيجابي|سلبي|محايد|متباين", "summary": ["...", "..."],
+        "sections": [{"title": "...", "body": "..."}], "events": [{"title": "...", "impact": "...", "source": "https://..."}],
+        "watch": ["..."], "risks": "..."},
+ "en": {same keys, "tone": "positive|negative|neutral|mixed"}}
+summary: 4 to 6 short points. sections: 4 to 6 (central banks and countries, banks and COT positioning, ETFs and institutions,
+physical market and vaults, and anything else notable). events: 2 to 5. watch: 2 to 4 things to watch next."""
+
+
+def _claude(payload, key):
+    r = requests.post(AI_URL, json=payload, timeout=300, headers={
+        "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+    if r.status_code >= 400:
+        raise RuntimeError(f"Claude API HTTP {r.status_code}: {r.text[:200]}")
+    return r.json()
+
+
+def ai_report(data, prev):
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    prev_ai = prev.get("ai") or {}
+    if not key:
+        log("AI report skipped: no ANTHROPIC_API_KEY secret")
+        return prev_ai or None
+    now = dt.datetime.now(dt.timezone.utc)
+    today = now.date().isoformat()
+    force = os.environ.get("AI_FORCE", "").strip().lower() in ("1", "true", "yes")
+    last = (prev_ai.get("latest") or {}).get("date")
+    if not force and last == today:
+        log("AI report: already written today")
+        return prev_ai
+    if not force and last and now.hour < 21:
+        log("AI report: waits for the evening run (after 21:00 UTC)")
+        return prev_ai
+    digest = json.dumps(ai_digest(data), ensure_ascii=False, separators=(",", ":"))
+    user = (f"Date (UTC): {today}.\nPlatform data (JSON; t = tonnes, contracts = COMEX GC 100-oz contracts):\n{digest}\n\n"
+            "Search for today's key gold-related events, then return the JSON report.")
+    messages = [{"role": "user", "content": user}]
+    sources, text, resp = [], "", None
+    for tools in ([{"type": "web_search_20260209", "name": "web_search", "max_uses": 4}],
+                  [{"type": "web_search_20250305", "name": "web_search", "max_uses": 4}], None):
+        try:
+            payload = {"model": AI_MODEL, "max_tokens": 9000, "system": AI_SYSTEM, "messages": list(messages)}
+            if tools:
+                payload["tools"] = tools
+            resp = _claude(payload, key)
+            for _ in range(3):                       # البحث الطويل قد يتوقف مؤقتًا (pause_turn) فنكمله
+                if resp.get("stop_reason") != "pause_turn":
+                    break
+                payload["messages"] = payload["messages"] + [{"role": "assistant", "content": resp["content"]}]
+                resp = _claude(payload, key)
+            break
+        except Exception as e:
+            log("AI request failed" + (" (with web search)" if tools else "") + ":", str(e)[:200])
+            resp = None
+    if not resp:
+        raise RuntimeError("Claude API: all attempts failed")
+    for b in resp.get("content", []):
+        if b.get("type") == "text":
+            text += b.get("text", "")
+        elif b.get("type") == "web_search_tool_result" and isinstance(b.get("content"), list):
+            for it in b["content"]:
+                u = it.get("url", "")
+                if u.startswith("https://") and u not in [x["url"] for x in sources]:
+                    sources.append({"url": u, "title": (it.get("title") or "")[:140]})
+    i, j = text.find("{"), text.rfind("}")
+    try:
+        rep = json.loads(text[i:j + 1])
+        if not (isinstance(rep.get("ar"), dict) and isinstance(rep.get("en"), dict)):
+            raise ValueError("missing ar/en")
+    except Exception as e:
+        raise RuntimeError(f"AI report: could not parse JSON ({e}); first chars: {text[:120]!r}")
+    u = resp.get("usage") or {}
+    cost = (u.get("input_tokens", 0) * 2 + u.get("output_tokens", 0) * 10) / 1e6 \
+        + ((u.get("server_tool_use") or {}).get("web_search_requests", 0)) * 0.01
+    latest = {"date": today, "generated_utc": now.replace(microsecond=0).isoformat(), "model": resp.get("model", AI_MODEL),
+              "ar": rep["ar"], "en": rep["en"], "sources": sources[:10],
+              "usage": {"input_tokens": u.get("input_tokens"), "output_tokens": u.get("output_tokens"),
+                        "searches": (u.get("server_tool_use") or {}).get("web_search_requests", 0), "est_cost_usd": round(cost, 4)}}
+    hist = load(AI_HIST, [])
+    hist = [h for h in hist if h.get("date") != today] + [latest]
+    hist = hist[-30:]
+    save(AI_HIST, hist)
+    log(f"AI report ok: {today}, model {latest['model']}, {u.get('input_tokens')} in / {u.get('output_tokens')} out tokens, "
+        f"{latest['usage']['searches']} searches, est. ${cost:.3f}")
+    return {"latest": latest, "history": [{"date": h["date"], "ar": h["ar"], "en": h["en"], "sources": h.get("sources", []),
+                                           "model": h.get("model"), "generated_utc": h.get("generated_utc")} for h in hist[-14:]]}
+
+
 # ---------------------------------------------------------------- main
 SECTIONS = {
     "imf": (fetch_imf, ("countries", "central_banks")),
@@ -1245,6 +1431,16 @@ def main():
     data["comex"] = load(COMEX_HIST, {"registered": [], "eligible": [], "total": []})
     dh = load(DELIV_HIST, {"daily": {}, "mtd": {}})
     data["deliveries"] = {"daily": {d: dh["daily"][d] for d in sorted(dh["daily"])[-120:]}, "mtd": dh.get("mtd", {})}
+    try:
+        ai = ai_report(data, prev)
+        if ai:
+            data["ai"] = ai
+        data["sources"]["ai"] = {"ok": True, "last_ok": now} if ai else {"ok": True, "off": True}
+    except Exception as e:
+        log("ai FAILED:", repr(e)[:300])
+        data["sources"]["ai"] = {"ok": False, "error": str(e)[:300], "last_ok": prev.get("sources", {}).get("ai", {}).get("last_ok")}
+        if prev.get("ai"):
+            data["ai"] = prev["ai"]
     save(OUT, data)
     ok = [n for n, s in data["sources"].items() if s["ok"]]
     log(f"done. ok: {ok}")
