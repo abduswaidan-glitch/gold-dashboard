@@ -38,6 +38,7 @@ F13_HIST = os.path.join("data", "f13_history.json")
 GLD_OZPS = os.path.join("data", "gld_ozps.json")
 ETF_HIST = os.path.join("data", "etf_history.json")
 SGE_HIST = os.path.join("data", "sge_history.json")
+GLD_LBMA = os.path.join("data", "gld_lbma_pm.json")
 
 IMF_URL = "https://api.imf.org/external/sdmx/2.1/data/IRFCL/.IRFCLDT1_IRFCL56V_FTO..M"
 COT_URLS = [
@@ -598,7 +599,8 @@ def parse_gld_rows(rows, save_ozps=True):
     else:
         ci, factor = next((i for i in ocols if "trust" in header[i]), ocols[0]), OZ_KG
     gi = next((i for i, h in enumerate(header) if "nav per gld in gold" in h or ("per" in h and "in gold" in h)), None)
-    out, ozps = {}, {}
+    ni = next((i for i, h in enumerate(header) if ("nav/share" in h or "nav per share" in h) and "gold" not in h), None)
+    out, ozps, lbma = {}, {}, {}
     for r in rows[hi + 1:]:
         if len(r) <= max(di, ci):
             continue
@@ -607,12 +609,17 @@ def parse_gld_rows(rows, save_ozps=True):
             g = num(r[gi])
             if g and 50 < g < 110 and d >= "2015-01-01":
                 ozps[d[:7]] = round(g / 1000, 6)        # آخر قيمة في كل شهر
+                nav = num(r[ni]) if ni is not None and len(r) > ni else None
+                if nav and d >= "2023-01-01":
+                    lbma[d] = round(nav / (g / 1000), 2)  # سعر LBMA PM الذي يُقيَّم به GLD
         if d and v and d >= START_DAY:
             out[d] = round(v * factor)
     if not out:
         raise RuntimeError(f"parsed 0 rows (columns: {header[:5]})")
     if ozps and save_ozps:
         save(GLD_OZPS, ozps)
+    if lbma and save_ozps:
+        save(GLD_LBMA, lbma)
     return sorted([d, v] for d, v in out.items())
 
 
@@ -805,8 +812,16 @@ def fetch_physical():
     try:
         pm = lbma_series(LBMA_PM)
         am = lbma_series(LBMA_AM)
+        out["london_src"] = "LBMA"
     except Exception as e:
-        raise RuntimeError(f"LBMA: {e}")
+        # LBMA تحجب خوادم GitHub (Cloudflare). البديل: سعر LBMA PM المستخرج من أرشيف GLD الرسمي،
+        # لأن الصندوق يُقيَّم يوميًا بهذا السعر بالضبط: السعر = NAV للسهم ÷ الذهب في السهم.
+        log("LBMA blocked, using LBMA PM derived from the GLD archive:", str(e)[:90])
+        pm = load(GLD_LBMA, {})
+        am = pm
+        out["london_src"] = "GLD"
+        if not pm:
+            raise RuntimeError(f"London price unavailable (LBMA: {str(e)[:120]}; GLD-derived: empty)")
     cut = (dt.date.today() - dt.timedelta(days=730)).isoformat()
     try:
         gc = yahoo_series("GC=F")
@@ -837,6 +852,7 @@ def fetch_physical():
     if not out.get("efp") and not out.get("sh"):
         raise RuntimeError(" | ".join(errors)[:280])
     out["errors"] = errors
+    log(f"Physical: London price source = {out['london_src']}")
     return {"physical": out}
 
 

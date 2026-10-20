@@ -1076,6 +1076,8 @@ ABOUT.physical = () => [
     'The COMEX gap is normally small and positive because of interest carry until expiry; a sharp widening means unusual demand to move metal to New York or pressure on sellers. A positive Shanghai premium means strong Chinese demand paying above London; a discount means weak local demand.')],
   [L('التحديث والحدود', 'Updates and limits'), L('يومي. الأسعار مأخوذة في أوقات مختلفة من اليوم، لذلك فيها ضجيج يومي بضعة دولارات: اقرأ الاتجاه والقراءات المتطرفة لا يومًا واحدًا. المصادر: LBMA وYahoo Finance (GC=F) وبورصة شنغهاي للذهب وFrankfurter (أسعار صرف البنك المركزي الأوروبي).',
     'Daily. Prices are taken at different times of day, so there is a few dollars of daily noise: read the trend and the extremes, not a single day. Sources: LBMA, Yahoo Finance (GC=F), the Shanghai Gold Exchange and Frankfurter (ECB exchange rates).')],
+  [L('سعر لندن عند تعذّر LBMA', 'London price when LBMA is unavailable'), L('موقع LBMA يحجب أحيانًا الطلبات الآلية. عندها نستخرج سعر LBMA PM من الأرشيف الرسمي لصندوق GLD، لأن الصندوق يُقيَّم يوميًا بهذا السعر بالضبط: السعر = قيمة السهم (NAV) ÷ كمية الذهب في السهم. وتظهر عبارة «عبر GLD» بجانب السعر حين نستعمل هذا البديل.',
+    'The LBMA site sometimes blocks automated requests. In that case we derive the LBMA PM price from GLD’s official archive, because the fund is valued every day at exactly that price: price = NAV per share ÷ gold per share. The label “via GLD” appears next to the price when this fallback is in use.')],
 ];
 R.physical = () => {
   const ph = DATA.physical || {};
@@ -1088,7 +1090,7 @@ R.physical = () => {
   h += chips('phys', avail, state.phys);
   const rows = ph[state.phys], isE = state.phys === 'efp', vals = rows.slice(-250).map(r => r[1]);
   const lr = last(rows), pr = pctRank(vals, lr[1]);
-  const aName = isE ? 'COMEX (GC)' : L('شنغهاي', 'Shanghai'), bName = isE ? 'LBMA PM' : 'LBMA AM';
+  const viaGld = ph.london_src === 'GLD', aName = isE ? 'COMEX (GC)' : L('شنغهاي', 'Shanghai'), bName = viaGld ? L('LBMA PM (عبر GLD)', 'LBMA PM (via GLD)') : (isE ? 'LBMA PM' : 'LBMA AM');
   let verdict;
   if (pr >= 90) verdict = isE ? L('الفرق في أعلى 10% من مستوياته خلال سنة: طلب غير عادي على الذهب في نيويورك أو ضغط على المراكز المكشوفة.', 'The gap is in the top 10% of its one-year range: unusual demand for metal in New York or pressure on short positions.')
     : L('العلاوة في أعلى 10% من مستوياتها خلال سنة: طلب صيني قوي على الذهب الفعلي.', 'The premium is in the top 10% of its one-year range: strong Chinese demand for physical gold.');
