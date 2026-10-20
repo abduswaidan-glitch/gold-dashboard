@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>تدفقات الذهب</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪙</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600&family=Reem+Kufi:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#E8EBE9; --surface:#F5F6F4; --ink:#18232B; --muted:#56646C; --rule:#C7CEC9;
+  --metal:#8E661C; --metal-hi:#D9B35E; --metal-lo:#9C7428; --ingot-ink:#2A1E07;
+  --buy:#1F7049; --sell:#A93A26; --alt:#3D6C8C;
+  --kufi:"Reem Kufi","IBM Plex Sans Arabic",system-ui,sans-serif;
+  --sans:"IBM Plex Sans Arabic","Segoe UI",Tahoma,system-ui,sans-serif;
+  color-scheme:light;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#131B21; --surface:#1B252C; --ink:#E4E7E3; --muted:#93A1A8; --rule:#2C3940;
+    --metal:#D8AB4F; --metal-hi:#E2BE6E; --metal-lo:#8A6421; --ingot-ink:#1E1505;
+    --buy:#4DB383; --sell:#E2735B; --alt:#7FB0D1; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#131B21; --surface:#1B252C; --ink:#E4E7E3; --muted:#93A1A8; --rule:#2C3940;
+  --metal:#D8AB4F; --metal-hi:#E2BE6E; --metal-lo:#8A6421; --ingot-ink:#1E1505;
+  --buy:#4DB383; --sell:#E2735B; --alt:#7FB0D1; color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;overflow-x:hidden;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.6;
+  font-variant-numeric:tabular-nums;-webkit-text-size-adjust:100%}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--metal);outline-offset:2px}
+.wrap{max-width:1040px;margin:0 auto;padding:0 18px}
+
+/* masthead: the stamped ingot */
+.masthead{padding:28px 0 18px}
+.ingot{position:relative;padding:22px 28px 20px;color:var(--ingot-ink);
+  background:linear-gradient(170deg,var(--metal-hi) 0%,#C99A3E 45%,var(--metal-lo) 100%);
+  clip-path:polygon(3% 0,97% 0,100% 100%,0 100%);}
+.ingot::after{content:"";position:absolute;inset:7px 3.5% 7px;border:1px solid rgba(42,30,7,.35);
+  clip-path:polygon(1.5% 0,98.5% 0,100% 100%,0 100%);pointer-events:none}
+.ingot h1{font-family:var(--kufi);font-weight:700;font-size:clamp(28px,6vw,44px);line-height:1.15;margin:0}
+.ingot .assay{display:flex;flex-wrap:wrap;gap:4px 22px;margin-top:8px;font-size:15px}
+.ingot .assay b{font-family:var(--kufi);font-size:clamp(22px,4.6vw,30px);font-weight:700;margin-inline-end:6px}
+.updated{margin:10px 2px 0;color:var(--muted);font-size:14px}
+
+/* tabs */
+.tabs{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);
+  border-bottom:1px solid var(--rule);display:flex;gap:2px;overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{flex:none;border:0;background:none;padding:12px 14px 10px;cursor:pointer;color:var(--muted);
+  border-bottom:3px solid transparent;font-weight:500;white-space:nowrap}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--metal)}
+
+/* section */
+main{padding:22px 0 40px}
+.sec-head h2{font-family:var(--kufi);font-weight:500;font-size:26px;margin:0 0 4px}
+.sec-head p{margin:0;color:var(--muted);max-width:68ch;font-size:15px}
+.meta{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 0}
+.chip{font-size:13px;padding:2px 10px;border:1px solid var(--rule);border-radius:99px;color:var(--muted)}
+.warn{overflow-wrap:anywhere;margin:14px 0 0;padding:10px 14px;border-inline-start:3px solid var(--sell);background:var(--surface);font-size:14px}
+
+.controls{display:flex;flex-wrap:wrap;gap:10px;margin:20px 0 18px}
+.seg{display:inline-flex;border:1px solid var(--rule);border-radius:8px;overflow:hidden;background:var(--surface)}
+.seg button{border:0;background:none;padding:8px 14px;cursor:pointer;font-size:15px}
+.seg button+button{border-inline-start:1px solid var(--rule)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+
+/* figures */
+.figs{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:1px;background:var(--rule);
+  border:1px solid var(--rule);margin-bottom:18px}
+.fig{background:var(--surface);padding:14px 16px}
+.fig h3{margin:0;font-size:14px;font-weight:500;color:var(--muted)}
+.fig .v{font-family:var(--kufi);font-size:30px;font-weight:700;line-height:1.25;margin-top:2px}
+.fig .sub{font-size:14px;color:var(--muted)}
+.fig .note{font-size:13px;color:var(--muted);margin-top:6px}
+.chg{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;margin-top:8px}
+.chg b{font-size:18px}
+.chg em{font-style:normal;font-size:13px;padding:0 8px;border-radius:4px}
+.up{color:var(--buy)} .down{color:var(--sell)} .flat,.na{color:var(--muted)}
+.up em{background:color-mix(in srgb,var(--buy) 14%,transparent)}
+.down em{background:color-mix(in srgb,var(--sell) 14%,transparent)}
+.since{display:block;font-size:13px;color:var(--muted)}
+
+/* charts */
+.chartbox{margin:0 0 18px;background:var(--surface);border:1px solid var(--rule);padding:12px 12px 6px}
+.chartbox h4{margin:0 0 6px;font-size:14px;font-weight:500;color:var(--muted)}
+.chart{display:block;width:100%;height:170px;direction:ltr}
+.chart .area{fill:var(--metal);opacity:.13}
+.chart .l-main{fill:none;stroke:var(--metal);stroke-width:2}
+.chart .l-alt{fill:none;stroke:var(--alt);stroke-width:2}
+.chart .zero{stroke:var(--muted);stroke-dasharray:3 4;stroke-width:1}
+.chart .b-up{fill:var(--buy)} .chart .b-down{fill:var(--sell)}
+.chartbox figcaption{display:flex;flex-direction:row-reverse;justify-content:space-between;gap:10px;font-size:12.5px;color:var(--muted);padding-top:4px}
+.legend{display:flex;gap:14px;font-size:13px;color:var(--muted);margin-bottom:4px}
+.legend i{display:inline-block;width:14px;height:3px;vertical-align:middle;margin-inline-end:5px}
+
+/* tables & ranked lists */
+.tablebox{overflow-x:auto;border:1px solid var(--rule);background:var(--surface);margin-bottom:12px}
+table{border-collapse:collapse;width:100%;min-width:620px;font-size:15px}
+th,td{padding:8px 12px;text-align:start;border-bottom:1px solid var(--rule);white-space:nowrap}
+th{font-weight:500;color:var(--muted);font-size:13.5px;position:sticky;top:0;background:var(--surface)}
+td.n,th.n{text-align:end}
+tr:last-child td{border-bottom:0}
+.rank{color:var(--muted);width:2.5em}
+.more{border:1px solid var(--rule);background:var(--surface);padding:8px 16px;border-radius:8px;cursor:pointer;margin:4px 0 18px}
+
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;margin-bottom:18px}
+.ranked h3{font-size:16px;margin:0 0 8px;font-weight:600}
+.row{display:grid;grid-template-columns:minmax(90px,8.5em) 1fr auto;gap:4px 10px;align-items:center;
+  padding:7px 0;border-bottom:1px solid var(--rule);font-size:14.5px}
+.row .track{height:10px;background:color-mix(in srgb,var(--muted) 12%,transparent)}
+.row .bar{height:100%}
+.row .bar.up{background:var(--buy)} .row .bar.down{background:var(--sell)}
+.row .val{text-align:end}
+.row .det{grid-column:1/-1;font-size:12.5px;color:var(--muted)}
+.empty{color:var(--muted);padding:12px 0;margin:0}
+.explain{color:var(--muted);font-size:14px;max-width:72ch;margin:0 0 10px}
+footer{border-top:1px solid var(--rule);color:var(--muted);font-size:13px;padding:18px 0 30px}
+footer a{color:inherit}
+@media (max-width:520px){
+  .fig .v{font-size:26px}
+  .ingot{padding:18px 20px 16px}
+}
+@media (prefers-reduced-motion:no-preference){
+  .ingot{animation:strike .6s ease-out both}
+  @keyframes strike{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+}
+</style>
+</head>
+<body>
+<header class="wrap masthead">
+  <div class="ingot">
+    <h1>تدفقات الذهب</h1>
+    <div class="assay" id="assay">جارٍ تحميل البيانات…</div>
+  </div>
+  <p class="updated" id="updated"></p>
+</header>
+
+<nav class="tabs wrap" role="tablist" aria-label="الأقسام" id="tabs"></nav>
+<main class="wrap" id="view" aria-live="polite"></main>
+
+<footer class="wrap">
+  المصادر: IMF IRFCL للحيازات الرسمية، CFTC COT لمراكز البنوك، CME لمخزون COMEX، SPDR لصندوق GLD.
+  تُحدَّث البيانات تلقائيًا عبر GitHub Actions، وكل قسم يعرض تاريخ آخر قراءة رسمية له.
+</footer>
+
+<script>
+'use strict';
+const PERIODS = {m:{days:30,label:'شهر',since:'شهر'}, q:{days:91,label:'ربع سنة',since:'ربع سنة'}, y:{days:365,label:'سنة',since:'سنة'}};
+const TABS = [
+  {id:'countries', label:'الدول'},
+  {id:'cb', label:'البنوك المركزية'},
+  {id:'banks', label:'البنوك التجارية'},
+  {id:'comex', label:'COMEX'},
+  {id:'etf', label:'صناديق ETF'},
+];
+const NAMES = {USA:'الولايات المتحدة',DEU:'ألمانيا',ITA:'إيطاليا',FRA:'فرنسا',RUS:'روسيا',CHN:'الصين',CHE:'سويسرا',JPN:'اليابان',
+IND:'الهند',NLD:'هولندا',TUR:'تركيا',PRT:'البرتغال',POL:'بولندا',UZB:'أوزبكستان',SAU:'السعودية',GBR:'المملكة المتحدة',KAZ:'كازاخستان',
+ESP:'إسبانيا',AUT:'النمسا',THA:'تايلاند',SGP:'سنغافورة',BEL:'بلجيكا',DZA:'الجزائر',PHL:'الفلبين',VEN:'فنزويلا',IRQ:'العراق',
+BRA:'البرازيل',EGY:'مصر',SWE:'السويد',ZAF:'جنوب أفريقيا',MEX:'المكسيك',LBY:'ليبيا',GRC:'اليونان',KOR:'كوريا الجنوبية',ROU:'رومانيا',
+HUN:'المجر',AUS:'أستراليا',KWT:'الكويت',IDN:'إندونيسيا',DNK:'الدنمارك',PAK:'باكستان',ARG:'الأرجنتين',BLR:'بيلاروسيا',FIN:'فنلندا',
+QAT:'قطر',BGR:'بلغاريا',JOR:'الأردن',MYS:'ماليزيا',CZE:'التشيك',SRB:'صربيا',PER:'بيرو',SVK:'سلوفاكيا',UKR:'أوكرانيا',ARE:'الإمارات',
+OMN:'عُمان',BHR:'البحرين',LBN:'لبنان',MAR:'المغرب',TUN:'تونس',SYR:'سوريا',CAN:'كندا',NOR:'النرويج',IRL:'أيرلندا',ISR:'إسرائيل',
+LUX:'لوكسمبورغ',IRN:'إيران',KGZ:'قيرغيزستان',TJK:'طاجيكستان',MNG:'منغوليا',GHA:'غانا',NGA:'نيجيريا',COL:'كولومبيا',CHL:'تشيلي',
+ECU:'الإكوادور',BOL:'بوليفيا',HRV:'كرواتيا',SVN:'سلوفينيا',LTU:'ليتوانيا',LVA:'لاتفيا',EST:'إستونيا',CYP:'قبرص',MLT:'مالطا',
+ISL:'آيسلندا',NZL:'نيوزيلندا',VNM:'فيتنام',BGD:'بنغلاديش',LKA:'سريلانكا',MMR:'ميانمار',KHM:'كمبوديا',AZE:'أذربيجان',ARM:'أرمينيا',
+GEO:'جورجيا',MKD:'مقدونيا الشمالية',ALB:'ألبانيا',BIH:'البوسنة والهرسك',MDA:'مولدوفا',URY:'الأوروغواي',PRY:'باراغواي',GTM:'غواتيمالا',
+DOM:'الدومينيكان',SLV:'السلفادور',HKG:'هونغ كونغ',MUS:'موريشيوس',KEN:'كينيا',SDN:'السودان',MOZ:'موزمبيق',CUW:'كوراساو',ABW:'أروبا',
+AGO:'أنغولا',CRI:'كوستاريكا',HND:'هندوراس',NIC:'نيكاراغوا',PAN:'بنما',JAM:'جامايكا',TTO:'ترينيداد وتوباغو',BRB:'باربادوس',
+SUR:'سورينام',GUY:'غيانا',HTI:'هايتي',MWI:'مالاوي',ZMB:'زامبيا',ZWE:'زيمبابوي',UGA:'أوغندا',TZA:'تنزانيا',RWA:'رواندا',
+MDG:'مدغشقر',BWA:'بوتسوانا',NAM:'ناميبيا',SEN:'السنغال',CIV:'ساحل العاج',CMR:'الكاميرون',MLI:'مالي',BFA:'بوركينا فاسو',
+MRT:'موريتانيا',YEM:'اليمن',AFG:'أفغانستان',NPL:'نيبال',LAO:'لاوس',PNG:'بابوا غينيا الجديدة',FJI:'فيجي',BRN:'بروناي',MAC:'ماكاو',
+CUB:'كوبا',PRK:'كوريا الشمالية',TWN:'تايوان',TKM:'تركمانستان',MNE:'الجبل الأسود',XKX:'كوسوفو',ETH:'إثيوبيا'};
+
+const state = {tab:'countries', mode:{}, period:{}, all:false};
+TABS.forEach(t => { state.mode[t.id] = 'stock'; state.period[t.id] = 'm'; });
+let DATA = null;
+
+/* ---------- formatting ---------- */
+const nf0 = new Intl.NumberFormat('en-US',{maximumFractionDigits:0});
+const nf1 = new Intl.NumberFormat('en-US',{minimumFractionDigits:1,maximumFractionDigits:1});
+const nf2 = new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fMonth = new Intl.DateTimeFormat('ar-u-nu-latn',{month:'long',year:'numeric',timeZone:'UTC'});
+const fDay = new Intl.DateTimeFormat('ar-u-nu-latn',{day:'numeric',month:'long',year:'numeric',timeZone:'UTC'});
+const fStamp = new Intl.DateTimeFormat('ar-u-nu-latn',{dateStyle:'medium',timeStyle:'short'});
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const toDate = s => new Date(s + 'T00:00:00Z');
+const sg = v => v > 0 ? '+' : v < 0 ? '−' : '';
+const bd = s => `<bdi dir="ltr">${s}</bdi>`;
+const KG = v => `${bd((v < 0 ? '−' : '') + nf0.format(Math.abs(v)))} كغ`;
+const TN = v => `${bd((v < 0 ? '−' : '') + nf1.format(Math.abs(v) / 1000))} طن`;
+const sKG = v => `${bd(sg(v) + nf0.format(Math.abs(v)))} كغ`;
+const sTN = v => `${bd(sg(v) + nf1.format(Math.abs(v) / 1000))} طن`;
+const sPCT = p => p == null || !isFinite(p) ? '' : bd(sg(p) + nf2.format(Math.abs(p)) + '%');
+const plainKG = v => `${sg(v)}${nf0.format(Math.abs(v))} kg`;
+const isMonthly = s => s.length > 1 && s.every(p => p[0].endsWith('-01'));
+const fmtD = (d, monthly) => monthly ? fMonth.format(toDate(d)) : fDay.format(toDate(d));
+const nameOf = c => NAMES[c] || c;
+
+/* ---------- math ---------- */
+function last(s){ return s && s.length ? s[s.length - 1] : null; }
+
+/* compare the latest reading with the reading closest to (latest − days) */
+function change(s, days){
+  if (!s || s.length < 2) return null;
+  const end = last(s), endT = toDate(end[0]).getTime();
+  const target = endT - days * 864e5;
+  let best = null, bestGap = Infinity;
+  for (let i = 0; i < s.length - 1; i++){
+    const gap = Math.abs(toDate(s[i][0]).getTime() - target);
+    if (gap < bestGap){ bestGap = gap; best = s[i]; }
+  }
+  if (!best || bestGap > days * 864e5 * 0.5) return null;
+  const d = end[1] - best[1];
+  return {from: best, to: end, d, pct: best[1] ? d / Math.abs(best[1]) * 100 : null};
+}
+
+/* ---------- small renderers ---------- */
+function sourceWarn(src){
+  const s = DATA.sources && DATA.sources[src];
+  if (!s || s.ok) return '';
+  const when = s.last_ok ? ` بتاريخ ${fDay.format(new Date(s.last_ok))}` : '';
+  return `<p class="warn">تعذّر جلب هذا المصدر في آخر تشغيل: <bdi dir="ltr">${esc((s.error || 'خطأ غير معروف').slice(0, 140))}</bdi>. المعروض هو آخر بيانات ناجحة${when}.</p>`;
+}
+
+function head(title, desc, chips, src){
+  return `<div class="sec-head"><h2>${title}</h2><p>${desc}</p>
+    <div class="meta">${chips.filter(Boolean).map(c => `<span class="chip">${c}</span>`).join('')}</div></div>${sourceWarn(src)}`;
+}
+
+function controls(id){
+  const m = state.mode[id], p = state.period[id];
+  return `<div class="controls">
+    <div class="seg" role="group" aria-label="طريقة العرض">
+      <button data-act="mode" data-v="stock" aria-pressed="${m === 'stock'}">المحتوى الإجمالي</button>
+      <button data-act="mode" data-v="chg" aria-pressed="${m === 'chg'}">التغير</button>
+    </div>
+    <div class="seg" role="group" aria-label="مدة المقارنة">
+      ${Object.entries(PERIODS).map(([k, v]) =>
+        `<button data-act="period" data-v="${k}" aria-pressed="${p === k}">${v.label}</button>`).join('')}
+    </div></div>`;
+}
+
+function chgLine(c, monthly, words){
+  if (!c) return `<div class="chg na">لا تتوفر بعد قراءة سابقة كافية لهذه المدة</div>`;
+  const cls = c.d > 0 ? 'up' : c.d < 0 ? 'down' : 'flat';
+  const w = c.d > 0 ? words[0] : c.d < 0 ? words[1] : 'دون تغيير';
+  return `<div class="chg ${cls}"><b>${sKG(c.d)}</b><span>${sTN(c.d)}</span><span>${sPCT(c.pct)}</span><em>${w}</em></div>
+    <span class="since">مقارنة بـ ${fmtD(c.from[0], monthly)}</span>`;
+}
+
+function figure(label, s, period, words, extra = ''){
+  const l = last(s);
+  if (!l) return `<div class="fig"><h3>${label}</h3><p class="empty">لا توجد بيانات بعد.</p></div>`;
+  const monthly = isMonthly(s);
+  return `<div class="fig"><h3>${label}</h3>
+    <div class="v">${TN(l[1])}</div><div class="sub">${KG(l[1])} حتى ${fmtD(l[0], monthly)}</div>
+    ${chgLine(change(s, PERIODS[period].days), monthly, words)}${extra}</div>`;
+}
+
+function lineChart(title, lines, maxPts){
+  lines = lines.filter(l => l.s && l.s.length).map(l => ({...l, s: l.s.slice(-maxPts)}));
+  const pts = lines.flatMap(l => l.s);
+  if (pts.length < 2) return `<div class="chartbox"><h4>${title}</h4><p class="empty">لا تكفي القراءات لرسم المنحنى بعد؛ يكتمل مع التحديثات اليومية.</p></div>`;
+  const W = 600, H = 170;
+  const xs = pts.map(p => toDate(p[0]).getTime()), ys = pts.map(p => p[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  let y0 = Math.min(...ys), y1 = Math.max(...ys);
+  if (y0 === y1){ y0 -= Math.abs(y0) * .01 + 1; y1 += Math.abs(y1) * .01 + 1; }
+  const pad = (y1 - y0) * .08; y0 -= pad; y1 += pad;
+  const X = t => x1 === x0 ? W / 2 : (t - x0) / (x1 - x0) * W;
+  const Y = v => H - (v - y0) / (y1 - y0) * H;
+  let svg = `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(title)}">`;
+  if (y0 < 0 && y1 > 0) svg += `<line class="zero" x1="0" x2="${W}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}" vector-effect="non-scaling-stroke"/>`;
+  lines.forEach((l, i) => {
+    const p = l.s.map(q => `${X(toDate(q[0]).getTime()).toFixed(1)},${Y(q[1]).toFixed(1)}`);
+    if (i === 0 && y0 >= 0){
+      const xa = X(toDate(l.s[0][0]).getTime()).toFixed(1), xb = X(toDate(last(l.s)[0]).getTime()).toFixed(1);
+      svg += `<polygon class="area" points="${xa},${H} ${p.join(' ')} ${xb},${H}"/>`;
+    }
+    svg += `<polyline class="${i ? 'l-alt' : 'l-main'}" points="${p.join(' ')}" vector-effect="non-scaling-stroke"/>`;
+  });
+  svg += '</svg>';
+  const monthly = isMonthly(lines[0].s);
+  const legend = lines.length > 1 ? `<div class="legend">${lines.map((l, i) =>
+    `<span><i style="background:var(${i ? '--alt' : '--metal'})"></i>${l.label}</span>`).join('')}</div>` : '';
+  const lo = Math.min(...ys), hi = Math.max(...ys);
+  return `<figure class="chartbox"><h4>${title}</h4>${legend}${svg}
+    <figcaption><span>${fmtD(lines[0].s[0][0], monthly)}</span><span>المدى: ${TN(lo)} إلى ${TN(hi)}</span><span>${fmtD(last(lines[0].s)[0], monthly)}</span></figcaption></figure>`;
+}
+
+function deltaBars(title, s, n){
+  if (!s || s.length < 2) return `<div class="chartbox"><h4>${title}</h4><p class="empty">يلزم قراءتان على الأقل لحساب التغير.</p></div>`;
+  const t = s.slice(-(n + 1)), d = [];
+  for (let i = 1; i < t.length; i++) d.push([t[i][0], t[i][1] - t[i - 1][1]]);
+  const m = Math.max(...d.map(x => Math.abs(x[1]))) || 1;
+  const W = 600, H = 130, mid = H / 2, bw = W / d.length;
+  const monthly = isMonthly(s);
+  let svg = `<svg class="chart" style="height:130px" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(title)}">`;
+  svg += `<line class="zero" x1="0" x2="${W}" y1="${mid}" y2="${mid}" vector-effect="non-scaling-stroke"/>`;
+  d.forEach(([date, v], i) => {
+    const h = Math.max(1, Math.abs(v) / m * (mid - 4));
+    const y = v >= 0 ? mid - h : mid;
+    svg += `<rect class="${v >= 0 ? 'b-up' : 'b-down'}" x="${(i * bw + bw * .18).toFixed(1)}" y="${y.toFixed(1)}" width="${(bw * .64).toFixed(1)}" height="${h.toFixed(1)}"><title>${fmtD(date, monthly)}: ${plainKG(v)}</title></rect>`;
+  });
+  svg += '</svg>';
+  const buys = d.filter(x => x[1] > 0).length, sells = d.filter(x => x[1] < 0).length;
+  return `<figure class="chartbox"><h4>${title}</h4>${svg}
+    <figcaption><span>${fmtD(d[0][0], monthly)}</span><span><span class="up">${buys} ارتفاع</span> و<span class="down">${sells} انخفاض</span></span><span>${fmtD(last(d)[0], monthly)}</span></figcaption></figure>`;
+}
+
+function rankedList(title, rows, cls, maxAbs, monthly){
+  if (!rows.length) return `<div class="ranked"><h3>${title}</h3><p class="empty">لا توجد دول في هذه الفئة خلال المدة.</p></div>`;
+  return `<div class="ranked"><h3>${title}</h3>${rows.map(r => `
+    <div class="row"><span>${esc(nameOf(r.code))}</span>
+      <span class="track"><span class="bar ${cls}" style="display:block;width:${Math.max(2, Math.abs(r.c.d) / maxAbs * 100).toFixed(1)}%"></span></span>
+      <span class="val ${cls}">${sTN(r.c.d)}</span>
+      <span class="det">${sKG(r.c.d)} ${sPCT(r.c.pct)}، من ${TN(r.c.from[1])} إلى ${TN(r.c.to[1])} (${fmtD(r.c.from[0], monthly)} ← ${fmtD(r.c.to[0], monthly)})</span>
+    </div>`).join('')}</div>`;
+}
+
+function countryChanges(period){
+  const days = PERIODS[period].days;
+  return Object.entries(DATA.countries || {})
+    .map(([code, s]) => ({code, s, c: change(s, days)}))
+    .filter(r => r.c && r.c.d !== 0);
+}
+
+/* ---------- sections ---------- */
+const R = {};
+
+R.countries = () => {
+  const id = 'countries', p = state.period[id];
+  const entries = Object.entries(DATA.countries || {});
+  let h = head('مشتريات الدول من الذهب',
+    'الحيازات الرسمية لكل دولة كما ترفعها إلى صندوق النقد الدولي في نموذج IRFCL الشهري. الموجب شراء والسالب بيع.',
+    ['شهري', 'تأخير نحو 50 يومًا', `${entries.length} دولة`], 'imf');
+  h += controls(id);
+  if (!entries.length) return h + `<p class="empty">لا توجد بيانات دول بعد. شغّل سير العمل من تبويب Actions في GitHub ثم أعد تحميل الصفحة.</p>`;
+
+  if (state.mode[id] === 'stock'){
+    const rows = entries.map(([code, s]) => ({code, l: last(s), c: change(s, PERIODS[p].days)}))
+      .sort((a, b) => b.l[1] - a.l[1]);
+    const total = rows.reduce((a, r) => a + r.l[1], 0);
+    const shown = state.all ? rows : rows.slice(0, 25);
+    h += `<div class="tablebox"><table><thead><tr><th class="rank">#</th><th>الدولة</th><th class="n">الحيازة</th><th class="n">بالكيلوغرام</th>
+      <th class="n">الحصة</th><th class="n">التغير خلال ${PERIODS[p].label}</th><th>آخر قراءة</th></tr></thead><tbody>
+      ${shown.map((r, i) => {
+        const cls = !r.c ? 'na' : r.c.d > 0 ? 'up' : r.c.d < 0 ? 'down' : 'flat';
+        return `<tr><td class="rank">${i + 1}</td><td>${esc(nameOf(r.code))}</td><td class="n">${TN(r.l[1])}</td><td class="n">${KG(r.l[1])}</td>
+          <td class="n">${bd(nf1.format(r.l[1] / total * 100) + '%')}</td>
+          <td class="n ${cls}">${r.c ? `${sTN(r.c.d)} ${sPCT(r.c.pct)}` : 'غير متاح'}</td><td>${fMonth.format(toDate(r.l[0]))}</td></tr>`;
+      }).join('')}</tbody></table></div>`;
+    if (rows.length > 25) h += `<button class="more" data-act="all">${state.all ? 'عرض أكبر 25 دولة فقط' : `عرض كل الدول (${rows.length})`}</button>`;
+    h += `<p class="explain">الحصة محسوبة من مجموع الدول الظاهرة هنا فقط. دول لا ترفع النموذج الشهري، مثل كندا والإمارات وقطر والكويت وباكستان، لا تظهر في هذا المصدر.</p>`;
+    return h;
+  }
+
+  const rows = countryChanges(p);
+  const buyers = rows.filter(r => r.c.d > 0).sort((a, b) => b.c.d - a.c.d);
+  const sellers = rows.filter(r => r.c.d < 0).sort((a, b) => a.c.d - b.c.d);
+  const bought = buyers.reduce((a, r) => a + r.c.d, 0), sold = sellers.reduce((a, r) => a + r.c.d, 0);
+  const net = bought + sold, maxAbs = Math.max(1, ...rows.map(r => Math.abs(r.c.d)));
+  h += `<div class="figs">
+    <div class="fig"><h3>اشترت ${buyers.length} دولة</h3><div class="v ${bought ? 'up' : 'flat'}">${sTN(bought)}</div><div class="sub">${sKG(bought)}</div></div>
+    <div class="fig"><h3>باعت ${sellers.length} دولة</h3><div class="v ${sold ? 'down' : 'flat'}">${sTN(sold)}</div><div class="sub">${sKG(sold)}</div></div>
+    <div class="fig"><h3>الصافي خلال ${PERIODS[p].label}</h3><div class="v ${net >= 0 ? 'up' : 'down'}">${sTN(net)}</div><div class="sub">${sKG(net)}</div></div>
+  </div>
+  <p class="explain">تُقارَن آخر قراءة لكل دولة بقراءتها قبل ${PERIODS[p].since} تقريبًا، لأن الدول لا ترفع بياناتها في الشهر نفسه.</p>
+  <div class="cols">${rankedList('المشترون', buyers, 'up', maxAbs, true)}${rankedList('البائعون', sellers, 'down', maxAbs, true)}</div>`;
+  return h;
+};
+
+R.cb = () => {
+  const id = 'cb', p = state.period[id], cb = DATA.central_banks || {};
+  const s = cb.series || [];
+  let h = head('البنوك المركزية: الإجمالي العالمي',
+    'مجموع حيازات البنوك المركزية التي ترفع بياناتها شهريًا إلى صندوق النقد الدولي، مع أكبر المشترين والبائعين.',
+    ['شهري', cb.as_of ? `حتى ${fMonth.format(toDate(cb.as_of))}` : '', cb.reporting ? `${cb.reporting} بنكًا مركزيًا أبلغ عن هذا الشهر` : ''], 'imf');
+  h += controls(id);
+  if (!s.length) return h + `<p class="empty">لا توجد بيانات بعد. شغّل سير العمل من تبويب Actions في GitHub ثم أعد تحميل الصفحة.</p>`;
+  h += `<div class="figs">${figure('الحيازة الإجمالية المُبلَّغة', s, p, ['صافي شراء', 'صافي بيع'],
+    `<div class="note">تشمل ${cb.in_total || '؟'} دولة متوفرة البيانات منذ بداية السجل.</div>`)}</div>`;
+  if (state.mode[id] === 'stock'){
+    h += lineChart('مسار الحيازة الإجمالية', [{s, label:'الإجمالي'}], 120);
+  } else {
+    h += deltaBars('صافي الشراء أو البيع في كل شهر (آخر 12 شهرًا)', s, 12);
+    const rows = countryChanges(p);
+    const buyers = rows.filter(r => r.c.d > 0).sort((a, b) => b.c.d - a.c.d).slice(0, 5);
+    const sellers = rows.filter(r => r.c.d < 0).sort((a, b) => a.c.d - b.c.d).slice(0, 5);
+    const maxAbs = Math.max(1, ...buyers.concat(sellers).map(r => Math.abs(r.c.d)));
+    h += `<div class="cols">${rankedList(`أكبر 5 مشترين خلال ${PERIODS[p].label}`, buyers, 'up', maxAbs, true)}${rankedList(`أكبر 5 بائعين خلال ${PERIODS[p].label}`, sellers, 'down', maxAbs, true)}</div>`;
+  }
+  h += `<p class="explain">المشتريات غير المُعلنة لا تظهر في أي مصدر رسمي؛ يقدّرها World Gold Council في تقريره الربعي Gold Demand Trends.</p>`;
+  return h;
+};
+
+R.banks = () => {
+  const id = 'banks', p = state.period[id], b = DATA.banks || {};
+  const swap = b.swap_net || [], prod = b.prod_net || [], L = b.latest;
+  let h = head('البنوك التجارية وصنّاع السوق',
+    'لا تُفصح البنوك التجارية عن حيازاتها مباشرة. أقرب مقياس رسمي هو تقرير CFTC COT: فئة Swap Dealers تمثّل البنوك الكبرى، وفئة Producer/Merchant تمثّل المنتجين والمصافي والتجار.',
+    ['أسبوعي', 'يصدر الجمعة عن بيانات الثلاثاء', L ? `آخر تقرير ${fDay.format(toDate(L.date))}` : ''], 'cot');
+  h += controls(id);
+  if (!swap.length) return h + `<p class="empty">لا توجد بيانات بعد. شغّل سير العمل من تبويب Actions في GitHub ثم أعد تحميل الصفحة.</p>`;
+  const words = ['ارتفاع صافي المركز', 'انخفاض صافي المركز'];
+  const gross = L ? `<div class="note">Long ${KG(L.swap_long)}، Short ${KG(L.swap_short)}</div>` : '';
+  const grossP = L ? `<div class="note">Long ${KG(L.prod_long)}، Short ${KG(L.prod_short)}</div>` : '';
+  h += `<div class="figs">${figure('Swap Dealers: صافي المركز', swap, p, words, gross)}${figure('Producer/Merchant: صافي المركز', prod, p, words, grossP)}</div>`;
+  h += `<p class="explain">صافي المركز = Long ناقص Short في عقود COMEX Gold، محوَّلًا إلى كغ (العقد 100 أونصة). القيمة السالبة تعني صافي مكشوف (Short)، وارتفاعها يعني تغطية المكشوف أو زيادة الشراء.</p>`;
+  if (state.mode[id] === 'stock'){
+    h += lineChart('صافي المراكز عبر الوقت', [{s:swap, label:'Swap Dealers'}, {s:prod, label:'Producer/Merchant'}], 104);
+  } else {
+    h += deltaBars('التغير الأسبوعي في صافي مركز Swap Dealers (آخر 12 أسبوعًا)', swap, 12);
+    h += deltaBars('التغير الأسبوعي في صافي مركز Producer/Merchant (آخر 12 أسبوعًا)', prod, 12);
+  }
+  return h;
+};
+
+R.comex = () => {
+  const id = 'comex', p = state.period[id], c = DATA.comex || {};
+  const reg = c.registered || [], eli = c.eligible || [], tot = c.total || [];
+  let h = head('مخزون بورصة COMEX',
+    'الذهب المخزّن في مستودعات COMEX المعتمدة. Registered جاهز للتسليم مقابل العقود، وEligible يستوفي المواصفات لكنه غير مسجَّل للتسليم.',
+    ['يومي', tot.length ? `${tot.length} يومًا في السجل` : ''], 'comex');
+  h += controls(id);
+  if (!tot.length) return h + `<p class="empty">لا توجد بيانات بعد. شغّل سير العمل من تبويب Actions في GitHub ثم أعد تحميل الصفحة.</p>`;
+  const words = ['دخول ذهب', 'خروج ذهب'];
+  h += `<div class="figs">${figure('الإجمالي', tot, p, words)}${figure('Registered', reg, p, words)}${figure('Eligible', eli, p, words)}</div>`;
+  if (tot.length < 30) h += `<p class="explain">CME تنشر لقطة اليوم فقط، لذلك يُبنى السجل يوميًا منذ أول تشغيل. يظهر تغيّر الشهر بعد نحو 30 يومًا، والربع بعد 91 يومًا، والسنة بعد 365 يومًا.</p>`;
+  h += state.mode[id] === 'stock'
+    ? lineChart('المخزون عبر الوقت', [{s:tot, label:'الإجمالي'}, {s:reg, label:'Registered'}], 400)
+    : deltaBars('التغير اليومي في الإجمالي (آخر 20 يومًا)', tot, 20) + deltaBars('التغير اليومي في Registered (آخر 20 يومًا)', reg, 20);
+  return h;
+};
+
+R.etf = () => {
+  const id = 'etf', p = state.period[id], gld = (DATA.etf || {}).GLD || [];
+  let h = head('صناديق الذهب المتداولة',
+    'الذهب الفعلي داخل صندوق SPDR Gold Shares (GLD)، أكبر صندوق ذهب في العالم. الدخول يعني شراء المستثمرين، والخروج يعني بيعهم.',
+    ['يومي', gld.length ? `آخر قراءة ${fDay.format(toDate(last(gld)[0]))}` : ''], 'etf');
+  h += controls(id);
+  if (!gld.length) return h + `<p class="empty">لا توجد بيانات بعد. شغّل سير العمل من تبويب Actions في GitHub ثم أعد تحميل الصفحة.</p>`;
+  h += `<div class="figs">${figure('الذهب داخل GLD', gld, p, ['تدفق داخل (شراء)', 'تدفق خارج (بيع)'])}</div>`;
+  h += state.mode[id] === 'stock'
+    ? lineChart('حيازة GLD عبر الوقت', [{s:gld, label:'GLD'}], 800)
+    : deltaBars('التدفق اليومي (آخر 20 يوم تداول)', gld, 20);
+  return h;
+};
+
+/* ---------- shell ---------- */
+function renderTabs(){
+  document.getElementById('tabs').innerHTML = TABS.map(t =>
+    `<button class="tab" role="tab" data-act="tab" data-v="${t.id}" aria-selected="${t.id === state.tab}">${t.label}</button>`).join('');
+}
+
+function renderMast(){
+  const cb = DATA.central_banks, l = cb && last(cb.series || []);
+  const gld = DATA.etf && last(DATA.etf.GLD || []);
+  const com = DATA.comex && last(DATA.comex.total || []);
+  const parts = [];
+  if (l) parts.push(`<span><b>${bd(nf0.format(l[1] / 1000))}</b>طن لدى البنوك المركزية المُبلِّغة</span>`);
+  if (com) parts.push(`<span><b>${bd(nf0.format(com[1] / 1000))}</b>طن في COMEX</span>`);
+  if (gld) parts.push(`<span><b>${bd(nf0.format(gld[1] / 1000))}</b>طن في GLD</span>`);
+  document.getElementById('assay').innerHTML = parts.join('') || 'لا توجد بيانات بعد';
+  document.getElementById('updated').textContent = DATA.generated_utc
+    ? `آخر تشغيل للتحديث التلقائي: ${fStamp.format(new Date(DATA.generated_utc))}` : '';
+}
+
+function render(){
+  renderTabs();
+  document.getElementById('view').innerHTML = R[state.tab]();
+}
+
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-act]');
+  if (!b || !DATA) return;
+  const act = b.dataset.act, v = b.dataset.v;
+  if (act === 'tab'){ state.tab = v; state.all = false; history.replaceState(null, '', '#' + v); }
+  else if (act === 'mode') state.mode[state.tab] = v;
+  else if (act === 'period') state.period[state.tab] = v;
+  else if (act === 'all') state.all = !state.all;
+  render();
+  if (act === 'tab') document.getElementById('tabs').scrollIntoView({block:'nearest'});
+});
+
+(async () => {
+  const fromHash = location.hash.slice(1);
+  if (TABS.some(t => t.id === fromHash)) state.tab = fromHash;
+  try {
+    const r = await fetch('data.json?t=' + Date.now(), {cache:'no-store'});
+    if (!r.ok) throw new Error(r.status);
+    DATA = await r.json();
+    renderMast();
+    render();
+  } catch (err){
+    document.getElementById('assay').textContent = 'لم يُعثر على البيانات';
+    document.getElementById('view').innerHTML = `<p class="warn">تعذّر قراءة الملف data.json (${esc(err.message)}). إذا كان هذا أول تشغيل، افتح تبويب Actions في GitHub، شغّل «تحديث بيانات الذهب»، وانتظر حتى ينتهي ثم أعد تحميل الصفحة.</p>`;
+  }
+})();
+</script>
+</body>
+</html>
