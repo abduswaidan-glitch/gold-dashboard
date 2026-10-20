@@ -669,7 +669,12 @@ def fetch_gld():
 
 
 # ---------------------------------------------------------------- SEC 13F (institutions)
-F13_BASE = "https://www.sec.gov/files/structureddata/data/form-13f-data-sets/"
+F13_BASES = [                                   # SEC غيّرت مسار الملفات الأحدث؛ نجرّب كل المسارات المعروفة
+    "https://www.sec.gov/files/structureddata/data/form-13f-data-sets/",
+    "https://www.sec.gov/files/datastandardsinnovation/data/form-13f-data-sets/",
+    "https://dcm.sec.gov/files/datastandardsinnovation/data/form-13f-data-sets/",
+    "https://dcm.sec.gov/files/structureddata/data/form-13f-data-sets/",
+]
 F13_START = dt.date(2024, 6, 1)
 def sec_ua():
     """SEC تشترط User-Agent فيه اسم وبريد للتواصل. يُقرأ البريد من GitHub Secret اسمه SEC_CONTACT إن وُجد."""
@@ -962,10 +967,14 @@ def fetch_f13():
     log(f"13F user-agent: {'contact from SEC_CONTACT secret' if '@' in os.environ.get('SEC_CONTACT', '') else sec_ua()} "
         f"(one line, {len(sec_ua())} chars)")
     for s, e, name in todo:
-        url = F13_BASE + name
         path = os.path.join(tempfile.gettempdir(), name)
         try:
-            code = sec_download(url, path)
+            code, where = 404, ""
+            for base in F13_BASES:
+                code = sec_download(base + name, path)
+                if code == 200:
+                    where = base.split("/")[2] + "/" + base.split("/")[4]
+                    break
             if code == 404:
                 log(f"13F {name}: not published yet")
                 continue
@@ -973,7 +982,7 @@ def fetch_f13():
             os.unlink(path)
             hist["done"].append(name)
             save(F13_HIST, hist)
-            log(f"13F {name}: {n} filings with gold ETF positions")
+            log(f"13F {name}: {n} filings with gold ETF positions ({where})")
         except Exception as ex:
             errors.append(f"{name}: {ex}")
             log("13F", name, "FAILED:", ex)
