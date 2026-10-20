@@ -298,6 +298,18 @@ footer b{color:var(--ink)}
   .kpi,.rv,.ai-report{animation:rise .35s ease-out both}
   @keyframes rise{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 }
+
+/* floating copy button (bottom-left corner in both languages) */
+.fab{position:fixed;left:18px;bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:30;display:inline-flex;align-items:center;gap:8px;
+  padding:10px 16px;border-radius:99px;border:1px solid var(--gold);background:var(--navy);color:var(--gold-hi);font-weight:600;font-size:13.5px;
+  cursor:pointer;box-shadow:0 6px 18px rgba(15,23,32,.25)}
+.fab:hover{background:var(--navy-2)}
+.toast{position:fixed;left:18px;bottom:calc(70px + env(safe-area-inset-bottom,0px));z-index:30;max-width:min(360px,calc(100vw - 36px));
+  background:var(--surface);color:var(--ink);border:1px solid var(--rule);border-top:3px solid var(--gold);border-radius:10px;
+  box-shadow:0 10px 30px rgba(15,23,32,.2);padding:10px 14px;font-size:13.5px}
+.toast a{color:var(--blue);font-weight:600;text-decoration:none;white-space:nowrap}
+footer{padding-bottom:84px}
+@media (max-width:720px){.fab span{display:none}.fab{padding:12px}}
 </style>
 </head>
 <body>
@@ -311,6 +323,8 @@ footer b{color:var(--ink)}
 <div class="tabs-bar"><nav class="tabs wrap" role="tablist" id="tabs"></nav></div>
 <main class="wrap" id="view" aria-live="polite"></main>
 <footer class="wrap" id="foot"></footer>
+<button class="fab" id="fab" type="button"></button>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 <script>
 'use strict';
 /* ================= language ================= */
@@ -1229,6 +1243,83 @@ R.ai = () => {
   return h;
 };
 
+/* ---------- floating "copy data for Claude" button ---------- */
+function digestText(){
+  const T = n => `${nf1.format(n / 1000)} ${L('طن', 't')}`, sT = n => `${sg(n)}${nf1.format(Math.abs(n) / 1000)} ${L('طن', 't')}`;
+  const sC = n => `${sg(n)}${nf0.format(Math.abs(n))}`, out = [];
+  const now = DATA.generated_utc ? fStamp.format(new Date(DATA.generated_utc)) : '';
+  out.push(L(
+    `أنت محلل محترف لسوق الذهب. فيما يلي بيانات منصة «تدفقات الذهب» (آخر تحديث: ${now}). اقرأها كاملة، ثم أجب عن أسئلتي بالاعتماد عليها، واذكر حين تكون المعلومة ناقصة. الوحدات: طن، والعقد = 100 أونصة.`,
+    `You are a professional gold-market analyst. Below is data from the "Gold Flows" platform (last update: ${now}). Read all of it, then answer my questions based on it, and say when information is missing. Units: tonnes; one contract = 100 oz.`), '');
+  const cb = (DATA.central_banks || {}).series || [];
+  if (cb.length > 13){ const a = last(cb)[1];
+    out.push(`## ${L('البنوك المركزية', 'Central banks')} (${fMonth.format(toDate(last(cb)[0]))})`,
+      `${L('الإجمالي', 'Total')}: ${T(a)} | ${L('شهر', '1m')}: ${sT(a - cb[cb.length - 2][1])} | ${L('3 أشهر', '3m')}: ${sT(a - cb[cb.length - 4][1])} | ${L('سنة', '12m')}: ${sT(a - cb[cb.length - 13][1])}`); }
+  const mv = Object.entries(DATA.countries || {}).filter(([, s]) => s.length > 1).map(([c, s]) => [c, last(s)[1] - s[s.length - 2][1], last(s)[0]]).filter(x => x[1]);
+  mv.sort((a, b) => b[1] - a[1]);
+  if (mv.length) out.push(`${L('أكبر المشترين (آخر شهر لكل دولة)', 'Top buyers (latest month per country)')}: ${mv.slice(0, 6).map(x => `${nameOf(x[0])} ${sT(x[1])}`).join('، ')}`,
+    `${L('أكبر البائعين', 'Top sellers')}: ${mv.slice(-6).reverse().filter(x => x[1] < 0).map(x => `${nameOf(x[0])} ${sT(x[1])}`).join('، ') || '-'}`, '');
+  const cats = SIG_CATS();
+  if (cats.length){ out.push(`## COT (${fDay.format(toDate(last(cats[0].recs)[0]))})`);
+    cats.forEach(c => { const r = c.recs, n = r.map(x => x[1] - x[2]), i = r.length - 1;
+      out.push(`${c.name}: Long ${nf0.format(r[i][1])}, Short ${nf0.format(r[i][2])}, ${L('الصافي', 'Net')} ${sC(n[i])} (${L('أسبوع', '1w')} ${sC(n[i] - n[i - 1])}, ${L('3 أسابيع', '3w')} ${sC(n[i] - n[i - 3])}) | COT Index 3y ${nf0.format(cotIndexAt(r, i, 156).idx)}, 6m ${nf0.format(cotIndexAt(r, i, 26).idx)}`); });
+    out.push(''); }
+  const com = DATA.comex || {}, tot = com.total || [];
+  if (tot.length){ const ch = n => tot.length > n ? sT(last(tot)[1] - tot[tot.length - 1 - n][1]) : '-';
+    out.push(`## COMEX (${fDay.format(toDate(last(tot)[0]))})`, `${L('الإجمالي', 'Total')} ${T(last(tot)[1])}, Registered ${T(last(com.registered || [[0, 0]])[1])}, Eligible ${T(last(com.eligible || [[0, 0]])[1])} | ${L('يوم', '1d')} ${ch(1)}, ${L('5 أيام', '5d')} ${ch(5)}, ${L('20 يومًا', '20d')} ${ch(20)}`); }
+  const {days, banks} = deliveriesByBank();
+  if (days.length){ const d = last(days), rows = Object.entries(banks).filter(([, x]) => x[d]).map(([b, x]) => `${b} (Stopped ${x[d].stp}, Issued ${x[d].iss})`);
+    out.push(`${L('تسليمات آخر يوم', 'Deliveries, last day')} ${fDay.format(toDate(d))}: ${rows.join('، ') || '-'}`); }
+  out.push('');
+  const funds = etfSeries();
+  if (Object.keys(funds).length){ out.push(`## ${L('صناديق الذهب', 'Gold ETFs')}`);
+    Object.entries(funds).forEach(([k, s]) => { const f = n => s.length > n ? sT(last(s)[1] - s[s.length - 1 - n][1]) : '-';
+      out.push(`${k}: ${T(last(s)[1])} (${fDay.format(toDate(last(s)[0]))}) | ${L('يوم', '1d')} ${f(1)}, ${L('5 أيام', '5d')} ${f(5)}, ${L('20 يومًا', '20d')} ${f(20)}`); });
+    out.push(''); }
+  const ph = DATA.physical || {};
+  [['efp', L('فرق COMEX عن لندن (EFP)', 'COMEX vs London (EFP)')], ['sh', L('علاوة شنغهاي', 'Shanghai premium')]].forEach(([k, n]) => {
+    const r = ph[k] || []; if (!r.length) return;
+    const v = r.slice(-250).map(x => x[1]), pr = pctRank(v, last(r)[1]);
+    out.push(`${n}: ${sg(last(r)[1])}$${nf2.format(Math.abs(last(r)[1]))}/oz (${fDay.format(toDate(last(r)[0]))}), ${L('الشريحة المئوية خلال سنة', '1y percentile')} ${nf0.format(pr)}`); });
+  const f = DATA.f13;
+  if (f && f.periods && f.periods.length){ const q = last(f.periods);
+    out.push('', `## 13F (${fDay.format(toDate(q.p))})`, `${L('المؤسسات', 'Institutions')}: ${q.holders}, ${L('الإجمالي', 'total')} ${T(q.total)}, ${L('اشترت', 'bought')} ${T(q.buy)}, ${L('باعت', 'sold')} ${T(q.sell)}`,
+      `${L('أكبر المشترين', 'Top buyers')}: ${q.buyers.slice(0, 5).map(m => `${f13Name(m.n)} ${sT(m.b - m.a)} [${stLabel(m.s)}]`).join('، ')}`,
+      `${L('أكبر البائعين', 'Top sellers')}: ${q.sellers.slice(0, 5).map(m => `${f13Name(m.n)} ${sT(m.b - m.a)} [${stLabel(m.s)}]`).join('، ')}`); }
+  const ai = DATA.ai && DATA.ai.latest, rep = ai && (ai[state.lang] || ai.ar);
+  if (rep){ out.push('', `## ${L('تقرير الذكاء الاصطناعي', 'AI report')} (${fDay.format(toDate(ai.date))})`, rep.headline || '', ...(rep.summary || []).map(s => `- ${s}`)); }
+  out.push('', L('ملاحظة: محتوى تعليمي، وليس نصيحة استثمارية.', 'Note: educational content, not investment advice.'));
+  const txt = out.join('\n');
+  return isAr() ? txt.replace(/, /g, '، ') : txt;
+}
+
+async function copyDigest(){
+  if (!DATA) return;
+  const text = digestText();
+  let ok = false;
+  try { await navigator.clipboard.writeText(text); ok = true; }
+  catch (e){
+    const ta = document.createElement('textarea'); ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+    ta.remove();
+  }
+  const t = document.getElementById('toast');
+  t.innerHTML = ok
+    ? `<b>${L('نُسخت البيانات ✓', 'Data copied ✓')}</b> ${L('الصقها في محادثة جديدة مع Claude واسأل ما تريد.', 'Paste it into a new Claude chat and ask anything.')} <a href="https://claude.ai/new" target="_blank" rel="noopener noreferrer">${L('افتح Claude', 'Open Claude')} ↗</a>`
+    : `<b>${L('تعذّر النسخ', 'Copy failed')}</b> ${L('اسمح للمتصفح بالوصول إلى الحافظة ثم أعد المحاولة.', 'Allow clipboard access in your browser and try again.')}`;
+  t.hidden = false;
+  clearTimeout(copyDigest.timer);
+  copyDigest.timer = setTimeout(() => { t.hidden = true; }, 9000);
+}
+
+function renderFab(){
+  const b = document.getElementById('fab');
+  b.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" fill="none" stroke="currentColor" stroke-width="2"/></svg><span>${L('انسخ البيانات لـ Claude', 'Copy data for Claude')}</span>`;
+  b.title = L('ينسخ ملخصًا منظّمًا لكل الأقسام لتلصقه في محادثة مع Claude', 'Copies a structured summary of every section to paste into a Claude chat');
+}
+document.addEventListener('click', e => { if (e.target.closest('#fab')) copyDigest(); });
+
 /* ================= shell ================= */
 const TABS = () => [
   ['ai', L('الملخص والتقرير', 'Summary & report')], ['countries', L('الدول', 'Countries')], ['cb', L('البنوك المركزية', 'Central banks')], ['banks', L('البنوك التجارية', 'Commercial banks')],
@@ -1295,6 +1386,7 @@ function applyLang(){
   try { regionNames = new Intl.DisplayNames([state.lang], {type:'region'}); } catch (e) { regionNames = null; }
   setFormatters();
   renderTop();
+  renderFab();
   renderMast();
   render();
 }
