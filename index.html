@@ -168,6 +168,30 @@ tr:last-child td{border-bottom:0}
   .cells{grid-template-columns:1fr}
   .tt{min-width:200px}
 }
+
+/* 13F dossier */
+.dossier{border:1px solid var(--metal-lo);background:var(--surface);margin:22px 0 22px}
+.dossier-head{display:flex;gap:16px;align-items:center;padding:16px 18px;color:var(--ingot-ink);
+  background:linear-gradient(170deg,var(--metal-hi) 0%,#C99A3E 55%,var(--metal-lo) 100%)}
+.dossier-head h2{font-family:var(--kufi);font-size:24px;font-weight:700;margin:0;line-height:1.25}
+.dossier-head p{margin:2px 0 0;font-size:15px}
+.stamp{font-family:var(--kufi);font-weight:700;font-size:26px;border:2px solid var(--ingot-ink);padding:4px 12px;line-height:1.1;flex:none;direction:ltr}
+.dossier-body{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:4px 28px;padding:8px 18px 14px}
+.dossier-body h3{font-size:16px;margin:12px 0 4px}
+.dossier-body p{margin:0 0 6px;font-size:14.5px;max-width:70ch}
+.legend-list{list-style:none;padding:0;margin:0 0 6px;font-size:14.5px}
+.legend-list li{margin:4px 0}
+.badge{display:inline-block;font-size:12px;font-weight:600;padding:1px 8px;border-radius:4px;vertical-align:middle;white-space:nowrap}
+.st-new{background:color-mix(in srgb,var(--blue) 16%,transparent);color:var(--blue)}
+.st-up{background:color-mix(in srgb,var(--buy) 16%,transparent);color:var(--buy)}
+.st-down{background:color-mix(in srgb,var(--sell) 14%,transparent);color:var(--sell)}
+.st-closed{background:var(--sell);color:#fff}
+.st-same{background:color-mix(in srgb,var(--muted) 16%,transparent);color:var(--muted)}
+.ranked.wide .row{grid-template-columns:minmax(150px,15em) 1fr auto}
+.brief{border-inline-start:4px solid var(--metal);background:var(--surface);padding:12px 16px;margin:0 0 16px}
+.brief h3{margin:0 0 6px;font-size:17px}
+.brief p{margin:0 0 6px;max-width:80ch;font-size:15px}
+.note-warn{color:var(--sell);font-size:13.5px}
 footer{border-top:1px solid var(--rule);color:var(--muted);font-size:13px;padding:18px 0 30px}
 footer a{color:inherit}
 @media (max-width:520px){
@@ -193,7 +217,7 @@ footer a{color:inherit}
 <main class="wrap" id="view" aria-live="polite"></main>
 
 <footer class="wrap">
-  المصادر: IMF IRFCL للحيازات الرسمية، CFTC COT (Legacy وDisaggregated)، CME لمخزون COMEX وتقرير Issues and Stops، SPDR لصندوق GLD.
+  المصادر: IMF IRFCL للحيازات الرسمية، CFTC COT (Legacy وDisaggregated)، CME لمخزون COMEX وتقرير Issues and Stops، SPDR لصندوق GLD، وSEC Form 13F لحيازات المؤسسات.
   تُحدَّث البيانات تلقائيًا عبر GitHub Actions، وكل قسم يعرض تاريخ آخر قراءة رسمية له.
 </footer>
 
@@ -205,6 +229,7 @@ const TABS = [
   {id:'cb', label:'البنوك المركزية'},
   {id:'banks', label:'البنوك التجارية'},
   {id:'noncomm', label:'COT Non-Commercial'},
+  {id:'f13', label:'المؤسسات (13F)'},
   {id:'comex', label:'COMEX'},
   {id:'etf', label:'صناديق ETF'},
 ];
@@ -227,7 +252,7 @@ MRT:'موريتانيا',YEM:'اليمن',AFG:'أفغانستان',NPL:'نيبا
 CUB:'كوبا',PRK:'كوريا الشمالية',TWN:'تايوان',TKM:'تركمانستان',MNE:'الجبل الأسود',XKX:'كوسوفو',ETH:'إثيوبيا'};
 
 const CONTRACT_KG = 100 * 0.0311034768;
-const state = {tab:'countries', mode:{}, period:{}, all:false, sel:{}, country:null, bankView:'cot', cotCat:'swap', bank:null, vault:null};
+const state = {tab:'countries', mode:{}, period:{}, all:false, sel:{}, country:null, bankView:'cot', cotCat:'swap', bank:null, vault:null, mgr:null};
 TABS.forEach(t => { state.mode[t.id] = 'stock'; state.period[t.id] = 'm'; });
 let DATA = null;
 
@@ -444,12 +469,12 @@ const lsExtra = q => `<div><span>تغير Long</span><b class="up">${sCT(q.dl)}<
 
 /* ---------- bank & depository names ---------- */
 const BANK_RULES = [[/J\.?\s?P\.?\s?MORGAN/,'JPMorgan'],[/HSBC/,'HSBC'],[/GOLDMAN/,'Goldman Sachs'],[/BOFA|BANC OF AMERICA|BANK OF AMERICA|MERRILL/,'Bank of America'],
- [/CITI/,'Citigroup'],[/MORGAN STANLEY/,'Morgan Stanley'],[/WELLS FARGO/,'Wells Fargo'],[/BARCLAYS/,'Barclays'],[/RBC|ROYAL BANK OF CANADA/,'RBC'],
+ [/CITIGROUP|CITIBANK|\bCITI\b/,'Citigroup'],[/MORGAN STANLEY/,'Morgan Stanley'],[/WELLS FARGO/,'Wells Fargo'],[/BARCLAYS/,'Barclays'],[/\bRBC\b|ROYAL BANK OF CANADA/,'RBC'],
  [/SCOTIA/,'Scotiabank'],[/\bUBS\b/,'UBS'],[/BNP/,'BNP Paribas'],[/SOCIETE|SG AMERICAS/,'Société Générale'],[/DEUTSCHE/,'Deutsche Bank'],
  [/MIZUHO/,'Mizuho'],[/NOMURA/,'Nomura'],[/MACQUARIE/,'Macquarie'],[/STONEX|FCSTONE/,'StoneX'],[/MAREX/,'Marex'],[/ABN AMRO/,'ABN AMRO'],
  [/\bADM\b/,'ADM'],[/STANDARD CHARTERED/,'Standard Chartered'],[/ICBC/,'ICBC'],[/BANK OF CHINA|BOCI/,'Bank of China'],[/\bTD\b|TORONTO/,'TD'],
  [/BMO|BANK OF MONTREAL/,'BMO'],[/BRINK/,"Brink's"],[/LOOMIS/,'Loomis'],[/MALCA/,'Malca-Amit'],[/MANFRA/,'Manfra, Tordella & Brookes'],
- [/ASAHI/,'Asahi'],[/INTERNATIONAL DEPOSITORY|IDS/,'IDS of Delaware'],[/DELAWARE DEPOSITORY/,'Delaware Depository'],[/DORMAN/,'Dorman'],[/ADVANTAGE/,'Advantage Futures']];
+ [/ASAHI/,'Asahi'],[/INTERNATIONAL DEPOSITORY|\bIDS\b/,'IDS of Delaware'],[/DELAWARE DEPOSITORY/,'Delaware Depository'],[/DORMAN/,'Dorman'],[/ADVANTAGE/,'Advantage Futures']];
 const GLOBAL_BANKS = new Set(['JPMorgan','HSBC','Goldman Sachs','Bank of America','Citigroup','Morgan Stanley','Wells Fargo','Barclays','RBC','Scotiabank','UBS','BNP Paribas','Société Générale','Deutsche Bank','Mizuho','Nomura','Macquarie','Standard Chartered','ICBC','Bank of China','TD','BMO','ABN AMRO']);
 function bankName(raw){
   const u = String(raw).toUpperCase();
@@ -729,6 +754,127 @@ R.etf = () => {
   return h;
 };
 
+/* ---------- 13F institutions ---------- */
+const F13_STATUS = {new:['مركز جديد','st-new'], first:['أول إفصاح','st-new'], up:['زيادة','st-up'], down:['تخفيض','st-down'], closed:['أغلق المركز','st-closed'], same:['دون تغيير','st-same']};
+const badge = s => s && F13_STATUS[s] ? `<span class="badge ${F13_STATUS[s][1]}">${F13_STATUS[s][0]}</span>` : '';
+const F13_FUNDS = ['GLD', 'IAU', 'IAUM', 'GLDM', 'SGOL', 'AAAU', 'BAR'];
+function f13Name(raw){
+  const u = String(raw).toUpperCase();
+  for (const [re, n] of BANK_RULES) if (GLOBAL_BANKS.has(n) && re.test(u)) return n;
+  return String(raw).toLowerCase().replace(/\b\w/g, c => c.toUpperCase()).replace(/\s+\/[a-z]{2,3}\/?$/i, '')
+    .replace(/\b(Llc|Lp|Llp|Plc|Ag|Sa|Nv|Ltd|Lllp|Na|Usa|Us|Uk)\b/g, w => w.toUpperCase()).replace(/[,.\s]+$/, '');
+}
+const nm = raw => `<bdi>${esc(f13Name(raw))}</bdi>`;
+const mgrBtn = (cik, name) => `<button class="linkish" data-act="mgr" data-v="${esc(cik)}">${nm(name)}</button>`;
+const moveTxt = m => `${nm(m.n)} (${sTN(m.b - m.a)}${m.s === 'new' || m.s === 'first' ? '، مركز جديد' : m.s === 'closed' ? '، أغلق مركزه بالكامل' : ''})`;
+
+function f13Intro(){
+  return `<div class="dossier">
+    <div class="dossier-head"><span class="stamp">13F</span>
+      <div><h2>المؤسسات الكبرى: إفصاحات 13F</h2><p>ما تملكه البنوك وصناديق التحوط ومديرو الأصول من صناديق الذهب، بالاسم وبالكمية.</p></div></div>
+    <div class="dossier-body">
+      <section><h3>ما هو تقرير 13F؟</h3>
+        <p>إفصاح إلزامي تقدّمه إلى هيئة الأوراق المالية الأمريكية (SEC) كل مؤسسة تدير أكثر من 100 مليون دولار من الأوراق المالية الأمريكية، مرة كل ربع سنة. يذكر كل مركز تملكه المؤسسة باسمه وعدد أسهمه، ويشمل البنوك مثل Goldman Sachs وJPMorgan وMorgan Stanley، وصناديق التحوط مثل Bridgewater وCitadel، ومديري الأصول مثل BlackRock وVanguard.</p></section>
+      <section><h3>ماذا يرصد هذا القسم؟</h3>
+        <p>حيازات المؤسسات في صناديق الذهب المدعومة بذهب فعلي: GLD وIAU وIAUM وGLDM وSGOL وAAAU وBAR. حوّلنا عدد الأسهم إلى أطنان ذهب بضربه في كمية الذهب التي يمثّلها السهم يوم نهاية الربع، فتظهر كل مؤسسة بكمية ذهب قابلة للمقارنة.</p></section>
+      <section><h3>حدود التقرير</h3>
+        <p>يصدر بعد نهاية الربع بمدة تصل إلى 45 يومًا. يرصد المراكز الطويلة فقط، ولا يشمل العقود الآجلة ولا مشتقات OTC ولا المراكز المكشوفة (Short) ولا الذهب الفعلي في الخزائن، واستبعدنا منه عقود الخيارات Put وCall. وحيازة البنك تشمل ما يديره لعملائه، لا ما يملكه لحسابه فقط.</p></section>
+      <section><h3>كيف تقرأ هذا القسم؟</h3>
+        <ul class="legend-list">
+          <li>${badge('new')} لم تكن تملك شيئًا في الربع السابق ثم فتحت مركزًا.</li>
+          <li>${badge('up')} زادت حيازتها، ${badge('down')} خفّضتها.</li>
+          <li>${badge('closed')} باعت كل ما تملك وخرجت تمامًا.</li>
+          <li>${badge('first')} أول إفصاح 13F لها في السجل، فلا توجد مقارنة.</li>
+        </ul>
+        <p>تنشر SEC الملفات كل ثلاثة أشهر، فيضيف الـ Dashboard كل ربع جديد تلقائيًا ويحتفظ بكل الأرباع السابقة.</p></section>
+    </div></div>`;
+}
+
+function f13Brief(P, first){
+  const nb = P.n.new + P.n.first + P.n.up, ns = P.n.down + P.n.closed, net = P.buy - P.sell;
+  let h = `<div class="brief"><h3>قراءة التقرير: الربع المنتهي في ${fDay.format(toDate(P.p))}</h3>
+    <p>أفصحت ${bd(nf0.format(P.holders))} مؤسسة عن حيازة ${TN(P.total)} من الذهب عبر صناديق الذهب المتداولة.`;
+  if (first) h += ' هذا أول ربع في السجل، فلا توجد مقارنة بربع سابق.</p>';
+  else h += ` ${net >= 0 ? 'زادت المؤسسات حيازتها بصافي' : 'خفّضت المؤسسات حيازتها بصافي'} ${sTN(net)}: اشترت ${bd(nf0.format(nb))} مؤسسة ما مجموعه ${TN(P.buy)}، وباعت ${bd(nf0.format(ns))} مؤسسة ما مجموعه ${TN(P.sell)}.</p>`;
+  if (P.buyers.length) h += `<p><b class="up">أكبر المشترين:</b> ${P.buyers.slice(0, 5).map(moveTxt).join('، ')}.</p>`;
+  if (P.sellers.length) h += `<p><b class="down">أكبر البائعين:</b> ${P.sellers.slice(0, 5).map(moveTxt).join('، ')}.</p>`;
+  if (!first && P.n.new + P.n.first) h += `<p>فتحت ${bd(nf0.format(P.n.new + P.n.first))} مؤسسة مراكز جديدة${P.opened.length ? `، أبرزها ${P.opened.slice(0, 3).map(m => `${nm(m.n)} (${TN(m.b)})`).join('، ')}` : ''}.</p>`;
+  if (!first && P.n.closed) h += `<p>أغلقت ${bd(nf0.format(P.n.closed))} مؤسسة مراكزها بالكامل${P.closed.length ? `، أبرزها ${P.closed.slice(0, 3).map(m => `${nm(m.n)} (كانت تملك ${TN(m.a)})`).join('، ')}` : ''}.</p>`;
+  if (!P.complete) h += `<p class="note-warn">مهلة الإفصاح عن هذا الربع لم تكتمل في الملفات المنشورة بعد، فقد تتغير الأرقام عند إضافة الإيداعات المتأخرة.</p>`;
+  return h + '</div>';
+}
+
+function f13List(title, rows, cls){
+  if (!rows.length) return `<div class="ranked wide"><h3>${title}</h3><p class="empty">لا توجد مؤسسات في هذه الفئة.</p></div>`;
+  const maxAbs = Math.max(1, ...rows.map(m => Math.abs(m.b - m.a)));
+  return `<div class="ranked wide"><h3>${title}</h3>${rows.map(m => {
+    const d = m.b - m.a, pct = m.a ? d / m.a * 100 : null;
+    return `<div class="row"><span>${mgrBtn(m.c, m.n)}</span>
+      <span class="track"><span class="bar ${cls}" style="display:block;width:${Math.max(2, Math.abs(d) / maxAbs * 100).toFixed(1)}%"></span></span>
+      <span class="val ${cls}">${sTN(d)}</span>
+      <span class="det">${badge(m.s)} ${sKG(d)}${pct == null ? '' : ' ' + sPCT(pct)}، من ${TN(m.a)} إلى ${TN(m.b)}</span></div>`;
+  }).join('')}</div>`;
+}
+
+R.f13 = () => {
+  const f = DATA.f13;
+  let h = f13Intro() + sourceWarn('f13');
+  if (!f || !f.periods || !f.periods.length) return h + '<p class="empty">يُنزَّل أرشيف SEC في أول تشغيل بعد هذا التحديث، وقد يستغرق التشغيل عدة دقائق. أعد تحميل الصفحة بعد انتهائه.</p>';
+  const P = f.periods;
+  const pts = P.map((q, i) => ({d: q.p, line: q.total, buy: q.buy, sell: q.sell, P: q, idx: i,
+    delta: i ? q.total - P[i - 1].total : 0, pct: i && P[i - 1].total ? (q.total - P[i - 1].total) / P[i - 1].total * 100 : null,
+    d3: i >= 3 ? q.total - P[i - 3].total : null})).slice(-WINDOW);
+  const si = rvSel('f13', pts), Q = pts[si].P, first = pts[si].idx === 0;
+  h += reportView('f13', 'حيازة المؤسسات عبر الأرباع (اختر الربع من القائمة)', pts, kgCfg({
+    monthly:true, buy:'مشتريات المؤسسات', sell:'مبيعات المؤسسات', line:'إجمالي الحيازة',
+    extra: q => `<div><span>عدد المؤسسات</span><b>${bd(nf0.format(q.P.holders))}</b></div>`,
+    cells: q => [
+      {label:'إجمالي حيازة المؤسسات', v: TN(q.line), sub: `${bd(nf0.format(q.P.holders))} مؤسسة`},
+      {label:'اشترت', v: `<span class="up">${TN(q.buy)}</span>`, sub: `${bd(nf0.format(q.P.n.new + q.P.n.first + q.P.n.up))} مؤسسة، منها ${bd(nf0.format(q.P.n.new + q.P.n.first))} مركزًا جديدًا`},
+      {label:'باعت', v: `<span class="down">${TN(q.sell)}</span>`, sub: `${bd(nf0.format(q.P.n.down + q.P.n.closed))} مؤسسة، منها ${bd(nf0.format(q.P.n.closed))} أغلقت مركزها`},
+    ]}));
+  h += f13Brief(Q, first);
+  const funds = F13_FUNDS.filter(k => Q.funds[k]).map(k => `<span class="chip">${k}: ${TN(Q.funds[k])}</span>`).join('');
+  if (funds) h += `<div class="meta" style="margin-bottom:16px">${funds}</div>`;
+  if (!first) h += `<div class="cols">${f13List('أكبر 15 مشتريًا', Q.buyers, 'up')}${f13List('أكبر 15 بائعًا', Q.sellers, 'down')}</div>`;
+
+  // known banks & institutions
+  const M = f.managers || {}, pi = P.findIndex(x => x.p === Q.p);
+  const majors = Object.entries(M).filter(([, m]) => m.m).map(([cik, m]) => {
+    const s = m.s[pi] || [], prev = pi ? (m.s.slice(0, pi).reverse().find(x => x[1] != null) || [])[1] : null;
+    return {cik, m, v: s[1], st: s[2], h: s[3] || {}, prev};
+  }).filter(x => x.v != null && (x.v > 0 || x.st === 'closed')).sort((a, b) => b.v - a.v);
+  if (majors.length) h += `<h3 class="rv-title">البنوك والمؤسسات المعروفة في هذا الربع</h3>
+    <div class="tablebox"><table><thead><tr><th>المؤسسة</th><th class="n">الحيازة</th><th class="n">التغير</th><th>الحالة</th><th class="n">GLD (سهم)</th><th class="n">IAU (سهم)</th></tr></thead><tbody>
+    ${majors.map(x => { const d = x.prev == null ? null : x.v - x.prev, cls = d > 0 ? 'up' : d < 0 ? 'down' : 'flat';
+      return `<tr><td>${mgrBtn(x.cik, x.m.n)}</td><td class="n">${TN(x.v)}</td><td class="n ${cls}">${d == null ? '—' : sTN(d)}</td><td>${badge(x.st)}</td>
+        <td class="n">${x.h.GLD ? bd(nf0.format(x.h.GLD)) : '—'}</td><td class="n">${x.h.IAU ? bd(nf0.format(x.h.IAU)) : '—'}</td></tr>`; }).join('')}
+    </tbody></table></div>`;
+
+  // drill-down per institution
+  const list = Object.entries(M).map(([cik, m]) => ({cik, m, last: (m.s.slice().reverse().find(x => x[1] != null) || [])[1] || 0}))
+    .sort((a, b) => b.last - a.last);
+  if (list.length){
+    if (!state.mgr || !M[state.mgr]) state.mgr = (list.find(x => /GOLDMAN/i.test(x.m.n)) || list[0]).cik;
+    const mm = M[state.mgr], ser = mm.s.filter(x => x[1] != null);
+    const mpts = ser.map((x, i) => ({d: x[0], line: x[1], st: x[2], h: x[3] || {},
+      delta: i ? x[1] - ser[i - 1][1] : 0, pct: i && ser[i - 1][1] ? (x[1] - ser[i - 1][1]) / ser[i - 1][1] * 100 : null,
+      d3: i >= 3 ? x[1] - ser[i - 3][1] : null})).map(q => ({...q, buy: Math.max(q.delta, 0), sell: Math.max(-q.delta, 0)})).slice(-WINDOW);
+    h += `<div class="picker" id="mgr-anchor"><label for="mgr-pick">مؤسسة بعينها</label><select id="mgr-pick" data-act="mgr-pick">${list.map(x =>
+      `<option value="${esc(x.cik)}" ${x.cik === state.mgr ? 'selected' : ''}>${esc(f13Name(x.m.n))}</option>`).join('')}</select></div>`;
+    h += reportView('mg-' + state.mgr, `${nm(mm.n)}: حيازتها ربعًا بربع`, mpts, kgCfg({
+      monthly:true, buy:'شراء', sell:'بيع', line:'الحيازة',
+      extra: q => `<div><span>الحالة</span><b>${q.st ? F13_STATUS[q.st][0] : '—'}</b></div>`,
+      cells: q => [
+        {label:'أسهم GLD', v: q.h.GLD ? bd(nf0.format(q.h.GLD)) : '—', sub: 'SPDR Gold Shares'},
+        {label:'أسهم IAU', v: q.h.IAU ? bd(nf0.format(q.h.IAU)) : '—', sub: Object.keys(q.h).filter(k => k !== 'GLD' && k !== 'IAU').map(k => `${k}: ${nf0.format(q.h[k])}`).join('، ') || 'iShares Gold Trust'},
+        {label:'الإجمالي بالذهب', v: TN(q.line), sub: `${KG(q.line)} ${badge(q.st)}`},
+      ]}));
+  }
+  h += `<p class="explain">المصدر: ملفات SEC Form 13F Data Sets. الأسماء كما أودعتها المؤسسات، والكميات محوَّلة إلى ذهب بتاريخ نهاية كل ربع.</p>`;
+  return h;
+};
+
 /* ---------- shell ---------- */
 function renderTabs(){
   document.getElementById('tabs').innerHTML = TABS.map(t =>
@@ -767,10 +913,12 @@ document.addEventListener('click', e => {
   else if (act === 'cotcat') state.cotCat = v;
   else if (act === 'bank'){ state.bank = v; state.bankView = 'deliv'; }
   else if (act === 'vault') state.vault = v;
+  else if (act === 'mgr'){ state.mgr = v; }
   const y = window.scrollY;
   render();
   if (act === 'tab') document.getElementById('tabs').scrollIntoView({block:'nearest'});
   else if (act === 'country-go'){ const el = document.getElementById('country-pick'); if (el) el.scrollIntoView({block:'center'}); }
+  else if (act === 'mgr'){ const el = document.getElementById('mgr-anchor'); if (el) el.scrollIntoView({block:'start'}); }
   else window.scrollTo(0, y);
 });
 
@@ -783,6 +931,7 @@ document.addEventListener('click', e => {
 });
 
 document.addEventListener('change', e => {
+  if (e.target.dataset.act === 'mgr-pick'){ state.mgr = e.target.value; const y = window.scrollY; render(); window.scrollTo(0, y); }
   if (e.target.dataset.act === 'country'){ state.country = e.target.value; const y = window.scrollY; render(); window.scrollTo(0, y); }
 });
 

@@ -34,6 +34,8 @@ START_DAY = "2022-01-01"
 OUT = "data.json"
 COMEX_HIST = os.path.join("data", "comex_history.json")
 DELIV_HIST = os.path.join("data", "deliveries_history.json")
+F13_HIST = os.path.join("data", "f13_history.json")
+GLD_OZPS = os.path.join("data", "gld_ozps.json")
 
 IMF_URL = "https://api.imf.org/external/sdmx/2.1/data/IRFCL/.IRFCLDT1_IRFCL56V_FTO..M"
 COT_URLS = [
@@ -593,15 +595,22 @@ def parse_gld_rows(rows):
         ci, factor = next((i for i in tcols if "trust" in header[i]), tcols[0]), 1000.0
     else:
         ci, factor = next((i for i in ocols if "trust" in header[i]), ocols[0]), OZ_KG
-    out = {}
+    gi = next((i for i, h in enumerate(header) if "nav per gld in gold" in h or ("per" in h and "in gold" in h)), None)
+    out, ozps = {}, {}
     for r in rows[hi + 1:]:
         if len(r) <= max(di, ci):
             continue
         d, v = cell_day(r[di]), num(r[ci])
+        if d and gi is not None and len(r) > gi:
+            g = num(r[gi])
+            if g and 50 < g < 110 and d >= "2015-01-01":
+                ozps[d[:7]] = round(g / 1000, 6)        # آخر قيمة في كل شهر
         if d and v and d >= START_DAY:
             out[d] = round(v * factor)
     if not out:
         raise RuntimeError(f"parsed 0 rows (columns: {header[:5]})")
+    if ozps:
+        save(GLD_OZPS, ozps)
     return sorted([d, v] for d, v in out.items())
 
 
@@ -659,6 +668,284 @@ def fetch_gld():
     raise RuntimeError("GLD: " + " | ".join(errors)[:260])
 
 
+# ---------------------------------------------------------------- SEC 13F (institutions)
+F13_BASE = "https://www.sec.gov/files/structureddata/data/form-13f-data-sets/"
+F13_START = dt.date(2024, 6, 1)
+SEC_HEADERS = {"User-Agent": "GoldFlowsDashboard abduswaidan-glitch@users.noreply.github.com",
+               "Accept-Encoding": "gzip, deflate"}
+FUND_CUSIPS = {"78463V107": "GLD", "464285204": "IAU", "464285105": "IAU"}
+FUND_NAMES = [
+    ("IAUM", r"ISHARES GOLD (TR|TRUST)\W*MICRO"),
+    ("GLDM", r"SPDR GOLD MINI|WORLD GOLD TR"),
+    ("SGOL", r"ABRDN (PHYSICAL )?GOLD|ABRDN GOLD ETF|ABERDEEN STANDARD GOLD|ETFS GOLD TR"),
+    ("AAAU", r"GOLDMAN SACHS PHYSICAL GOLD|PERTH MINT PHYSICAL GOLD"),
+    ("BAR", r"GRANITESHARES GOLD"),
+]
+MAJORS = (r"GOLDMAN SACHS|JPMORGAN|J\.?P\.? ?MORGAN|MORGAN STANLEY|BANK OF AMERICA|BANK AMERICA|MERRILL|CITIGROUP|WELLS FARGO|"
+          r"\bUBS\b|BARCLAYS|HSBC|DEUTSCHE BANK|BNP PARIBAS|ROYAL BANK OF CANADA|TORONTO.?DOMINION|BANK OF MONTREAL|SCOTIA|"
+          r"BLACKROCK|VANGUARD|STATE STREET|\bFMR\b|FIDELITY|BRIDGEWATER|RENAISSANCE TECH|CITADEL|MILLENNIUM MANAGEMENT|"
+          r"SUSQUEHANNA|JANE STREET|TWO SIGMA|D\.? ?E\.? SHAW|PAULSON|SOROS|NORTHERN TRUST|SCHWAB|NOMURA|MIZUHO|MITSUBISHI UFJ|"
+          r"SUMITOMO|SOCIETE GENERALE|CREDIT AGRICOLE|JEFFERIES|NORGES BANK|INVESCO|AMERIPRISE|RAYMOND JAMES|LPL FINANCIAL")
+
+
+def add_months(d, n):
+    m = d.month - 1 + n
+    return dt.date(d.year + m // 12, m % 12 + 1, 1)
+
+
+def f13_windows(today):
+    out, s = [], F13_START
+    while True:
+        e = add_months(s, 3) - dt.timedelta(days=1)
+        if e >= today - dt.timedelta(days=10):
+            break
+        name = f"{s.day:02d}{s.strftime('%b').lower()}{s.year}-{e.day:02d}{e.strftime('%b').lower()}{e.year}_form13f.zip"
+        out.append((s, e, name))
+        s = add_months(s, 3)
+    return out
+
+
+def sec_day(v):
+    v = str(v or "").strip()
+    for fmt in ("%d-%b-%Y", "%Y-%m-%d", "%m/%d/%Y"):
+        try:
+            return dt.datetime.strptime(v, fmt).date().isoformat()
+        except ValueError:
+            pass
+    return None
+
+
+def tsv_rows(zf, suffix):
+    import zipfile  # noqa: F401
+    name = next((n for n in zf.namelist() if n.upper().endswith(suffix)), None)
+    if not name:
+        raise RuntimeError(f"{suffix} missing in zip")
+    f = io.TextIOWrapper(zf.open(name), encoding="utf-8", errors="replace")
+    rd = csv.reader(f, delimiter="\t", quoting=csv.QUOTE_NONE)
+    header = [h.strip().upper() for h in next(rd)]
+    return header, rd
+
+
+def fund_of(cusip, issuer, title):
+    c = (cusip or "").strip().upper()
+    if c in FUND_CUSIPS:
+        return FUND_CUSIPS[c]
+    u = f"{issuer} {title}".upper()
+    if "GOLD" not in u or "MINER" in u:
+        return None
+    for key, rx in FUND_NAMES:
+        if re.search(rx, u):
+            return key
+    return None
+
+
+def process_f13_zip(path, hist):
+    import zipfile
+    csv.field_size_limit(10 ** 8)
+    with zipfile.ZipFile(path) as zf:
+        h, rd = tsv_rows(zf, "SUBMISSION.TSV")
+        ix = {k: h.index(k) for k in ("ACCESSION_NUMBER", "FILING_DATE", "SUBMISSIONTYPE", "CIK", "PERIODOFREPORT") if k in h}
+        subs = {}
+        for r in rd:
+            try:
+                subs[r[ix["ACCESSION_NUMBER"]]] = (r[ix["CIK"]].lstrip("0"), sec_day(r[ix["PERIODOFREPORT"]]),
+                                                   r[ix["SUBMISSIONTYPE"]].upper(), sec_day(r[ix["FILING_DATE"]]) or "")
+            except (IndexError, KeyError):
+                continue
+        h, rd = tsv_rows(zf, "COVERPAGE.TSV")
+        gi = lambda k: h.index(k) if k in h else None  # noqa: E731
+        a_i, n_i, t_i, r_i = gi("ACCESSION_NUMBER"), gi("FILINGMANAGER_NAME"), gi("AMENDMENTTYPE"), gi("REPORTTYPE")
+        cover = {}
+        for r in rd:
+            try:
+                cover[r[a_i]] = (r[n_i].strip() if n_i is not None else "",
+                                 (r[t_i] if t_i is not None else "").upper(), (r[r_i] if r_i is not None else "").upper())
+            except IndexError:
+                continue
+        h, rd = tsv_rows(zf, "INFOTABLE.TSV")
+        g = {k: h.index(k) for k in ("ACCESSION_NUMBER", "NAMEOFISSUER", "TITLEOFCLASS", "CUSIP", "VALUE",
+                                      "SSHPRNAMT", "SSHPRNAMTTYPE", "PUTCALL") if k in h}
+        gold, px = {}, {}
+        for r in rd:
+            try:
+                f = fund_of(r[g["CUSIP"]], r[g["NAMEOFISSUER"]], r[g["TITLEOFCLASS"]])
+                if not f or r[g["PUTCALL"]].strip() or r[g["SSHPRNAMTTYPE"]].strip().upper() != "SH":
+                    continue
+                sh, val = num(r[g["SSHPRNAMT"]]), num(r[g["VALUE"]])
+            except (IndexError, KeyError):
+                continue
+            if not sh or sh <= 0:
+                continue
+            acc = r[g["ACCESSION_NUMBER"]]
+            gold.setdefault(acc, {})
+            gold[acc][f] = gold[acc].get(f, 0) + sh
+            sub = subs.get(acc)
+            if sub and val:
+                lst = px.setdefault(sub[1], {}).setdefault(f, [])
+                if len(lst) < 400:
+                    lst.append(val / sh)
+
+    order = sorted(subs.items(), key=lambda kv: kv[1][3])
+    for acc, (cik, period, typ, fdate) in order:
+        if not period or not typ.startswith("13F-HR"):
+            continue
+        name, amend, rtype = cover.get(acc, ("", "", ""))
+        if "NOTICE" in rtype:
+            continue
+        per = hist["periods"].setdefault(period, {"filers": {}, "hold": {}, "px": {}})
+        per["filers"][cik] = max(per["filers"].get(cik, ""), fdate)
+        if name:
+            hist["names"][cik] = name
+        funds = gold.get(acc, {})
+        if typ == "13F-HR" or "RESTAT" in amend:
+            if typ == "13F-HR" or funds:
+                if funds:
+                    per["hold"][cik] = {k: int(v) for k, v in funds.items()}
+                else:
+                    per["hold"].pop(cik, None)
+        elif "NEW HOLD" in amend and funds:
+            cur = per["hold"].setdefault(cik, {})
+            for k, v in funds.items():
+                cur[k] = int(cur.get(k, 0) + v)
+    for period, d in px.items():
+        per = hist["periods"].setdefault(period, {"filers": {}, "hold": {}, "px": {}})
+        for f, lst in d.items():
+            per["px"][f] = (per["px"].get(f, []) + lst)[-400:]
+    return len(gold)
+
+
+def gld_ozps_at(date, table):
+    keys = sorted(k for k in table if k <= date[:7])
+    if keys:
+        return table[keys[-1]]
+    years = (dt.date.fromisoformat(date) - dt.date(2004, 11, 18)).days / 365.25
+    return 0.1 * (1 - 0.004) ** years                      # تقدير: الرسوم تخفض الذهب لكل سهم 0.4% سنويًا
+
+
+def build_f13(hist, windows):
+    ozt = load(GLD_OZPS, {})
+    periods = sorted(hist["periods"])
+    if not periods:
+        return None
+    maxh = max(len(hist["periods"][p]["hold"]) for p in periods)
+    periods = [p for p in periods if len(hist["periods"][p]["hold"]) >= 0.3 * maxh]
+    kg, conv = {}, {}
+    for p in periods:
+        per = hist["periods"][p]
+        med = {f: statistics.median(v) for f, v in per["px"].items() if v}
+        gld_oz = gld_ozps_at(p, ozt)
+        gold_px = (med["GLD"] / gld_oz) if med.get("GLD") else None
+        c = {"GLD": gld_oz}
+        for f, m in med.items():
+            if f != "GLD" and gold_px and 500 < gold_px < 30000:
+                c[f] = m / gold_px
+        conv[p] = c
+        kg[p] = {cik: sum(sh * c.get(f, 0) * OZ_KG for f, sh in funds.items()) for cik, funds in per["hold"].items()}
+
+    def val(p, cik):
+        if cik in kg[p]:
+            return kg[p][cik]
+        return 0.0 if cik in hist["periods"][p]["filers"] else None
+
+    def status(prev, cur):
+        if cur is None:
+            return None
+        if prev is None:
+            return "first" if cur > 0 else None
+        if abs(cur - prev) < 0.5:
+            return "same"
+        if prev <= 0.5 and cur > 0:
+            return "new"
+        if prev > 0 and cur <= 0.5:
+            return "closed"
+        return "up" if cur > prev else "down"
+
+    names, majors = hist["names"], re.compile(MAJORS)
+    done = set(hist["done"])
+    out_periods, keep = [], set()
+    for i, p in enumerate(periods):
+        prev_p = periods[i - 1] if i else None
+        ciks = set(kg[p]) | (set(kg[prev_p]) if prev_p else set())
+        moves = []
+        for cik in ciks:
+            cur = val(p, cik)
+            prev = val(prev_p, cik) if prev_p else None
+            st = status(prev, cur)
+            if st in ("new", "up", "down", "closed") or (st == "first" and prev_p):
+                moves.append({"c": cik, "n": names.get(cik, cik), "a": round(prev or 0), "b": round(cur), "s": st})
+        buys = sorted([m for m in moves if m["b"] > m["a"]], key=lambda m: m["a"] - m["b"])
+        sells = sorted([m for m in moves if m["b"] < m["a"]], key=lambda m: m["b"] - m["a"])
+        deadline = dt.date.fromisoformat(p) + dt.timedelta(days=45)
+        complete = any(s <= deadline <= e and n in done for s, e, n in windows)
+        by_fund = {}
+        for cik, funds in hist["periods"][p]["hold"].items():
+            for f, sh in funds.items():
+                by_fund[f] = by_fund.get(f, 0) + sh * conv[p].get(f, 0) * OZ_KG
+        out_periods.append({
+            "p": p, "total": round(sum(kg[p].values())), "holders": len(kg[p]), "complete": complete,
+            "funds": {f: round(v) for f, v in by_fund.items()},
+            "buy": round(sum(m["b"] - m["a"] for m in buys)), "sell": round(sum(m["a"] - m["b"] for m in sells)),
+            "n": {k: sum(1 for m in moves if m["s"] == k) for k in ("new", "first", "up", "down", "closed")},
+            "buyers": buys[:15], "sellers": sells[:15],
+            "opened": [m for m in buys if m["s"] in ("new", "first")][:8], "closed": [m for m in sells if m["s"] == "closed"][:8],
+        })
+        for lst in (buys[:15], sells[:15]):
+            keep.update(m["c"] for m in lst)
+    peak = {}
+    for p in periods:
+        for cik, v in kg[p].items():
+            peak[cik] = max(peak.get(cik, 0), v)
+    keep.update(sorted(peak, key=lambda c: -peak[c])[:250])
+    keep.update(c for c in peak if majors.search(names.get(c, "").upper()))
+    managers = {}
+    for cik in keep:
+        ser, prev = [], None
+        for p in periods:
+            v = val(p, cik)
+            ser.append([p, None if v is None else round(v), status(prev, v), hist["periods"][p]["hold"].get(cik, {})])
+            if v is not None:
+                prev = v
+        managers[cik] = {"n": names.get(cik, cik), "m": bool(majors.search(names.get(cik, "").upper())), "s": ser}
+    return {"periods": out_periods, "managers": managers, "conv": conv}
+
+
+def fetch_f13():
+    import tempfile
+    hist = load(F13_HIST, {"done": [], "periods": {}, "names": {}})
+    windows = f13_windows(dt.date.today())
+    todo = [w for w in windows if w[2] not in hist["done"]]
+    errors = []
+    for s, e, name in todo:
+        url = F13_BASE + name
+        try:
+            with requests.get(url, headers=SEC_HEADERS, stream=True, timeout=600) as r:
+                if r.status_code == 404:
+                    log(f"13F {name}: not published yet")
+                    continue
+                r.raise_for_status()
+                with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+                    for chunk in r.iter_content(1 << 20):
+                        tmp.write(chunk)
+                    path = tmp.name
+            n = process_f13_zip(path, hist)
+            os.unlink(path)
+            hist["done"].append(name)
+            save(F13_HIST, hist)
+            log(f"13F {name}: {n} filings with gold ETF positions")
+        except Exception as ex:
+            errors.append(f"{name}: {ex}")
+            log("13F", name, "FAILED:", ex)
+    out = build_f13(hist, windows)
+    if not out:
+        raise RuntimeError("13F: no data — " + " | ".join(errors)[:220])
+    last = out["periods"][-1]
+    log(f"13F ok: {len(out['periods'])} quarters, latest {last['p']} ({last['holders']} institutions, "
+        f"{last['total'] / 1000:,.1f} t), {len(out['managers'])} managers kept")
+    if errors:
+        log("13F partial errors:", " | ".join(errors)[:300])
+    return {"f13": out}
+
+
 # ---------------------------------------------------------------- main
 SECTIONS = {
     "imf": (fetch_imf, ("countries", "central_banks")),
@@ -667,6 +954,7 @@ SECTIONS = {
     "deliveries": (fetch_deliveries, ()),
     "comex": (fetch_comex, ()),
     "etf": (fetch_gld, ("etf",)),
+    "f13": (fetch_f13, ("f13",)),
 }
 
 
