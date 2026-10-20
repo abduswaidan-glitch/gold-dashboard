@@ -44,6 +44,7 @@ CME_URL = "https://www.cmegroup.com/delivery_reports/Gold_Stocks.xls"
 GLD_PAGE = "https://www.spdrgoldshares.com/usa/historical-data/"
 GLD_PAGES = [GLD_PAGE, "https://www.spdrgoldshares.com/usa/"]
 GLD_CANDIDATES = [
+    "https://api.spdrgoldshares.com/api/v1/historical-archive?product=gld&exchange=NYSE&lang=en",
     "https://www.spdrgoldshares.com/assets/dynamic/GLD/GLD_US_archive_EN.xlsx",
     "https://www.spdrgoldshares.com/assets/dynamic/GLD/GLD_US_archive_EN.csv",
 ]
@@ -462,9 +463,11 @@ def parse_gld_rows(rows):
 def find_archive_links(page_url, html):
     """يلتقط روابط ملفات xlsx/csv من الصفحة، بما فيها الروابط المخبّأة داخل JSON."""
     from urllib.parse import urljoin
-    text = html.decode("utf-8", "replace").replace("\\/", "/").replace("\\u002F", "/")
+    text = (html.decode("utf-8", "replace").replace("\\/", "/")
+            .replace("\\u002F", "/").replace("&amp;", "&"))
     found = []
     for m in re.finditer(r"""(?:https?:)?//[^\s"'<>()]+?\.(?:xlsx|csv)(?:\?[^\s"'<>()]*)?"""
+                         r"""|https?://[^\s"'<>()]*historical-archive[^\s"'<>()]*"""
                          r"""|(?<=["'(])/[^\s"'<>()]+?\.(?:xlsx|csv)(?:\?[^\s"'<>()]*)?""", text, re.I):
         u = m.group(0)
         u = ("https:" + u) if u.startswith("//") else urljoin(page_url, u)
@@ -492,9 +495,18 @@ def fetch_gld():
         except Exception as e:
             errors.append(f"page: {e}")
     urls += [u for u in GLD_CANDIDATES if u not in urls]
-    for u in urls[:8]:
+    i = 0
+    while i < min(len(urls), 10):
+        u = urls[i]
+        i += 1
         try:
-            series = parse_gld_rows(table_rows(browser_get(u, headers={"Referer": GLD_PAGE}).content))
+            content = browser_get(u, headers={"Referer": GLD_PAGE}).content
+            if content.lstrip()[:1] in (b"{", b"["):        # API أعاد JSON يحوي رابط الملف
+                inner = find_archive_links(u, content)
+                inner += re.findall(r'https?://[^\s"]+', content.decode("utf-8", "replace").replace("\\/", "/"))
+                urls[i:i] = [x for x in inner if x not in urls][:3]
+                raise RuntimeError("JSON response, following file link")
+            series = parse_gld_rows(table_rows(content))
             log(f"GLD ok: {len(series)} days, latest {series[-1][0]} ({u})")
             return {"etf": {"GLD": series}}
         except Exception as e:
