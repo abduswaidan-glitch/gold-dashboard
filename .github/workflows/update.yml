@@ -2,12 +2,14 @@ name: تحديث بيانات الذهب
 
 on:
   schedule:
-    - cron: "30 23 * * 1-5"
-    - cron: "0 14 * * 6"
-  workflow_dispatch:
+    - cron: "15 13 * * 1-5"   # صباح نيويورك: بعد نشر أرشيف SPDR وأسعار لندن وشنغهاي
+    - cron: "30 23 * * 1-5"   # بعد إغلاق السوق الأمريكي: CME وCOT يوم الجمعة
+    - cron: "0 14 * * 6"      # السبت: التقاط أي تقرير تأخر
+  workflow_dispatch:          # زر التشغيل اليدوي من تبويب Actions
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: gold-data
@@ -16,6 +18,7 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -24,7 +27,7 @@ jobs:
           python-version: "3.12"
 
       - name: تثبيت المكتبات
-        run: pip install requests xlrd
+        run: pip install requests xlrd openpyxl pdfplumber curl_cffi
 
       - name: جلب البيانات
         env:
@@ -38,3 +41,8 @@ jobs:
           git add -A
           git diff --cached --quiet || git commit -m "تحديث بيانات الذهب $(date -u +%F)"
           git push
+
+      - name: إبقاء التحديث التلقائي مفعّلًا
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow enable update.yml --repo "$GITHUB_REPOSITORY" || true
