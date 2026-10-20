@@ -598,28 +598,44 @@ def parse_gld_rows(rows, save_ozps=True):
         ci, factor = next((i for i in tcols if "trust" in header[i]), tcols[0]), 1000.0
     else:
         ci, factor = next((i for i in ocols if "trust" in header[i]), ocols[0]), OZ_KG
-    gi = next((i for i, h in enumerate(header) if "nav per gld in gold" in h or ("per" in h and "in gold" in h)), None)
-    ni = next((i for i, h in enumerate(header) if ("nav/share" in h or "nav per share" in h) and "gold" not in h), None)
+    hn = [re.sub(r"\s+", " ", h) for h in header]
+    gi = next((i for i, h in enumerate(hn) if "in gold" in h and "total" not in h), None)          # ذهب لكل سهم
+    ni = next((i for i, h in enumerate(hn) if "nav" in h and ("share" in h or "per gld" in h)
+               and "in gold" not in h and "total" not in h), None)                                   # قيمة السهم بالدولار
+    li = next((i for i, h in enumerate(hn) if "lbma" in h or "gold price" in h), None)              # سعر LBMA إن وُجد صراحة
+    ci_close = next((i for i, h in enumerate(hn) if "close" in h), None)
+    if save_ozps:
+        log("GLD archive columns:", " | ".join(f"{i}:{h[:38]}" for i, h in enumerate(hn))[:600])
     out, ozps, lbma = {}, {}, {}
     for r in rows[hi + 1:]:
         if len(r) <= max(di, ci):
             continue
         d, v = cell_day(r[di]), num(r[ci])
-        if d and gi is not None and len(r) > gi:
+        if d and gi is not None and len(r) > gi and d >= "2015-01-01":
             g = num(r[gi])
-            if g and 50 < g < 110 and d >= "2015-01-01":
-                ozps[d[:7]] = round(g / 1000, 6)        # آخر قيمة في كل شهر
-                nav = num(r[ni]) if ni is not None and len(r) > ni else None
-                if nav and d >= "2023-01-01":
-                    lbma[d] = round(nav / (g / 1000), 2)  # سعر LBMA PM الذي يُقيَّم به GLD
+            oz = g / 1000 if g and 50 < g < 110 else (g if g and 0.05 < g < 0.11 else None)   # بالألف أونصة أو بالأونصة
+            if oz:
+                ozps[d[:7]] = round(oz, 6)                                                     # آخر قيمة في كل شهر
+                if d >= "2023-01-01":
+                    px = num(r[li]) if li is not None and len(r) > li else None
+                    if not (px and 500 < px < 30000):
+                        nav = num(r[ni]) if ni is not None and len(r) > ni else None
+                        px = nav / oz if nav else None                                        # سعر LBMA PM الذي يُقيَّم به GLD
+                    if not (px and 500 < px < 30000) and ci_close is not None and len(r) > ci_close:
+                        cl = num(r[ci_close])
+                        px = cl / oz if cl else None                                          # بديل أخير: سعر إغلاق السهم
+                    if px and 500 < px < 30000:
+                        lbma[d] = round(px, 2)
         if d and v and d >= START_DAY:
             out[d] = round(v * factor)
     if not out:
         raise RuntimeError(f"parsed 0 rows (columns: {header[:5]})")
     if ozps and save_ozps:
         save(GLD_OZPS, ozps)
-    if lbma and save_ozps:
-        save(GLD_LBMA, lbma)
+    if save_ozps:
+        log(f"GLD-derived London price: {len(lbma)} days; gold-per-share col={gi}, NAV col={ni}, LBMA col={li}")
+        if lbma:
+            save(GLD_LBMA, lbma)
     return sorted([d, v] for d, v in out.items())
 
 
