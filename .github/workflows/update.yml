@@ -27,6 +27,8 @@ jobs:
         run: pip install requests xlrd
 
       - name: جلب البيانات
+        env:
+          SEC_CONTACT: ${{ secrets.SEC_CONTACT }}
         run: python fetch_gold.py
 
       - name: حفظ البيانات في المستودع
