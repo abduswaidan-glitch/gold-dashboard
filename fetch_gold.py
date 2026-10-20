@@ -407,22 +407,27 @@ def fetch_comex():
 
 
 # ---------------------------------------------------------------- SPDR GLD
-def table_rows(content):
-    """يحوّل ملف XLSX أو CSV إلى صفوف."""
+def table_sheets(content):
+    """يحوّل ملف XLSX أو CSV إلى قائمة أوراق: [(اسم الورقة, صفوف)]."""
     head = content[:8]
     if head.startswith(b"%PDF"):
         raise RuntimeError("file is a PDF, not data")
     if head.startswith(b"PK"):                       # xlsx
         openpyxl = ensure("openpyxl")
         wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-        rows = []
-        for ws in wb.worksheets:
-            rows = [list(r) for r in ws.iter_rows(values_only=True)]
-            if len(rows) > 10:
-                break
-        return rows
+        return [(ws.title, [list(r) for r in ws.iter_rows(values_only=True)]) for ws in wb.worksheets]
     text = content.decode("utf-8-sig", errors="replace")
-    return list(csv.reader(text.splitlines()))
+    return [("csv", list(csv.reader(text.splitlines())))]
+
+
+def parse_gld_sheets(sheets):
+    errors = []
+    for name, rows in sheets:
+        try:
+            return parse_gld_rows(rows)
+        except Exception as e:
+            errors.append(f"[{name}] {e}")
+    raise RuntimeError(" ; ".join(errors)[:240])
 
 
 def cell_day(v):
@@ -436,10 +441,11 @@ def cell_day(v):
 def parse_gld_rows(rows):
     def low(r):
         return [str(c or "").strip().lower() for c in r]
-    hi = next((i for i, r in enumerate(rows[:80])
+    hi = next((i for i, r in enumerate(rows[:300])
                if any("date" in c for c in low(r)) and any(("tonnes" in c or "ounces" in c) for c in low(r))), None)
     if hi is None:
-        raise RuntimeError("header not found; first row: " + str(rows[0][:4] if rows else "empty")[:100])
+        dated = [str(c)[:40] for r in rows[:300] for c in r if c and "date" in str(c).lower()][:3]
+        raise RuntimeError(f"header not found ({len(rows)} rows; date cells: {dated})")
     header = low(rows[hi])
     di = next(i for i, h in enumerate(header) if "date" in h)
     tcols = [i for i, h in enumerate(header) if "tonnes" in h]
@@ -506,7 +512,7 @@ def fetch_gld():
                 inner += re.findall(r'https?://[^\s"]+', content.decode("utf-8", "replace").replace("\\/", "/"))
                 urls[i:i] = [x for x in inner if x not in urls][:3]
                 raise RuntimeError("JSON response, following file link")
-            series = parse_gld_rows(table_rows(content))
+            series = parse_gld_sheets(table_sheets(content))
             log(f"GLD ok: {len(series)} days, latest {series[-1][0]} ({u})")
             return {"etf": {"GLD": series}}
         except Exception as e:
