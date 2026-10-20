@@ -41,7 +41,11 @@ COT_URLS = [
 ]
 GOLD_CODE = "088691"
 CME_URL = "https://www.cmegroup.com/delivery_reports/Gold_Stocks.xls"
-GLD_URL = "https://www.spdrgoldshares.com/assets/dynamic/GLD/GLD_US_archive_EN.csv"
+GLD_PAGE = "https://www.spdrgoldshares.com/usa/historical-data/"
+GLD_CANDIDATES = [
+    "https://www.spdrgoldshares.com/assets/dynamic/GLD/GLD_US_archive_EN.xlsx",
+    "https://www.spdrgoldshares.com/assets/dynamic/GLD/GLD_US_archive_EN.csv",
+]
 
 HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -80,21 +84,27 @@ def get(url, **kw):
     return r
 
 
-def browser_get(url, headers=None):
+def ensure(module, package=None):
+    """يستورد مكتبة، ويثبّتها تلقائيًا إن لم تكن موجودة."""
+    import importlib
+    try:
+        return importlib.import_module(module)
+    except ImportError:
+        import subprocess
+        import sys
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", package or module], check=False)
+        return importlib.import_module(module)
+
+
+def browser_get(url, headers=None, allow_html=False):
     """جلب يحاكي متصفح Chrome (بصمة TLS) لتجاوز حجب Akamai/Cloudflare لخوادم GitHub."""
     errors = []
     try:
-        try:
-            from curl_cffi import requests as creq
-        except ImportError:
-            import subprocess
-            import sys
-            subprocess.run([sys.executable, "-m", "pip", "install", "-q", "curl_cffi"], check=False)
-            from curl_cffi import requests as creq
+        creq = ensure("curl_cffi.requests", "curl_cffi")
         for imp in ("chrome", "safari", "edge"):
             try:
                 r = creq.get(url, impersonate=imp, headers=headers or {}, timeout=TIMEOUT)
-                if r.status_code == 200 and not looks_like_html(r.content):
+                if r.status_code == 200 and (allow_html or not looks_like_html(r.content)):
                     return r
                 errors.append(f"{imp}: HTTP {r.status_code} {page_hint(r.content)}")
             except Exception as e:
@@ -103,7 +113,7 @@ def browser_get(url, headers=None):
         errors.append(f"curl_cffi: {e}")
     try:
         r = requests.get(url, headers={**HEADERS, **(headers or {})}, timeout=TIMEOUT)
-        if r.status_code == 200 and not looks_like_html(r.content):
+        if r.status_code == 200 and (allow_html or not looks_like_html(r.content)):
             return r
         errors.append(f"requests: HTTP {r.status_code} {page_hint(r.content)}")
     except Exception as e:
@@ -395,16 +405,40 @@ def fetch_comex():
 
 
 # ---------------------------------------------------------------- SPDR GLD
-def fetch_gld():
-    r = browser_get(GLD_URL, headers={"Referer": "https://www.spdrgoldshares.com/usa/historical-data/"})
-    text = r.content.decode("utf-8-sig", errors="replace")
-    lines = text.splitlines()
-    hi = next((i for i, l in enumerate(lines[:60])
-               if "date" in l.lower() and ("tonnes" in l.lower() or "ounces" in l.lower())), None)
+def table_rows(content):
+    """يحوّل ملف XLSX أو CSV إلى صفوف."""
+    head = content[:8]
+    if head.startswith(b"%PDF"):
+        raise RuntimeError("file is a PDF, not data")
+    if head.startswith(b"PK"):                       # xlsx
+        openpyxl = ensure("openpyxl")
+        wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+        rows = []
+        for ws in wb.worksheets:
+            rows = [list(r) for r in ws.iter_rows(values_only=True)]
+            if len(rows) > 10:
+                break
+        return rows
+    text = content.decode("utf-8-sig", errors="replace")
+    return list(csv.reader(text.splitlines()))
+
+
+def cell_day(v):
+    if isinstance(v, dt.datetime):
+        return v.date().isoformat()
+    if isinstance(v, dt.date):
+        return v.isoformat()
+    return parse_day(v)
+
+
+def parse_gld_rows(rows):
+    def low(r):
+        return [str(c or "").strip().lower() for c in r]
+    hi = next((i for i, r in enumerate(rows[:80])
+               if any("date" in c for c in low(r)) and any(("tonnes" in c or "ounces" in c) for c in low(r))), None)
     if hi is None:
-        raise RuntimeError("GLD: header not found; first line: " + (lines[0][:120] if lines else "empty file"))
-    reader = csv.reader(lines[hi:])
-    header = [h.strip().lower() for h in next(reader)]
+        raise RuntimeError("header not found; first row: " + str(rows[0][:4] if rows else "empty")[:100])
+    header = low(rows[hi])
     di = next(i for i, h in enumerate(header) if "date" in h)
     tcols = [i for i, h in enumerate(header) if "tonnes" in h]
     ocols = [i for i, h in enumerate(header) if "ounces" in h]
@@ -413,17 +447,36 @@ def fetch_gld():
     else:
         ci, factor = next((i for i in ocols if "trust" in header[i]), ocols[0]), OZ_KG
     out = {}
-    for row in reader:
-        if len(row) <= max(di, ci):
+    for r in rows[hi + 1:]:
+        if len(r) <= max(di, ci):
             continue
-        d, v = parse_day(row[di]), num(row[ci])
+        d, v = cell_day(r[di]), num(r[ci])
         if d and v and d >= START_DAY:
             out[d] = round(v * factor)
     if not out:
-        raise RuntimeError(f"GLD: parsed 0 rows (columns: {header[:6]})")
-    series = sorted([d, v] for d, v in out.items())
-    log(f"GLD ok: {len(series)} days, latest {series[-1][0]}")
-    return {"etf": {"GLD": series}}
+        raise RuntimeError(f"parsed 0 rows (columns: {header[:5]})")
+    return sorted([d, v] for d, v in out.items())
+
+
+def fetch_gld():
+    from urllib.parse import urljoin
+    errors, urls = [], list(GLD_CANDIDATES)
+    try:                                              # ابحث عن رابط الأرشيف الحالي في الصفحة
+        page = browser_get(GLD_PAGE, allow_html=True).content
+        for href in re.findall(rb"""href=["']([^"']+\.(?:xlsx|csv)[^"']*)["']""", page, re.I):
+            u = urljoin(GLD_PAGE, href.decode("utf-8", "replace"))
+            if "gldm" not in u.lower() and u not in urls:
+                urls.insert(0, u)
+    except Exception as e:
+        errors.append(f"page: {e}")
+    for u in urls:
+        try:
+            series = parse_gld_rows(table_rows(browser_get(u, headers={"Referer": GLD_PAGE}).content))
+            log(f"GLD ok: {len(series)} days, latest {series[-1][0]} ({u.rsplit('/', 1)[-1]})")
+            return {"etf": {"GLD": series}}
+        except Exception as e:
+            errors.append(f"{u.rsplit('/', 1)[-1]}: {e}")
+    raise RuntimeError("GLD: " + " | ".join(errors)[:260])
 
 
 # ---------------------------------------------------------------- main
