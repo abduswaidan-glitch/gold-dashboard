@@ -671,8 +671,52 @@ def fetch_gld():
 # ---------------------------------------------------------------- SEC 13F (institutions)
 F13_BASE = "https://www.sec.gov/files/structureddata/data/form-13f-data-sets/"
 F13_START = dt.date(2024, 6, 1)
-SEC_HEADERS = {"User-Agent": "GoldFlowsDashboard abduswaidan-glitch@users.noreply.github.com",
-               "Accept-Encoding": "gzip, deflate"}
+def sec_ua():
+    """SEC تشترط User-Agent فيه اسم وبريد للتواصل. يُقرأ البريد من GitHub Secret اسمه SEC_CONTACT إن وُجد."""
+    c = os.environ.get("SEC_CONTACT", "").strip()
+    return f"GoldFlowsDashboard {c}" if "@" in c else "GoldFlowsDashboard abduswaidan-glitch@users.noreply.github.com"
+
+
+def sec_hint(content):
+    t = content[:4000].decode("utf-8", "replace")
+    t = re.sub(r"<[^>]+>", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    for key in ("Undeclared Automated Tool", "Request Rate Threshold", "Access Denied", "Your Request"):
+        i = t.find(key)
+        if i >= 0:
+            return t[i:i + 90]
+    return t[:90]
+
+
+def sec_download(url, path):
+    """ينزّل ملف SEC إلى path. يعيد 200 أو 404، أو يرفع خطأ يشرح سبب الرفض."""
+    ua, errors = sec_ua(), []
+    try:
+        with requests.get(url, headers={"User-Agent": ua, "Accept-Encoding": "gzip, deflate"}, stream=True, timeout=600) as r:
+            if r.status_code == 404:
+                return 404
+            if r.status_code == 200:
+                with open(path, "wb") as f:
+                    for chunk in r.iter_content(1 << 20):
+                        f.write(chunk)
+                return 200
+            errors.append(f"requests HTTP {r.status_code} [{sec_hint(r.raw.read(4000, decode_content=True) or b'')}]")
+    except Exception as e:
+        errors.append(f"requests: {e}")
+    try:
+        creq = ensure("curl_cffi.requests", "curl_cffi")
+        for imp in ("chrome", "safari"):
+            r = creq.get(url, impersonate=imp, headers={"User-Agent": ua, "Accept-Encoding": "gzip, deflate"}, timeout=900)
+            if r.status_code == 404:
+                return 404
+            if r.status_code == 200 and r.content[:2] == b"PK":
+                with open(path, "wb") as f:
+                    f.write(r.content)
+                return 200
+            errors.append(f"{imp} HTTP {r.status_code} [{sec_hint(r.content)}]")
+    except Exception as e:
+        errors.append(f"curl_cffi: {e}")
+    raise RuntimeError(" | ".join(errors)[:300])
 FUND_CUSIPS = {"78463V107": "GLD", "464285204": "IAU", "464285105": "IAU"}
 FUND_NAMES = [
     ("IAUM", r"ISHARES GOLD (TR|TRUST)\W*MICRO"),
@@ -915,18 +959,15 @@ def fetch_f13():
     windows = f13_windows(dt.date.today())
     todo = [w for w in windows if w[2] not in hist["done"]]
     errors = []
+    log(f"13F user-agent: {sec_ua()}")
     for s, e, name in todo:
         url = F13_BASE + name
+        path = os.path.join(tempfile.gettempdir(), name)
         try:
-            with requests.get(url, headers=SEC_HEADERS, stream=True, timeout=600) as r:
-                if r.status_code == 404:
-                    log(f"13F {name}: not published yet")
-                    continue
-                r.raise_for_status()
-                with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
-                    for chunk in r.iter_content(1 << 20):
-                        tmp.write(chunk)
-                    path = tmp.name
+            code = sec_download(url, path)
+            if code == 404:
+                log(f"13F {name}: not published yet")
+                continue
             n = process_f13_zip(path, hist)
             os.unlink(path)
             hist["done"].append(name)
@@ -935,6 +976,9 @@ def fetch_f13():
         except Exception as ex:
             errors.append(f"{name}: {ex}")
             log("13F", name, "FAILED:", ex)
+            if len(errors) >= 2 and not hist["done"]:
+                log("13F: stopping early, SEC is refusing every download")
+                break
     out = build_f13(hist, windows)
     if not out:
         raise RuntimeError("13F: no data — " + " | ".join(errors)[:220])
