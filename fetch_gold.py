@@ -42,6 +42,7 @@ COT_URLS = [
 GOLD_CODE = "088691"
 CME_URL = "https://www.cmegroup.com/delivery_reports/Gold_Stocks.xls"
 GLD_PAGE = "https://www.spdrgoldshares.com/usa/historical-data/"
+GLD_PAGES = [GLD_PAGE, "https://www.spdrgoldshares.com/usa/"]
 GLD_CANDIDATES = [
     "https://www.spdrgoldshares.com/assets/dynamic/GLD/GLD_US_archive_EN.xlsx",
     "https://www.spdrgoldshares.com/assets/dynamic/GLD/GLD_US_archive_EN.csv",
@@ -458,24 +459,46 @@ def parse_gld_rows(rows):
     return sorted([d, v] for d, v in out.items())
 
 
-def fetch_gld():
+def find_archive_links(page_url, html):
+    """يلتقط روابط ملفات xlsx/csv من الصفحة، بما فيها الروابط المخبّأة داخل JSON."""
     from urllib.parse import urljoin
-    errors, urls = [], list(GLD_CANDIDATES)
-    try:                                              # ابحث عن رابط الأرشيف الحالي في الصفحة
-        page = browser_get(GLD_PAGE, allow_html=True).content
-        for href in re.findall(rb"""href=["']([^"']+\.(?:xlsx|csv)[^"']*)["']""", page, re.I):
-            u = urljoin(GLD_PAGE, href.decode("utf-8", "replace"))
-            if "gldm" not in u.lower() and u not in urls:
-                urls.insert(0, u)
-    except Exception as e:
-        errors.append(f"page: {e}")
-    for u in urls:
+    text = html.decode("utf-8", "replace").replace("\\/", "/").replace("\\u002F", "/")
+    found = []
+    for m in re.finditer(r"""(?:https?:)?//[^\s"'<>()]+?\.(?:xlsx|csv)(?:\?[^\s"'<>()]*)?"""
+                         r"""|(?<=["'(])/[^\s"'<>()]+?\.(?:xlsx|csv)(?:\?[^\s"'<>()]*)?""", text, re.I):
+        u = m.group(0)
+        u = ("https:" + u) if u.startswith("//") else urljoin(page_url, u)
+        low = u.lower()
+        if "gldm" in low or u in found:
+            continue
+        found.append(u)
+    # الأرجح أولًا: ما يحمل كلمة archive أو historical أو اسم GLD
+    found.sort(key=lambda u: -sum(k in u.lower() for k in ("archive", "histor", "gld")))
+    return found
+
+
+def fetch_gld():
+    errors, urls = [], []
+    for page_url in GLD_PAGES:
+        try:
+            html = browser_get(page_url, allow_html=True).content
+            links = find_archive_links(page_url, html)
+            log(f"GLD links on {page_url}: {links[:5] or 'none'}")
+            if not links:
+                i = html.lower().find(b"archive")
+                if i >= 0:
+                    log("GLD page context:", html[max(0, i - 300):i + 300].decode("utf-8", "replace").replace("\n", " "))
+            urls += [u for u in links if u not in urls]
+        except Exception as e:
+            errors.append(f"page: {e}")
+    urls += [u for u in GLD_CANDIDATES if u not in urls]
+    for u in urls[:8]:
         try:
             series = parse_gld_rows(table_rows(browser_get(u, headers={"Referer": GLD_PAGE}).content))
-            log(f"GLD ok: {len(series)} days, latest {series[-1][0]} ({u.rsplit('/', 1)[-1]})")
+            log(f"GLD ok: {len(series)} days, latest {series[-1][0]} ({u})")
             return {"etf": {"GLD": series}}
         except Exception as e:
-            errors.append(f"{u.rsplit('/', 1)[-1]}: {e}")
+            errors.append(f"{u.rsplit('/', 1)[-1][:50]}: {e}")
     raise RuntimeError("GLD: " + " | ".join(errors)[:260])
 
 
