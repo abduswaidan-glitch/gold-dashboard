@@ -32,6 +32,8 @@ START_MONTH = "2022-01"
 START_DAY = "2022-01-01"
 
 OUT = "data.json"
+STATUS_OUT = "status.json"              # يتغير كل ساعة: حالة الفحص فقط
+PRICES_OUT = "prices.json"              # سعر الذهب: كل ساعة
 COMEX_HIST = os.path.join("data", "comex_history.json")
 DELIV_HIST = os.path.join("data", "deliveries_history.json")
 F13_HIST = os.path.join("data", "f13_history.json")
@@ -39,6 +41,9 @@ GLD_OZPS = os.path.join("data", "gld_ozps.json")
 ETF_HIST = os.path.join("data", "etf_history.json")
 SGE_HIST = os.path.join("data", "sge_history.json")
 GLD_LBMA = os.path.join("data", "gld_lbma_pm.json")
+STATE = os.path.join("data", "state.json")
+RELEASES = os.path.join("data", "releases.json")
+WGC_HIST = os.path.join("data", "wgc_etf.json")
 
 IMF_URL = "https://api.imf.org/external/sdmx/2.1/data/IRFCL/.IRFCLDT1_IRFCL56V_FTO..M"
 COT_URLS = [
@@ -355,7 +360,7 @@ def cot_records(rows, keys):
 
 
 def fetch_cot():
-    rows = socrata_gold(COT_URLS)
+    rows = socrata_gold(COT_URLS, limit=700)
     s = rows[0]
     k = {
         "sl": find_key(s, ("swap", "positions", "long")),
@@ -387,7 +392,7 @@ def fetch_cot():
 
 
 def fetch_cot_legacy():
-    rows = socrata_gold(LEGACY_URLS, limit=170)
+    rows = socrata_gold(LEGACY_URLS, limit=700)
     s = rows[0]
     k = [
         find_key(s, ("noncomm", "long")),
@@ -879,6 +884,105 @@ def fetch_physical():
     return {"physical": out}
 
 
+# ---------------------------------------------------------------- gold price (hourly)
+def yahoo_chart(symbol, rng, interval):
+    errors = []
+    for host in ("query1", "query2"):
+        url = f"https://{host}.finance.yahoo.com/v8/finance/chart/{symbol}?range={rng}&interval={interval}"
+        try:
+            res = browser_get(url, headers={"Accept": "application/json"}).json()["chart"]["result"][0]
+            q = res["indicators"]["quote"][0]["close"]
+            return res.get("meta", {}), [(t, float(c)) for t, c in zip(res["timestamp"], q) if c]
+        except Exception as e:
+            errors.append(f"{host}: {str(e)[:80]}")
+    raise RuntimeError(f"Yahoo {symbol} {interval}: " + " | ".join(errors))
+
+
+def fetch_prices():
+    """سعر الذهب (عقود COMEX الأقرب GC=F): إغلاقات يومية منذ 2008، وأسعار الساعة لآخر 5 أيام."""
+    meta, daily = yahoo_chart("GC=F", "max", "1d")
+    d = {}
+    for t, c in daily:
+        day = dt.datetime.fromtimestamp(t, dt.timezone.utc).date().isoformat()
+        if day >= "2008-01-01":
+            d[day] = round(c, 2)
+    try:
+        _, hourly = yahoo_chart("GC=F", "5d", "60m")
+        h = [[dt.datetime.fromtimestamp(t, dt.timezone.utc).replace(microsecond=0).isoformat(), round(c, 2)] for t, c in hourly]
+    except Exception as e:
+        log("hourly prices failed:", e)
+        h = (load(PRICES_OUT, {}).get("hourly") or [])
+    price = meta.get("regularMarketPrice") or (h[-1][1] if h else None)
+    ptime = meta.get("regularMarketTime")
+    last = {"price": round(float(price), 2) if price else None,
+            "time": dt.datetime.fromtimestamp(ptime, dt.timezone.utc).isoformat() if ptime else (h[-1][0] if h else None),
+            "prev_close": meta.get("chartPreviousClose") or meta.get("previousClose")}
+    out = {"symbol": "GC=F", "updated_utc": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(),
+           "last": last, "daily": sorted([k, v] for k, v in d.items()), "hourly": h[-150:]}
+    save(PRICES_OUT, out)
+    log(f"price ok: ${last['price']} at {last['time']} ({len(d)} daily closes, {len(h)} hourly)")
+    return {}
+
+
+# ---------------------------------------------------------------- World Gold Council: global ETF flows (monthly)
+WGC_URL = "https://www.gold.org/goldhub/research/gold-etfs-holdings-and-flows/{}/{:02d}"
+WGC_MODEL = "claude-haiku-5-5"
+WGC_SYSTEM = """Extract numbers from a World Gold Council monthly "Gold ETF Flows" article. Return ONLY one JSON object:
+{"data_month":"YYYY-MM","global_holdings_t":number|null,"global_demand_t":number|null,"global_flow_usd_bn":number|null,
+ "aum_usd_bn":number|null,
+ "regions":{"north_america":{"flow_usd_bn":number|null,"demand_t":number|null},"europe":{...},"asia":{...},"other":{...}},
+ "headline_en":"one sentence","headline_ar":"جملة واحدة بالعربية الفصحى"}
+Use null when a number is not stated. Outflows are negative. data_month is the month the data covers (not the publication month).
+US$ millions must be converted to billions (e.g. US$495mn = 0.495)."""
+
+
+def fetch_wgc():
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not key:
+        raise RuntimeError("needs the ANTHROPIC_API_KEY secret to read the monthly WGC article")
+    hist = load(WGC_HIST, [])
+    done = {h.get("article") for h in hist}
+    today = dt.date.today().replace(day=1)
+    errors, added = [], 0
+    for back in (range(0, 13) if len(hist) < 6 else (0, 1, 2)):    # أول مرة: سنة كاملة من التقارير الشهرية
+        m = add_months(today, -back)
+        url = WGC_URL.format(m.year, m.month)
+        if url in done:
+            continue
+        try:
+            html = browser_get(url, allow_html=True).content.decode("utf-8", "replace")
+        except Exception as e:
+            errors.append(f"{m:%Y-%m}: {str(e)[:90]}")
+            continue
+        text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html, flags=re.S | re.I)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"\s+", " ", text)
+        i = text.find("Gold ETF Flows:")
+        if i < 0:
+            errors.append(f"{m:%Y-%m}: article not found")
+            continue
+        body = text[i:i + 14000]
+        resp = _claude({"model": WGC_MODEL, "max_tokens": 900, "system": WGC_SYSTEM,
+                        "messages": [{"role": "user", "content": body}]}, key)
+        out = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
+        j = json.loads(out[out.find("{"):out.rfind("}") + 1])
+        if not re.fullmatch(r"\d{4}-\d{2}", str(j.get("data_month", ""))):
+            errors.append(f"{m:%Y-%m}: no data_month")
+            continue
+        j["article"] = url
+        j["seen_utc"] = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
+        hist = [h for h in hist if h.get("data_month") != j["data_month"]] + [j]
+        added += 1
+        log(f"WGC ok: data month {j['data_month']}, global holdings {j.get('global_holdings_t')} t")
+    hist.sort(key=lambda h: h.get("data_month", ""))
+    save(WGC_HIST, hist)
+    if not hist:
+        raise RuntimeError("WGC: " + (" | ".join(errors) or "nothing found")[:250])
+    if not added:
+        log("WGC: no new monthly article", ("(" + " | ".join(errors)[:150] + ")") if errors else "")
+    return {"wgc_etf": hist[-36:]}
+
+
 # ---------------------------------------------------------------- SEC 13F (institutions)
 F13_BASES = [                                   # SEC غيّرت مسار الملفات الأحدث؛ نجرّب كل المسارات المعروفة
     "https://www.sec.gov/files/structureddata/data/form-13f-data-sets/",
@@ -1289,6 +1393,17 @@ def ai_digest(d):
             vals = [r[1] for r in rows[-250:]]
             g[label] = {"date": rows[-1][0], "value": rows[-1][1], "avg_5d": round(sum(r[1] for r in rows[-5:]) / min(5, len(rows)), 2),
                         "percentile_1y": round(sum(1 for v in vals if v <= rows[-1][1]) / len(vals) * 100)}
+    pr = load(PRICES_OUT, {})
+    dly = pr.get("daily") or []
+    if dly:
+        def back(n):
+            return dly[-1 - n][1] if len(dly) > n else None
+        g["gold_price_usd_oz"] = {"last": (pr.get("last") or {}).get("price"), "last_time_utc": (pr.get("last") or {}).get("time"),
+                                  "close": dly[-1][1], "close_date": dly[-1][0],
+                                  "change_1w_pct": round((dly[-1][1] / back(5) - 1) * 100, 2) if back(5) else None,
+                                  "change_1m_pct": round((dly[-1][1] / back(21) - 1) * 100, 2) if back(21) else None}
+    if d.get("wgc_etf"):
+        g["global_gold_etfs_wgc_latest_month"] = d["wgc_etf"][-1]
     f = d.get("f13") or {}
     if f.get("periods"):
         q = f["periods"][-1]
@@ -1326,23 +1441,23 @@ def _claude(payload, key):
     return r.json()
 
 
-def ai_report(data, prev):
+def ai_report(data, prev, new_major, releases):
     key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     prev_ai = prev.get("ai") or {}
     if not key:
         log("AI report skipped: no ANTHROPIC_API_KEY secret")
-        return prev_ai or None
+        return prev_ai or None, False
     now = dt.datetime.now(dt.timezone.utc)
     today = now.date().isoformat()
     force = os.environ.get("AI_FORCE", "").strip().lower() in ("1", "true", "yes")
-    last = (prev_ai.get("latest") or {}).get("date")
-    if not force and last == today:
-        log("AI report: already written today")
-        return prev_ai
-    if not force and last and now.hour < 21:
-        log("AI report: waits for the evening run (after 21:00 UTC)")
-        return prev_ai
-    digest = json.dumps(ai_digest(data), ensure_ascii=False, separators=(",", ":"))
+    if not force and not new_major:
+        log("AI report: no new major report (COT, IMF, 13F, WGC) since the last one; no tokens used")
+        return prev_ai or None, False
+    log("AI report triggered by:", ", ".join(new_major) if new_major else "manual request")
+    digest_obj = ai_digest(data)
+    digest_obj["new_reports_triggering_this_update"] = {k: {"data_date": v, "first_seen_utc": (releases.get(k) or {}).get(v)}
+                                                        for k, v in (new_major or {}).items()}
+    digest = json.dumps(digest_obj, ensure_ascii=False, separators=(",", ":"))
     user = (f"Date (UTC): {today}.\nPlatform data (JSON; t = tonnes, contracts = COMEX GC 100-oz contracts):\n{digest}\n\n"
             "Search for today's key gold-related events, then return the JSON report.")
     messages = [{"role": "user", "content": user}]
@@ -1388,17 +1503,22 @@ def ai_report(data, prev):
               "usage": {"input_tokens": u.get("input_tokens"), "output_tokens": u.get("output_tokens"),
                         "searches": (u.get("server_tool_use") or {}).get("web_search_requests", 0), "est_cost_usd": round(cost, 4)}}
     hist = load(AI_HIST, [])
-    hist = [h for h in hist if h.get("date") != today] + [latest]
+    hist = [h for h in hist if h.get("generated_utc") != latest["generated_utc"]] + [latest]
     hist = hist[-30:]
     save(AI_HIST, hist)
     log(f"AI report ok: {today}, model {latest['model']}, {u.get('input_tokens')} in / {u.get('output_tokens')} out tokens, "
         f"{latest['usage']['searches']} searches, est. ${cost:.3f}")
+    latest["trigger"] = list((new_major or {}).keys()) or ["manual"]
+    hist[-1]["trigger"] = latest["trigger"]
+    save(AI_HIST, hist)
     return {"latest": latest, "history": [{"date": h["date"], "ar": h["ar"], "en": h["en"], "sources": h.get("sources", []),
-                                           "model": h.get("model"), "generated_utc": h.get("generated_utc")} for h in hist[-14:]]}
+                                           "model": h.get("model"), "generated_utc": h.get("generated_utc"),
+                                           "trigger": h.get("trigger", [])} for h in hist[-14:]]}, True
 
 
-# ---------------------------------------------------------------- main
+# ---------------------------------------------------------------- main: release-aware scheduler
 SECTIONS = {
+    "price": (fetch_prices, ()),
     "imf": (fetch_imf, ("countries", "central_banks")),
     "cot": (fetch_cot, ("banks", "cot_disagg")),
     "cot_legacy": (fetch_cot_legacy, ("noncomm",)),
@@ -1408,42 +1528,138 @@ SECTIONS = {
     "etf2": (fetch_etfs, ("etf2", "etf2_errors")),
     "physical": (fetch_physical, ("physical",)),
     "f13": (fetch_f13, ("f13",)),
+    "wgc": (fetch_wgc, ("wgc_etf",)),
 }
+MAJOR = ("cot", "cot_legacy", "imf", "f13", "wgc")      # تقارير كبرى تستحق تقريرًا ذكيًا جديدًا
+
+
+def latest_of(name, d):
+    """تاريخ أحدث تقرير لكل مصدر، لاكتشاف صدور تقرير جديد."""
+    try:
+        if name == "imf":
+            return max(s[-1][0] for s in (d.get("countries") or {}).values())
+        if name == "cot":
+            return d["cot_disagg"]["swap"][-1][0]
+        if name == "cot_legacy":
+            return d["noncomm"][-1][0]
+        if name == "deliveries":
+            return max((d.get("deliveries") or {}).get("daily") or {"": 0}) or None
+        if name == "comex":
+            return d["comex"]["total"][-1][0]
+        if name == "etf":
+            return d["etf"]["GLD"][-1][0]
+        if name == "etf2":
+            return max(v[-1][0] for v in d["etf2"].values() if v)
+        if name == "physical":
+            return max(v[-1][0] for k, v in d["physical"].items() if k in ("efp", "sh") and v)
+        if name == "f13":
+            return d["f13"]["periods"][-1]["p"]
+        if name == "wgc":
+            return d["wgc_etf"][-1]["data_month"]
+    except Exception:
+        return None
+    return None
+
+
+def hours_since(iso):
+    if not iso:
+        return 1e9
+    return (dt.datetime.now(dt.timezone.utc) - dt.datetime.fromisoformat(iso)).total_seconds() / 3600
+
+
+def is_due(name, st, prev):
+    """متى نفحص كل مصدر: قرب موعد التقرير المتوقع فقط، بدل فحص كل شيء كل ساعة."""
+    if os.environ.get("FULL_REFRESH", "").strip().lower() in ("1", "true", "yes"):
+        return True
+    now = dt.datetime.now(dt.timezone.utc)
+    if name == "price":
+        return True                                                        # كل ساعة
+    if name in ("cot", "cot_legacy"):
+        last = latest_of(name, prev)
+        if not last:
+            return True
+        # بيانات الثلاثاء تصدر الجمعة 15:30 بتوقيت نيويورك (19:30 أو 20:30 UTC). نبدأ الفحص من 19:00 UTC الجمعة
+        # ونستمر كل ساعة حتى يظهر التقرير (يتأخر أحيانًا إلى الاثنين بسبب العطل الرسمية).
+        expected = dt.datetime.fromisoformat(last).replace(tzinfo=dt.timezone.utc) + dt.timedelta(days=10, hours=19)
+        return now >= expected
+    if name in ("deliveries", "comex", "etf", "etf2", "physical"):
+        return now.weekday() != 6 and hours_since(st.get("checked")) >= 2.8      # تقارير يومية: كل 3 ساعات
+    if name in ("imf", "f13", "wgc"):
+        return hours_since(st.get("checked")) >= 11.5                          # شهرية وربعية: مرتين يوميًا
+    return True
 
 
 def main():
     prev = load(OUT, {})
+    state = load(STATE, {})
+    releases = load(RELEASES, {})
     now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
-    data = {"generated_utc": now, "sources": {}}
+    data = {k: v for k, v in prev.items() if k not in ("generated_utc", "sources")}
+    status = {"checked_utc": now, "sources": {}}
+    new_major = {}
     for name, (fn, keys) in SECTIONS.items():
-        prev_src = prev.get("sources", {}).get(name, {})
+        st = state.setdefault(name, {})
+        if not is_due(name, st, prev):
+            status["sources"][name] = {**st, "ok": st.get("ok", True), "skipped": True}
+            continue
+        before = latest_of(name, prev)
+        st["checked"] = now
         try:
-            result = fn() or {}
-            data.update(result)
-            data["sources"][name] = {"ok": True, "last_ok": now}
+            data.update(fn() or {})
+            if name == "comex":
+                data["comex"] = load(COMEX_HIST, {"registered": [], "eligible": [], "total": []})
+            if name == "deliveries":
+                dh = load(DELIV_HIST, {"daily": {}, "mtd": {}})
+                data["deliveries"] = {"daily": {d: dh["daily"][d] for d in sorted(dh["daily"])[-120:]}, "mtd": dh.get("mtd", {})}
+            st.update(ok=True, last_ok=now, error=None)
+            after = latest_of(name, data)
+            if after and after != before:
+                st["new"] = now
+                st["latest"] = after
+                log(f"{name}: NEW report {after} (previous {before})")
+                if before is not None:                              # أول تشغيل لا يعرف لحظة النشر الحقيقية
+                    releases.setdefault(name, {})[after] = now      # اللحظة التي رُصد فيها التقرير الجديد
+                    if name in MAJOR:
+                        new_major[name] = after
         except Exception as e:
-            log(name, "FAILED:", repr(e))
-            data["sources"][name] = {"ok": False, "error": (str(e) or repr(e))[:300],
-                                     "last_ok": prev_src.get("last_ok")}
+            log(name, "FAILED:", repr(e)[:300])
+            st.update(ok=False, error=(str(e) or repr(e))[:300])
             for key in keys:
                 if key in prev:
                     data[key] = prev[key]
-    data["comex"] = load(COMEX_HIST, {"registered": [], "eligible": [], "total": []})
-    dh = load(DELIV_HIST, {"daily": {}, "mtd": {}})
-    data["deliveries"] = {"daily": {d: dh["daily"][d] for d in sorted(dh["daily"])[-120:]}, "mtd": dh.get("mtd", {})}
+        status["sources"][name] = {**st}
+    for k in releases:
+        releases[k] = dict(sorted(releases[k].items())[-80:])
+    data["releases"] = releases
+    pending = state.get("ai_pending") or {}
+    new_major = {**pending, **new_major}
     try:
-        ai = ai_report(data, prev)
+        ai, wrote = ai_report(data, prev, new_major, releases)
         if ai:
             data["ai"] = ai
-        data["sources"]["ai"] = {"ok": True, "last_ok": now} if ai else {"ok": True, "off": True}
+        state["ai_pending"] = {}
+        status["sources"]["ai"] = {"ok": True, "checked": now, "wrote": wrote, "off": not bool(ai)}
     except Exception as e:
         log("ai FAILED:", repr(e)[:300])
-        data["sources"]["ai"] = {"ok": False, "error": str(e)[:300], "last_ok": prev.get("sources", {}).get("ai", {}).get("last_ok")}
+        state["ai_pending"] = new_major                             # نعيد المحاولة في التشغيل التالي
+        status["sources"]["ai"] = {"ok": False, "checked": now, "error": str(e)[:300]}
         if prev.get("ai"):
             data["ai"] = prev["ai"]
-    save(OUT, data)
-    ok = [n for n, s in data["sources"].items() if s["ok"]]
-    log(f"done. ok: {ok}")
+    # data.json لا يُكتب إلا إذا تغيّرت البيانات فعلًا، كي لا يتضخم سجل المستودع
+    core = lambda x: json.dumps({k: v for k, v in x.items() if k not in ("generated_utc", "sources", "data_utc")},
+                                ensure_ascii=False, sort_keys=True)
+    if core(data) != core(prev):
+        data["data_utc"] = now
+        save(OUT, data)
+        log("data.json updated")
+    else:
+        log("data.json unchanged")
+    status["data_utc"] = data.get("data_utc") or prev.get("data_utc") or prev.get("generated_utc")
+    save(STATUS_OUT, status)
+    save(STATE, state)
+    save(RELEASES, releases)
+    ran = [n for n, x in status["sources"].items() if not x.get("skipped")]
+    log(f"done. checked: {ran}; skipped (not due): {[n for n, x in status['sources'].items() if x.get('skipped')]}")
 
 
 if __name__ == "__main__":

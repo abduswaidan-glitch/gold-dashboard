@@ -72,7 +72,7 @@ button{font:inherit;color:inherit}
 .kpi{background:var(--surface);border:1px solid var(--rule);border-radius:var(--radius);padding:12px 14px;box-shadow:var(--shadow);min-width:0;
   border-top:3px solid var(--gold)}
 .kpi span{display:block;font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.kpi b{display:block;font-size:22px;font-weight:700;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpi b{display:block;font-size:21px;font-weight:700;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .kpi small{font-size:12.5px}
 @media (max-width:900px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.kpis .kpi:last-child{grid-column:1/-1}}
 
@@ -310,6 +310,17 @@ footer b{color:var(--ink)}
 .toast a{color:var(--blue);font-weight:600;text-decoration:none;white-space:nowrap}
 footer{padding-bottom:84px}
 @media (max-width:720px){.fab span{display:none}.fab{padding:12px}}
+
+/* gold price overlay & release info */
+.rvc .l-price{fill:none;stroke:var(--gold);stroke-width:2;stroke-dasharray:5 4}
+.legend .lg-price{background:repeating-linear-gradient(90deg,var(--gold) 0 5px,transparent 5px 8px);height:3px;border-radius:0;vertical-align:3px}
+.gold{color:var(--gold-lo)}
+:root:not([data-theme="light"]) .gold{color:var(--gold)}
+.muted{color:var(--muted)}
+tr.base td{background:var(--surface-2);color:var(--muted)}
+.kpis{grid-template-columns:repeat(6,minmax(0,1fr))}
+@media (max-width:1100px){.kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:700px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.kpis .kpi:last-child{grid-column:auto}}
 </style>
 </head>
 <body>
@@ -340,7 +351,7 @@ const isAr = () => state.lang === 'ar';
 const nf0 = new Intl.NumberFormat('en-US', {maximumFractionDigits:0});
 const nf1 = new Intl.NumberFormat('en-US', {minimumFractionDigits:1, maximumFractionDigits:1});
 const nf2 = new Intl.NumberFormat('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
-let fMonth, fDay, fStamp, fShortM, fList;
+let fMonth, fDay, fStamp, fShortM, fList, fRel;
 function setFormatters(){
   const loc = isAr() ? 'ar-u-nu-latn' : 'en-GB';
   fMonth = new Intl.DateTimeFormat(loc, {month:'long', year:'numeric', timeZone:'UTC'});
@@ -348,6 +359,7 @@ function setFormatters(){
   fStamp = new Intl.DateTimeFormat(loc, {dateStyle:'medium', timeStyle:'short'});
   fShortM = new Intl.DateTimeFormat(loc, {month:'short', year:'2-digit', timeZone:'UTC'});
   fList = new Intl.DateTimeFormat(loc, {day:'numeric', month:'short', year:'numeric', timeZone:'UTC'});
+  fRel = new Intl.DateTimeFormat(loc, {weekday:'long', day:'numeric', month:'long', year:'numeric', hour:'numeric', minute:'2-digit'});
 }
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const toDate = s => new Date(s + 'T00:00:00Z');
@@ -356,6 +368,7 @@ const sg = v => v > 0 ? '+' : v < 0 ? '−' : '';
 const bd = s => `<bdi dir="ltr">${s}</bdi>`;
 const U = {t: () => L('طن', 't'), kg: () => L('كغ', 'kg'), ct: () => L('عقد', 'contracts'), oz: () => '$/oz'};
 const KG = v => `${bd((v < 0 ? '−' : '') + nf0.format(Math.abs(v)))} ${U.kg()}`;
+const TN0 = v => `${bd(nf0.format(v / 1000))} ${U.t()}`;
 const TN = v => `${bd((v < 0 ? '−' : '') + nf1.format(Math.abs(v) / 1000))} ${U.t()}`;
 const sKG = v => `${bd(sg(v) + nf0.format(Math.abs(v)))} ${U.kg()}`;
 const sTN = v => `${bd(sg(v) + nf1.format(Math.abs(v) / 1000))} ${U.t()}`;
@@ -408,6 +421,38 @@ function bankName(raw){
   return titleCase(raw);
 }
 
+/* ================= gold price & release dates ================= */
+let PRICES = null, STATUS = null;
+function priceAt(d, monthly){
+  const a = PRICES && PRICES.daily; if (!a || !a.length) return null;
+  let key = d;
+  if (monthly){ const t = toDate(d); key = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).toISOString().slice(0, 10); }
+  let lo = 0, hi = a.length - 1, ans = null;
+  while (lo <= hi){ const m = (lo + hi) >> 1; if (a[m][0] <= key){ ans = a[m][1]; lo = m + 1; } else hi = m - 1; }
+  return ans;
+}
+/* US Eastern time -> UTC (DST: 2nd Sunday of March to 1st Sunday of November) */
+function nthSunday(y, m, n){ const d = new Date(Date.UTC(y, m, 1)); const first = (7 - d.getUTCDay()) % 7 + 1; return first + (n - 1) * 7; }
+function etToUtc(dateStr, h, mi){
+  const t = toDate(dateStr), y = t.getUTCFullYear();
+  const start = Date.UTC(y, 2, nthSunday(y, 2, 2), 7), end = Date.UTC(y, 10, nthSunday(y, 10, 1), 6);
+  const off = (t.getTime() >= start && t.getTime() < end) ? 4 : 5;
+  return new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate(), h + off, mi));
+}
+const addDays = (d, n) => new Date(toDate(d).getTime() + n * 864e5).toISOString().slice(0, 10);
+/* release of a COT report: data as of Tuesday, published Friday 15:30 New York time (or later after a holiday) */
+function cotRelease(src, d){
+  const seen = ((DATA.releases || {})[src] || {})[d], sched = etToUtc(addDays(d, 3), 15, 30);
+  if (seen){ const s = new Date(seen); if (s - sched < 4 * 864e5) return {when: s, observed: true, sched}; }
+  return {when: sched, observed: false, sched};
+}
+function seenAt(src, d){ const s = ((DATA.releases || {})[src] || {})[d]; return s ? new Date(s) : null; }
+function untilText(t){
+  const ms = t - Date.now(); if (ms <= 0) return L('متوقع الآن؛ يُفحص كل ساعة حتى يظهر', 'Due now; checked every hour until it appears');
+  const h = Math.floor(ms / 36e5), d = Math.floor(h / 24);
+  return d ? L(`بعد ${d} يوم و${h % 24} ساعة`, `in ${d}d ${h % 24}h`) : L(`بعد ${h} ساعة`, `in ${h}h`);
+}
+
 /* ================= math helpers ================= */
 const PERIODS = {m:{days:30, ar:'شهر', en:'Month'}, q:{days:91, ar:'ربع سنة', en:'Quarter'}, y:{days:365, ar:'سنة', en:'Year'}};
 const pLabel = k => L(PERIODS[k].ar, PERIODS[k].en);
@@ -431,7 +476,7 @@ const RVM = {};
 const WINDOW = 20;
 
 function sourceWarn(src){
-  const s = DATA.sources && DATA.sources[src];
+  const s = STATUS && STATUS.sources && STATUS.sources[src];
   if (!s || s.ok) return '';
   const when = s.last_ok ? ` ${L('بتاريخ', 'from')} ${fDay.format(new Date(s.last_ok))}` : '';
   return `<p class="warn">${L('تعذّر جلب هذا المصدر في آخر تشغيل', 'This source could not be fetched on the last run')}: <bdi dir="ltr">${esc((s.error || '').slice(0, 140))}</bdi>. ${L('المعروض هو آخر بيانات ناجحة', 'Showing the last successful data')}${when}.</p>`;
@@ -494,6 +539,21 @@ function rankedList(title, rows, k, maxAbs, monthly, nameFn){
       <span class="val ${k}">${sTN(r.c.d)}</span>
       <span class="det">${sKG(r.c.d)} ${sPCT(r.c.pct)}${L('، من', ', from')} ${TN(r.c.from[1])} ${L('إلى', 'to')} ${TN(r.c.to[1])} (${fmtD(r.c.from[0], monthly)} → ${fmtD(r.c.to[0], monthly)})</span>
     </div>`).join('')}</div>`;
+}
+
+/* release / next-report chips */
+function cotChips(src, recs){
+  const d = last(recs)[0], r = cotRelease(src, d), next = etToUtc(addDays(d, 10), 15, 30);
+  return [`${L('آخر تقرير صدر', 'Latest released')}: ${fRel.format(r.when)}`, `${L('بيانات المراكز كما في', 'Positions as of')} ${fDay.format(toDate(d))}`,
+    `${L('التقرير القادم', 'Next report')}: ${fRel.format(next)}، ${untilText(next)}`.replace('، ', isAr() ? '، ' : ', ')];
+}
+function seenChip(src, d){ const s = seenAt(src, d); return s ? `${L('رُصد', 'Picked up')}: ${fRel.format(s)}` : ''; }
+const dailyNext = () => `${L('التقرير القادم', 'Next report')}: ${L('كل يوم عمل، ويُفحص المصدر كل 3 ساعات', 'every business day; the source is checked every 3 hours')}`;
+function f13Next(p){
+  const q = new Date(Date.UTC(toDate(p).getUTCFullYear(), toDate(p).getUTCMonth() + 4, 0)), dl = new Date(q.getTime() + 45 * 864e5);
+  let m = dl.getUTCMonth(), y = dl.getUTCFullYear(); while (![1, 4, 7, 10].includes(m)){ m++; if (m > 11){ m = 0; y++; } }
+  const pub = new Date(Date.UTC(y, m + 1, 0) + 14 * 864e5);
+  return `${L('الربع القادم', 'Next quarter')} (${fDay.format(q)}): ${L('تنشره SEC نحو', 'SEC publishes around')} ${fDay.format(pub)}`;
 }
 
 const noData = () => `<p class="empty">${L('لا توجد بيانات بعد. شغّل سير العمل من تبويب Actions في GitHub ثم أعد تحميل الصفحة.', 'No data yet. Run the workflow from the Actions tab on GitHub, then reload the page.')}</p>`;
@@ -561,36 +621,55 @@ function reportView(id, title, pts, cfg){
     const Y = v => T + 8 + (hi - v) / (hi - lo) * (ph - 16);
     svg += `<polyline class="l-net" points="${pts.map((q, i) => `${((i + .5) * cw).toFixed(1)},${Y(q.line).toFixed(1)}`).join(' ')}" vector-effect="non-scaling-stroke"/>`;
   }
+  const pp = cfg.price === false ? [] : pts.map(q => priceAt(q.d, cfg.monthly));
+  pts.forEach((q, i) => { q.gp = pp[i]; });
+  const pv = pp.filter(v => v != null);
+  if (pv.length >= 2){
+    let lo = Math.min(...pv), hi = Math.max(...pv); if (lo === hi){ lo -= 1; hi += 1; }
+    const Y = v => T + 8 + (hi - v) / (hi - lo) * (ph - 16);
+    svg += `<polyline class="l-price" points="${pts.map((q, i) => q.gp == null ? '' : `${((i + .5) * cw).toFixed(1)},${Y(q.gp).toFixed(1)}`).filter(Boolean).join(' ')}" vector-effect="non-scaling-stroke"/>`;
+  }
   pts.forEach((q, i) => { svg += `<rect class="hit" data-rv="${esc(id)}" data-i="${i}" x="${(i * cw).toFixed(1)}" y="0" width="${cw.toFixed(1)}" height="${H}"/>`; });
   svg += '</svg>';
   const monthly = cfg.monthly, step = n > 12 ? 4 : n > 6 ? 2 : 1;
   const ticks = pts.map((q, i) => `<span>${(i % step === (n - 1) % step) ? (monthly ? fShortM.format(toDate(q.d)) : dm(q.d)) : ''}</span>`).join('');
-  const legend = `<div class="legend"><span><i style="background:var(--buy)"></i>${cfg.buy}</span><span><i style="background:var(--sell)"></i>${cfg.sell}</span>${cfg.line ? `<span><i style="background:var(--ink)"></i>${cfg.line}</span>` : ''}</div>`;
+  const legend = `<div class="legend"><span><i style="background:var(--buy)"></i>${cfg.buy}</span><span><i style="background:var(--sell)"></i>${cfg.sell}</span>${cfg.line ? `<span><i style="background:var(--ink)"></i>${cfg.line}</span>` : ''}${pv.length >= 2 ? `<span><i class="lg-price"></i>${L('سعر الذهب (GC)', 'Gold price (GC)')}</span>` : ''}</div>`;
   const cells = cfg.cells(p, si, pts).map(c => `<div class="cell"><h4>${c.label}</h4><div class="cv">${c.v}</div><div class="cs">${c.sub || ''}</div></div>`).join('');
   const list = pts.map((q, i) => ({q, i})).reverse().map(({q, i}) =>
-    `<button class="rep" data-act="sel" data-rv="${esc(id)}" data-i="${i}" aria-pressed="${i === si}"><span>${monthly ? fMonth.format(toDate(q.d)) : fList.format(toDate(q.d))}</span><span class="${cls(q.delta)}">${cfg.sfmt(q.delta)}</span></button>`).join('');
+    `<button class="rep" data-act="sel" data-rv="${esc(id)}" data-i="${i}" aria-pressed="${i === si}"><span>${cfg.rel ? fList.format(cfg.rel(q.d).when) : (monthly ? fMonth.format(toDate(q.d)) : fList.format(toDate(q.d)))}</span><span class="${cls(q.delta)}">${cfg.sfmt(q.delta)}</span></button>`).join('');
   return `<div class="rv" id="rv-${esc(id)}">
     <h3 class="rv-title">${title}</h3>${legend}
     <div class="rv-plot">${svg}<div class="ticks">${ticks}</div><div class="tt" dir="${isAr() ? 'rtl' : 'ltr'}" hidden></div></div>
     <div class="rv-bottom">
-      <div><div class="rv-sel">${L('التقرير المختار', 'Selected report')}: <b>${fmtD(p.d, monthly)}</b></div><div class="cells">${cells}</div></div>
+      <div><div class="rv-sel">${relLine(cfg, p.d, monthly)}</div><div class="cells">${cells}</div></div>
       <div class="rv-list" aria-label="${L('آخر التقارير', 'Latest reports')}">${list}</div>
     </div></div>`;
+}
+
+function relLine(cfg, d, monthly){
+  if (cfg.rel){
+    const r = cfg.rel(d);
+    return `${L('صدر', 'Released')}: <b>${fRel.format(r.when)}</b>${r.observed ? '' : ` <span class="muted">(${L('الموعد الرسمي', 'official schedule')})</span>`}
+      · ${L('البيانات كما في', 'Data as of')} ${fmtD(d, monthly)}`;
+  }
+  const seen = cfg.src ? seenAt(cfg.src, d) : null;
+  return `${L('التقرير المختار', 'Selected report')}: <b>${fmtD(d, monthly)}</b>${seen ? ` · ${L('رُصد في', 'Picked up')} ${fRel.format(seen)}` : ''}`;
 }
 
 function panelHTML(id, i){
   const m = RVM[id]; if (!m) return '';
   const q = m.pts[i], c = m.cfg;
   const row = (k, v, cl) => `<div><span>${k}</span><b class="${cl}">${v}</b></div>`;
-  let h = `<div class="tt-d">${fmtD(q.d, c.monthly)}</div>`;
-  if (c.panel) return h + c.panel(q, row);
+  let h = `<div class="tt-d">${c.rel ? `${L('صدر', 'Released')} ${fList.format(c.rel(q.d).when)} <small class="muted">(${L('بيانات', 'data')} ${fList.format(toDate(q.d))})</small>` : fmtD(q.d, c.monthly)}</div>`;
+  const gpRow = q.gp != null ? row(L('سعر الذهب', 'Gold price'), USD(q.gp), 'gold') : '';
+  if (c.panel) return h + c.panel(q, row) + gpRow;
   h += row(c.buy, c.fmt(q.buy), 'up');
   h += row(c.sell, c.fmt(q.sell), 'down');
   if (c.extra) h += c.extra(q);
   h += row(c.pctLabel || L('نسبة التغير', 'Change %'), q.pct == null ? '—' : sPCT(q.pct), 'ink');
   h += row(c.deltaLabel || L('الدلتا', 'Delta'), c.sfmt(q.delta), 'orange');
   h += row(L('دلتا آخر 3 تقارير', 'Delta, last 3 reports'), q.d3 == null ? '—' : c.sfmt(q.d3), q.d3 >= 0 ? 'blue' : 'down');
-  return h;
+  return h + gpRow;
 }
 
 const kgCfg = o => Object.assign({fmt: KG, sfmt: sKG}, o);
@@ -630,8 +709,8 @@ ABOUT.countries = () => [
     'Each country’s official gold holdings month by month and the change between months: positive means buying, negative means selling. Pick a country to see its last 20 months, or compare countries in the table and the buyer and seller lists.')],
   [L('المصدر وطريقة الحساب', 'Source and method'), L('قاعدة IRFCL في صندوق النقد الدولي، وهي ما ترفعه البنوك المركزية شهريًا. تصل الكمية بالأونصة الذهبية (Troy ounce)، فنحوّلها إلى كيلوغرام (الأونصة = 31.1035 غرامًا)، ونستبعد آليًا القيم غير المنطقية الناتجة عن أخطاء وحدات في بعض البلاغات.',
     'The IMF’s IRFCL database, which central banks report to every month. Quantities arrive in troy ounces and are converted to kilograms (1 oz = 31.1035 g). Implausible values caused by unit errors in some reports are rejected automatically.')],
-  [L('التحديث', 'Updates'), L('يُفحص المصدر تلقائيًا في كل تشغيل، ثلاث مرات يوميًا في أيام العمل. تصل بيانات كل شهر عادةً بعد نحو 50 يومًا من نهايته.',
-    'The source is checked automatically on every run, three times a day on weekdays. Each month’s data usually arrives about 50 days after the month ends.')],
+  [L('التحديث', 'Updates'), L('يُفحص المصدر تلقائيًا مرتين يوميًا. تصل بيانات كل شهر عادةً بعد نحو 50 يومًا من نهايته، ويظهر بجانب التقرير وقت رصده الفعلي.',
+    'The source is checked automatically twice a day. Each month’s data usually arrives about 50 days after the month ends, and the moment it was picked up is shown next to the report.')],
   [L('الحدود', 'Limits'), L('الدول التي لا ترفع النموذج الشهري، مثل كندا والإمارات وقطر والكويت وباكستان، لا تظهر هنا. والمشتريات غير المعلنة لا تظهر في أي مصدر رسمي.',
     'Countries that do not file the monthly template, such as Canada, the UAE, Qatar, Kuwait and Pakistan, do not appear here. Unreported purchases do not appear in any official source.')],
 ];
@@ -641,7 +720,7 @@ R.countries = () => {
   const entries = Object.entries(DATA.countries || {});
   const latest = entries.reduce((a, [, s]) => last(s)[0] > a ? last(s)[0] : a, '');
   let h = head(L('مشتريات الدول من الذهب', 'Gold purchases by country'), '',
-    [L('شهري', 'Monthly'), L('تأخير نحو 50 يومًا', 'About 50 days delay'), `${entries.length} ${L('دولة', 'countries')}`], 'imf', fresh(latest, 80));
+    [L('شهري', 'Monthly'), L('تأخير نحو 50 يومًا', 'About 50 days delay'), `${entries.length} ${L('دولة', 'countries')}`, seenChip('imf', latest), `${L('التحديث القادم', 'Next update')}: ${L('مستمر خلال الشهر، ويُفحص مرتين يوميًا', 'rolling through the month, checked twice a day')}`], 'imf', fresh(latest, 80));
   h += about(id, ABOUT.countries());
   if (!entries.length) return h + noData();
 
@@ -753,9 +832,9 @@ R.banks = () => {
     const dis = DATA.cot_disagg || {}, recs = state.cotCat === 'prod' ? dis.prod : dis.swap;
     h += sourceWarn('cot');
     if (!recs || !recs.length) return h + noData();
-    h += `<div class="meta">${fresh(last(recs)[0], 10)}</div>`;
+    h += `<div class="meta">${cotChips('cot', recs).map(c => `<span class="chip">${c}</span>`).join('')}${fresh(last(recs)[0], 11)}</div>`;
     h += chips('cotcat', [['swap', L('Swap Dealers (البنوك الكبرى)', 'Swap Dealers (major banks)')], ['prod', 'Producer/Merchant']], state.cotCat);
-    h += reportView('cot-' + state.cotCat, L(`آخر ${WINDOW} تقريرًا أسبوعيًا`, `Last ${WINDOW} weekly reports`), lsModel(recs), ctCfg({
+    h += reportView('cot-' + state.cotCat, L(`آخر ${WINDOW} تقريرًا أسبوعيًا`, `Last ${WINDOW} weekly reports`), lsModel(recs), ctCfg({rel: d => cotRelease('cot', d),
       buy: L('Long (شراء)', 'Long (buy)'), sell: L('Short (بيع)', 'Short (sell)'), line: L('صافي المركز', 'Net position'),
       pctLabel: L('نسبة تغير الصافي', 'Net change %'), deltaLabel: L('دلتا الصافي', 'Net delta'), extra: lsExtra, cells: lsCells(state.cotCat === 'prod')}));
     return h;
@@ -765,7 +844,7 @@ R.banks = () => {
     h += sourceWarn('deliveries');
     const {days, banks} = deliveriesByBank();
     if (!days.length) return h + `<p class="empty">${L('يُبنى سجل التسليمات يوميًا من أول تشغيل؛ لا توجد أيام مسجلة بعد.', 'The delivery history builds daily from the first run; no days recorded yet.')}</p>`;
-    h += `<div class="meta">${fresh(last(days), 6)}</div>`;
+    h += `<div class="meta"><span class="chip">${dailyNext()}</span>${seenChip('deliveries', last(days)) ? `<span class="chip">${seenChip('deliveries', last(days))}</span>` : ''}${fresh(last(days), 6)}</div>`;
     const totals = Object.entries(banks).map(([b, byDay]) => {
       const t = Object.values(byDay).reduce((a, r) => ({iss: a.iss + r.iss, stp: a.stp + r.stp}), {iss:0, stp:0});
       return {b, ...t, vol: t.iss + t.stp};
@@ -835,15 +914,15 @@ ABOUT.noncomm = () => [
     'Non-Commercial positions in gold futures, meaning hedge funds, money managers and large speculators: Long is buying, Short is selling, and Spread is offsetting positions. Includes the net and its delta for the last 20 weeks.')],
   [L('المصدر وطريقة الحساب', 'Source and method'), L('تقرير CFTC Legacy لعقود COMEX Gold (الرمز 088691) من الواجهة الرسمية. الصافي = Long − Short. الدلتا = تغير الصافي عن التقرير السابق، ودلتا آخر 3 تقارير = تغيره خلال ثلاثة أسابيع.',
     'The CFTC Legacy report for COMEX Gold (code 088691) from the official API. Net = Long − Short. Delta = change in net vs the previous report; the 3-report delta = its change over three weeks.')],
-  [L('التحديث', 'Updates'), L('أسبوعي: تنشر CFTC التقرير الجمعة الساعة 3:30 مساءً بتوقيت نيويورك عن بيانات الثلاثاء، ويلتقطه التشغيل التالي تلقائيًا. التقرير الحادي والعشرون يخرج من المخطط تلقائيًا.',
-    'Weekly: CFTC publishes on Friday at 3:30 pm New York time for Tuesday’s data, and the next run picks it up automatically. The 21st report drops out of the chart automatically.')],
+  [L('التحديث وتواريخ التقارير', 'Updates and report dates'), L('تقرير COT يرصد المراكز كما كانت عند إغلاق يوم الثلاثاء، وتنشره CFTC يوم الجمعة الساعة 3:30 مساءً بتوقيت نيويورك. لذلك يُعرض كل تقرير بتاريخ نشره (الجمعة)، ومعه تاريخ بياناته (الثلاثاء). يبدأ الفحص من موعد النشر ويتكرر كل ساعة حتى يظهر التقرير، فيُسجَّل وقت ظهوره الفعلي. التقرير الحادي والعشرون يخرج من المخطط تلقائيًا.',
+    'A COT report captures positions as of Tuesday’s close, and CFTC publishes it on Friday at 3:30 pm New York time. Each report is therefore shown by its release date (Friday), together with its data date (Tuesday). Checks start at the release time and repeat every hour until the report appears, and the actual moment it appeared is recorded. The 21st report drops out of the chart automatically.')],
   [L('الحدود', 'Limits'), L('التصنيف تضعه CFTC بحسب نشاط المتداول المعلن، وقد تقع بعض المراكز في فئة غير متوقعة.', 'The classification is CFTC’s, based on each trader’s declared business, so some positions may sit in an unexpected group.')],
 ];
 
 R.noncomm = () => {
   const recs = DATA.noncomm || [];
   let h = head(L('COT Non-Commercial: المضاربون الكبار', 'COT Non-Commercial: large speculators'), '',
-    [L('أسبوعي', 'Weekly'), recs.length ? `${L('آخر تقرير', 'Latest report')} ${fDay.format(toDate(last(recs)[0]))}` : ''], 'cot_legacy', recs.length ? fresh(last(recs)[0], 10) : '');
+    recs.length ? [L('أسبوعي', 'Weekly'), ...cotChips('cot_legacy', recs)] : [], 'cot_legacy', recs.length ? fresh(last(recs)[0], 11) : '');
   h += about('noncomm', ABOUT.noncomm());
   if (!recs.length) return h + noData();
   const Lr = last(recs), net = Lr[1] - Lr[2], oi = Lr[4];
@@ -851,7 +930,7 @@ R.noncomm = () => {
     <div class="fig"><h3>${L('صافي المركز (Long − Short)', 'Net position (Long − Short)')}</h3><div class="v ${cls(net)}">${sCT(net)}</div><div class="sub">≈ ${sTN(net * CONTRACT_KG)}</div></div>
     <div class="fig"><h3>${L('Long من إجمالي العقود المفتوحة', 'Long as share of open interest')}</h3><div class="v">${oi ? bd(nf1.format(Lr[1] / oi * 100) + '%') : '—'}</div><div class="sub">Open Interest ${CT(oi)}</div></div>
     <div class="fig"><h3>${L('Short من إجمالي العقود المفتوحة', 'Short as share of open interest')}</h3><div class="v">${oi ? bd(nf1.format(Lr[2] / oi * 100) + '%') : '—'}</div><div class="sub">${L('العقد = 100 أونصة ≈ 3.11 كغ', 'One contract = 100 oz ≈ 3.11 kg')}</div></div></div>`;
-  h += reportView('noncomm', L(`آخر ${WINDOW} تقريرًا أسبوعيًا`, `Last ${WINDOW} weekly reports`), lsModel(recs), ctCfg({
+  h += reportView('noncomm', L(`آخر ${WINDOW} تقريرًا أسبوعيًا`, `Last ${WINDOW} weekly reports`), lsModel(recs), ctCfg({rel: d => cotRelease('cot_legacy', d),
     buy: L('Long (شراء)', 'Long (buy)'), sell: L('Short (بيع)', 'Short (sell)'), line: L('صافي المركز', 'Net position'),
     pctLabel: L('نسبة تغير الصافي', 'Net change %'), deltaLabel: L('دلتا الصافي', 'Net delta'), extra: lsExtra, cells: lsCells(false)}));
   return h;
@@ -896,8 +975,8 @@ ABOUT.signals = () => [
 
 R.signals = () => {
   const cats = SIG_CATS();
-  let h = head(L('إشارات التطرف في COT', 'COT extreme signals'), '', [L('أسبوعي', 'Weekly'), L('نطاق 3 سنوات', '3-year range')], 'cot',
-    cats.length ? fresh(last(cats[0].recs)[0], 10) : '');
+  let h = head(L('إشارات التطرف في COT', 'COT extreme signals'), '', cats.length ? [L('نطاق 3 سنوات', '3-year range'), ...cotChips('cot', cats[0].recs)] : [], 'cot',
+    cats.length ? fresh(last(cats[0].recs)[0], 11) : '');
   h += about('signals', ABOUT.signals());
   if (!cats.length) return h + noData();
   if (!cats.find(c => c.id === state.sig)) state.sig = cats[0].id;
@@ -918,7 +997,7 @@ R.signals = () => {
     <p class="explain">${L('الخط الأسود موضع مؤشر 3 سنوات، والدائرة موضع مؤشر 6 أشهر. المنطقة الحمراء (0–10) والخضراء (90–100) منطقتا التطرف.', 'The black line marks the 3-year index and the circle marks the 6-month index. The red (0–10) and green (90–100) bands are the extreme zones.')}</p>`;
   const c = scored.find(x => x.id === state.sig), offset = c.recs.length;
   const pts = lsModel(c.recs).map(q => { const idx = c.recs.findIndex(r => r[0] === q.d); return {...q, k3: cotIndexAt(c.recs, idx, 156).idx, k6: cotIndexAt(c.recs, idx, 26).idx}; });
-  h += reportView('sig-' + c.id, `${c.name}: ${L(`آخر ${WINDOW} أسبوعًا`, `last ${WINDOW} weeks`)}`, pts, ctCfg({
+  h += reportView('sig-' + c.id, `${c.name}: ${L(`آخر ${WINDOW} أسبوعًا`, `last ${WINDOW} weeks`)}`, pts, ctCfg({rel: d => cotRelease(c.id === 'nc' ? 'cot_legacy' : 'cot', d),
     buy: L('Long (شراء)', 'Long (buy)'), sell: L('Short (بيع)', 'Short (sell)'), line: L('صافي المركز', 'Net position'),
     pctLabel: L('نسبة تغير الصافي', 'Net change %'), deltaLabel: L('دلتا الصافي', 'Net delta'),
     extra: q => `<div><span>${L('مؤشر COT (3 سنوات)', 'COT Index (3y)')}</span><b>${bd(nf0.format(q.k3))}</b></div><div><span>${L('مؤشر COT (6 أشهر)', 'COT Index (6m)')}</span><b>${bd(nf0.format(q.k6))}</b></div>`,
@@ -927,9 +1006,49 @@ R.signals = () => {
       {label: L('مؤشر COT (6 أشهر)', 'COT Index (6 months)'), v: bd(nf0.format(q.k6)), sub: L('يلتقط التطرف قصير المدى', 'Captures short-term extremes')},
       {label: L('صافي المركز', 'Net position'), v: sCT(q.line), sub: chgSub(q.delta, sCT)},
     ]}));
-  h += `<p class="explain">${L(`السجل المتاح: ${offset} أسبوعًا.`, `History available: ${offset} weeks.`)}</p>`;
+  h += backtestHTML(c);
   return h;
 };
+
+/* historical test: what did gold do after each extreme? */
+function backtest(c){
+  const r = c.recs, H = [4, 8, 13], px = r.map(x => priceAt(x[0], false));
+  const idx = r.map((x, i) => i >= 155 ? cotIndexAt(r, i, 156).idx : null);
+  const want = {hi: c.type === 'spec' ? -1 : 1, lo: c.type === 'spec' ? 1 : -1};
+  const mk = () => ({n: 0, dates: [], hit: [0, 0, 0], ret: [0, 0, 0], cnt: [0, 0, 0]});
+  const S = {hi: mk(), lo: mk()}, B = {up: [0, 0, 0], ret: [0, 0, 0], cnt: [0, 0, 0]};
+  let first = null, lastD = null;
+  for (let i = 0; i < r.length; i++){
+    if (idx[i] == null || px[i] == null) continue;
+    first = first || r[i][0];
+    const fr = H.map(h => (i + h < r.length && px[i + h] != null) ? px[i + h] / px[i] - 1 : null);
+    fr.forEach((v, k) => { if (v != null){ B.cnt[k]++; B.ret[k] += v; if (v > 0) B.up[k]++; lastD = r[i][0]; } });
+    const zone = idx[i] >= 90 && !(idx[i - 1] >= 90) ? 'hi' : idx[i] <= 10 && !(idx[i - 1] <= 10) ? 'lo' : null;
+    if (!zone) continue;
+    const z = S[zone]; z.n++; z.dates.push(r[i][0]);
+    fr.forEach((v, k) => { if (v != null){ z.cnt[k]++; z.ret[k] += v; if (Math.sign(v) === want[zone]) z.hit[k]++; } });
+  }
+  return {S, B, want, first, lastD, H};
+}
+function backtestHTML(c){
+  if (!PRICES || !PRICES.daily || c.recs.length < 200) return `<p class="explain">${L('الاختبار التاريخي يحتاج سجل أسعار وسجل COT أطول؛ يكتمل بعد التحديث القادم.', 'The historical test needs longer price and COT history; it completes after the next update.')}</p>`;
+  const {S, B, want, first, lastD, H} = backtest(c);
+  if (!first) return '';
+  const pc = (a, b) => b ? bd(nf0.format(a / b * 100) + '%') : '—';
+  const avg = (a, b) => b ? `<span class="${cls(a)}">${sPCT(a / b * 100)}</span>` : '—';
+  const dir = w => w > 0 ? `<span class="up">${L('صعود', 'Up')}</span>` : `<span class="down">${L('هبوط', 'Down')}</span>`;
+  const row = (label, z, w) => `<tr><td>${label}</td><td class="n">${z.n}</td><td>${dir(w)}</td>${H.map((h, k) => `<td class="n"><b>${pc(z.hit[k], z.cnt[k])}</b></td>`).join('')}${H.map((h, k) => `<td class="n">${avg(z.ret[k], z.cnt[k])}</td>`).join('')}</tr>`;
+  const base = `<tr class="base"><td>${L('كل الأسابيع (للمقارنة)', 'All weeks (baseline)')}</td><td class="n">${B.cnt[0]}</td><td>${L('نسبة الصعود', 'Share up')}</td>${H.map((h, k) => `<td class="n">${pc(B.up[k], B.cnt[k])}</td>`).join('')}${H.map((h, k) => `<td class="n">${avg(B.ret[k], B.cnt[k])}</td>`).join('')}</tr>`;
+  const lastSig = [...S.hi.dates.map(d => [d, 'hi']), ...S.lo.dates.map(d => [d, 'lo'])].sort().slice(-6).reverse();
+  return `<h3 class="rv-title">${L('الاختبار التاريخي: ماذا فعل الذهب بعد كل إشارة؟', 'Historical test: what did gold do after each signal?')}</h3>
+    <div class="tablebox"><table><thead><tr><th>${L('الإشارة', 'Signal')}</th><th class="n">${L('عدد المرات', 'Times')}</th><th>${L('الاتجاه المتوقع', 'Expected move')}</th>
+      ${H.map(h => `<th class="n">${L(`نجاح بعد ${h} أسابيع`, `Hit rate, ${h}w`)}</th>`).join('')}${H.map(h => `<th class="n">${L(`متوسط العائد ${h} أسابيع`, `Avg return, ${h}w`)}</th>`).join('')}</tr></thead>
+      <tbody>${row(L('دخول منطقة 90 فما فوق', 'Entered 90 or above'), S.hi, want.hi)}${row(L('دخول منطقة 10 فما دون', 'Entered 10 or below'), S.lo, want.lo)}${base}</tbody></table></div>
+    <p class="explain">${L(
+      `الفترة المختبرة: من ${fDay.format(toDate(first))} إلى ${fDay.format(toDate(lastD))}. «النجاح» يعني أن الذهب تحرك في الاتجاه المتوقع بعد المدة المذكورة. قارن نسبة النجاح بسطر «كل الأسابيع»: الإشارة مفيدة فقط إن تفوقت عليه بوضوح. السعر من عقود COMEX الأقرب، وفيه فروق صغيرة عند تبديل العقود. النتائج التاريخية لا تضمن المستقبل، وعدد المرات القليل يجعل النسب غير موثوقة.`,
+      `Period tested: ${fDay.format(toDate(first))} to ${fDay.format(toDate(lastD))}. A “hit” means gold moved in the expected direction over that horizon. Compare each hit rate with the “All weeks” row: a signal only adds value if it clearly beats it. Prices are from the front COMEX contract, with small jumps at contract rolls. Past results do not guarantee the future, and a small number of signals makes the rates unreliable.`)}
+      ${lastSig.length ? `<br>${L('آخر الإشارات', 'Latest signals')}: ${lastSig.map(([d, z]) => `${fList.format(toDate(d))} (${z === 'hi' ? '≥90' : '≤10'})`).join(L('، ', ', '))}` : ''}</p>`;
+}
 
 /* ---------- 13F institutions ---------- */
 const F13_STATUS = {new:['مركز جديد', 'New position', 'st-new'], first:['أول إفصاح', 'First filing', 'st-new'], up:['زيادة', 'Increased', 'st-up'],
@@ -1002,7 +1121,7 @@ R.f13 = () => {
   let h = f13Intro() + sourceWarn('f13');
   if (!f || !f.periods || !f.periods.length) return h + `<p class="empty">${L('يُنزَّل أرشيف SEC في أول تشغيل، وقد يستغرق عدة دقائق. أعد تحميل الصفحة بعد انتهائه.', 'The SEC archive downloads on the first run and can take several minutes. Reload the page when it finishes.')}</p>`;
   const P = f.periods;
-  h += `<div class="meta" style="margin-bottom:10px">${fresh(last(P).p, 150)}</div>`;
+  h += `<div class="meta" style="margin-bottom:10px"><span class="chip">${f13Next(last(P).p)}</span>${seenChip('f13', last(P).p) ? `<span class="chip">${seenChip('f13', last(P).p)}</span>` : ''}${fresh(last(P).p, 150)}</div>`;
   const pts = P.map((q, i) => ({d: q.p, line: q.total, buy: q.buy, sell: q.sell, P: q, idx: i,
     delta: i ? q.total - P[i - 1].total : 0, pct: i && P[i - 1].total ? (q.total - P[i - 1].total) / P[i - 1].total * 100 : null,
     d3: i >= 3 ? q.total - P[i - 3].total : null})).slice(-WINDOW);
@@ -1070,7 +1189,7 @@ ABOUT.comex = () => [
 R.comex = () => {
   const id = 'comex', p = state.period[id], c = DATA.comex || {};
   const reg = c.registered || [], eli = c.eligible || [], tot = c.total || [];
-  let h = head(L('مخزون بورصة COMEX', 'COMEX vault stocks'), '', [L('يومي', 'Daily'), tot.length ? L(`${tot.length} يومًا في السجل`, `${tot.length} days recorded`) : ''], 'comex', tot.length ? fresh(last(tot)[0], 6) : '');
+  let h = head(L('مخزون بورصة COMEX', 'COMEX vault stocks'), '', [L('يومي', 'Daily'), tot.length ? L(`${tot.length} يومًا في السجل`, `${tot.length} days recorded`) : '', dailyNext(), tot.length ? seenChip('comex', last(tot)[0]) : ''], 'comex', tot.length ? fresh(last(tot)[0], 6) : '');
   h += about(id, ABOUT.comex());
   if (!tot.length) return h + noData();
   const byR = Object.fromEntries(reg), byE = Object.fromEntries(eli);
@@ -1104,20 +1223,22 @@ ABOUT.etf = () => [
     'Physical gold held by the largest US physically backed gold ETFs, GLD, IAU and GLDM, and their daily flows. Inflows mean investors are buying; outflows mean they are selling.')],
   [L('المصادر وطريقة الحساب', 'Sources and method'), L('GLD وGLDM من الأرشيف التاريخي الرسمي لـ SPDR (عمود الأطنان في الصندوق). IAU من صفحة iShares الرسمية (Tonnes in Trust)، ويُبنى سجله يومًا بيوم منذ أول تشغيل. التدفق اليومي = تغير الحيازة عن اليوم السابق.',
     'GLD and GLDM come from SPDR’s official historical archive (tonnes in trust). IAU comes from the official iShares page (Tonnes in Trust), and its history builds day by day from the first run. Daily flow = change in holdings vs the previous day.')],
-  [L('التحديث', 'Updates'), L('يومي. SPDR تحدّث ملفها صباح نيويورك عن اليوم السابق، لذلك أضفنا تشغيلًا صباحيًا يلتقطه في يومه.', 'Daily. SPDR updates its file in the New York morning for the previous day, so a morning run picks it up the same day.')],
+  [L('التحديث', 'Updates'), L('يومي: يُفحص كل 3 ساعات، فيظهر تحديث SPDR الصباحي وتحديث iShares في يومهما. وقسم «عالميًا (WGC)» شهري: يقرأ الذكاء الاصطناعي تقرير World Gold Council الشهري المنشور عن كل صناديق الذهب في العالم ويستخرج أرقامه.', 'Daily: checked every 3 hours, so SPDR’s morning update and the iShares update appear the same day. The “Global (WGC)” view is monthly: AI reads the World Gold Council’s published monthly report on every gold ETF worldwide and extracts its figures.')],
   [L('الحدود', 'Limits'), L('لا يشمل صناديق الذهب الأوروبية والآسيوية ولا الصناديق الأمريكية الأصغر. الإجمالي يجمع فقط الصناديق التي يتوفر لها سجل كافٍ.', 'European and Asian gold ETFs and smaller US funds are not included. The total only adds funds with enough history.')],
 ];
 R.etf = () => {
   const id = 'etf', p = state.period[id], funds = etfSeries(), keys = Object.keys(funds);
   const latest = keys.reduce((a, k) => last(funds[k])[0] > a ? last(funds[k])[0] : a, '');
-  let h = head(L('صناديق الذهب المتداولة', 'Gold ETFs'), '', [L('يومي', 'Daily'), keys.join(' · ')], 'etf', fresh(latest, 6)) + sourceWarn('etf2');
+  let h = head(L('صناديق الذهب المتداولة', 'Gold ETFs'), '', [L('يومي', 'Daily'), keys.join(' · '), dailyNext()], 'etf', fresh(latest, 6)) + sourceWarn('etf2');
   h += about(id, ABOUT.etf());
   if (!keys.length) return h + noData();
   const tot = etfTotal(funds);
   const opts = keys.map(k => [k, k]);
   if (tot.series.length > 2) opts.unshift(['ALL', L('الإجمالي', 'Total')]);
+  if ((DATA.wgc_etf || []).length) opts.push(['WGC', L('عالميًا (WGC)', 'Global (WGC)')]);
   if (!opts.find(o => o[0] === state.etfFund)) state.etfFund = opts[0][0];
   h += chips('etffund', opts, state.etfFund);
+  if (state.etfFund === 'WGC') return h + sourceWarn('wgc') + wgcView();
   const s = state.etfFund === 'ALL' ? tot.series : funds[state.etfFund];
   const title = state.etfFund === 'ALL' ? `${L('الإجمالي', 'Total')} (${tot.use.join(' + ')})` : `${state.etfFund}: ${ETF_INFO[state.etfFund]}`;
   h += reportView('etf-' + state.etfFund, `${title}, ${L(`آخر ${WINDOW} يوم تداول`, `last ${WINDOW} trading days`)}`, flowModel(s), kgCfg({
@@ -1138,6 +1259,31 @@ R.etf = () => {
   return h;
 };
 
+function wgcView(){
+  const w = DATA.wgc_etf || [], R2 = ['north_america', 'europe', 'asia', 'other'];
+  const RN = {north_america: L('أمريكا الشمالية', 'North America'), europe: L('أوروبا', 'Europe'), asia: L('آسيا', 'Asia'), other: L('مناطق أخرى', 'Other')};
+  const usd = v => v == null ? '—' : `<span class="${cls(v)}">${bd(sg(v) + '$' + nf1.format(Math.abs(v)) + 'bn')}</span>`;
+  const ser = w.filter(x => x.global_holdings_t != null).map(x => [x.data_month + '-01', x.global_holdings_t * 1000]);
+  const byM = Object.fromEntries(w.map(x => [x.data_month + '-01', x]));
+  const latest = last(w) || {};
+  let h = `<div class="brief"><h3>${L('آخر شهر', 'Latest month')}: ${fMonth.format(toDate(latest.data_month + '-01'))}</h3><p>${esc(isAr() ? latest.headline_ar || '' : latest.headline_en || '')}</p>
+    <p>${L('التقرير القادم', 'Next report')}: ${L('خلال الأسبوع الأول من الشهر القادم، ويُفحص مرتين يوميًا', 'within the first week of next month; checked twice a day')}. ${latest.article && safeUrl(latest.article) ? extLink(latest.article) : ''}</p></div>`;
+  h += reportView('wgc', L('صناديق الذهب في العالم (أكثر من 100 صندوق)', 'Gold ETFs worldwide (100+ funds)'), flowModel(ser), kgCfg({monthly: true,
+    buy: L('تدفق داخل', 'Inflow'), sell: L('تدفق خارج', 'Outflow'), line: L('الحيازة العالمية', 'Global holdings'),
+    empty: L('يكتمل المخطط بعد شهرين من البيانات.', 'The chart needs two months of data.'),
+    cells: q => { const x = byM[q.d] || {}; return [
+      {label: L('الحيازة العالمية', 'Global holdings'), v: TN(q.line), sub: x.aum_usd_bn ? `AUM ${bd('$' + nf1.format(x.aum_usd_bn) + 'bn')}` : ''},
+      {label: L('التدفق بالدولار', 'Flow in USD'), v: usd(x.global_flow_usd_bn), sub: x.global_demand_t == null ? '' : `${L('الطلب', 'Demand')} ${bd(sg(x.global_demand_t) + nf1.format(Math.abs(x.global_demand_t)))} ${U.t()}`},
+      {label: L('حسب المنطقة', 'By region'), v: '', sub: R2.map(k => `${RN[k]}: ${usd(((x.regions || {})[k] || {}).flow_usd_bn)}`).join('<br>')},
+    ]; }}));
+  h += `<div class="tablebox"><table><thead><tr><th>${L('الشهر', 'Month')}</th><th class="n">${L('الحيازة', 'Holdings')}</th><th class="n">${L('الطلب', 'Demand')}</th><th class="n">${L('التدفق', 'Flow')}</th>${R2.map(k => `<th class="n">${RN[k]}</th>`).join('')}<th>${L('المصدر', 'Source')}</th></tr></thead><tbody>
+    ${w.slice().reverse().map(x => `<tr><td>${fMonth.format(toDate(x.data_month + '-01'))}</td><td class="n">${x.global_holdings_t == null ? '—' : bd(nf1.format(x.global_holdings_t)) + ' ' + U.t()}</td>
+      <td class="n ${cls(x.global_demand_t)}">${x.global_demand_t == null ? '—' : bd(sg(x.global_demand_t) + nf1.format(Math.abs(x.global_demand_t))) + ' ' + U.t()}</td><td class="n">${usd(x.global_flow_usd_bn)}</td>
+      ${R2.map(k => `<td class="n">${usd(((x.regions || {})[k] || {}).flow_usd_bn)}</td>`).join('')}<td>${extLink(x.article)}</td></tr>`).join('')}</tbody></table></div>
+    <p class="explain">${L('المصدر: تقرير World Gold Council الشهري عن تدفقات صناديق الذهب، وهو يغطي أكثر من 100 صندوق مدعوم بالذهب حول العالم. يقرأ الذكاء الاصطناعي التقرير المنشور ويستخرج أرقامه؛ راجع الرابط للتحقق.', 'Source: the World Gold Council’s monthly gold ETF flows report, covering 100+ physically backed gold ETFs worldwide. AI reads the published report and extracts its figures; follow the link to verify.')}</p>`;
+  return h;
+}
+
 /* ---------- physical market: EFP & Shanghai premium ---------- */
 function pctRank(vals, v){ const a = vals.filter(x => x != null); return a.length ? a.filter(x => x <= v).length / a.length * 100 : null; }
 ABOUT.physical = () => [
@@ -1155,7 +1301,7 @@ ABOUT.physical = () => [
 R.physical = () => {
   const ph = DATA.physical || {};
   const avail = [['efp', L('فرق COMEX عن لندن (EFP)', 'COMEX vs London (EFP)')], ['sh', L('علاوة شنغهاي', 'Shanghai premium')]].filter(([k]) => (ph[k] || []).length);
-  let h = head(L('السوق الفعلي: EFP وعلاوة شنغهاي', 'Physical market: EFP and Shanghai premium'), '', [L('يومي', 'Daily'), '$/oz'], 'physical',
+  let h = head(L('السوق الفعلي: EFP وعلاوة شنغهاي', 'Physical market: EFP and Shanghai premium'), '', [L('يومي', 'Daily'), '$/oz', dailyNext()], 'physical',
     avail.length ? fresh(last(ph[avail[0][0]])[0], 6) : '');
   h += about('physical', ABOUT.physical());
   if (!avail.length) return h + noData();
@@ -1208,8 +1354,8 @@ function aiIntro(){
         <p>${L('يبحث النموذج في الإنترنت عن أحداث اليوم: قرارات الفيدرالي والفائدة، والدولار وعوائد السندات، والتوترات الجيوسياسية، وأخبار شراء البنوك المركزية، والطلب في الصين والهند. ويُذكر رابط مصدر كل حدث، وتظهر قائمة المصادر أسفل التقرير.',
           'The model searches the web for today’s events: Federal Reserve and rate decisions, the US dollar and bond yields, geopolitical tensions, central-bank buying news, and demand in China and India. Each event links to its source, and the full source list appears below the report.')}</p></section>
       <section><h3>${L('متى يُكتب وما قواعده؟', 'When is it written, and under what rules?')}</h3>
-        <p>${L('مرة واحدة في كل يوم عمل، بعد إغلاق نيويورك. كل الأرقام مأخوذة من بيانات المنصة نفسها، والنموذج ممنوع من اختراع الأرقام أو إعطاء توصيات شراء وبيع. نحتفظ بآخر 14 تقريرًا.',
-          'Once every weekday, after the New York close. Every number comes from the platform’s own data, and the model is not allowed to invent numbers or give buy or sell recommendations. The last 14 reports are kept.')}</p></section>
+        <p>${L('فور صدور تقرير كبير جديد: COT كل جمعة، وبيانات البنوك المركزية الشهرية، وملفات 13F الربعية، وتقرير WGC الشهري. في الأيام التي لا يصدر فيها تقرير كبير لا يُكتب تقرير جديد، فلا تُستهلك Tokens دون فائدة، بينما تتحدث الأسعار والبيانات اليومية في أقسامها. كل الأرقام من بيانات المنصة نفسها، والنموذج ممنوع من اختراع الأرقام أو إعطاء توصيات شراء وبيع. نحتفظ بآخر 14 تقريرًا.',
+          'As soon as a major new report comes out: COT every Friday, monthly central-bank data, quarterly 13F filings and the monthly WGC report. On days with no major report, no new report is written, so no tokens are wasted, while prices and daily data keep updating in their sections. Every number comes from the platform’s own data, and the model may not invent numbers or give buy or sell recommendations. The last 14 reports are kept.')}</p></section>
     </div></div>`;
 }
 
@@ -1217,14 +1363,18 @@ R.ai = () => {
   const ai = DATA.ai, list = ai && ai.history ? ai.history.slice().reverse() : [];
   let h = aiIntro() + sourceWarn('ai');
   if (!list.length) return h + `<div class="brief"><h3>${L('التقرير غير مفعّل بعد', 'The report is not active yet')}</h3><p>${L('يبدأ التقرير اليومي بعد إضافة مفتاح Claude API إلى إعدادات المنصة. سيظهر أول تقرير بعد أول تشغيل مسائي.', 'The daily report starts once a Claude API key is added to the platform settings. The first report appears after the first evening run.')}</p></div>`;
-  if (!state.aiDate || !list.find(r => r.date === state.aiDate)) state.aiDate = list[0].date;
-  const r = list.find(x => x.date === state.aiDate), rep = r[state.lang] || r.ar || {};
+  const keyOf = x => x.generated_utc || x.date;
+  if (!state.aiDate || !list.find(r => keyOf(r) === state.aiDate)) state.aiDate = keyOf(list[0]);
+  const r = list.find(x => keyOf(x) === state.aiDate), rep = r[state.lang] || r.ar || {};
+  const TRIG = {cot: L('تقرير COT جديد', 'New COT report'), cot_legacy: L('تقرير COT جديد', 'New COT report'), imf: L('بيانات بنوك مركزية جديدة', 'New central-bank data'),
+    f13: L('ملفات 13F جديدة', 'New 13F filings'), wgc: L('تقرير WGC الشهري', 'Monthly WGC report'), manual: L('طلب يدوي', 'Manual request')};
   h += `<div class="ai-dates" role="group" aria-label="${L('التقارير السابقة', 'Previous reports')}">${list.map(x =>
-    `<button class="chip-btn" data-act="aidate" data-v="${esc(x.date)}" aria-pressed="${x.date === state.aiDate}">${fDay.format(toDate(x.date))}</button>`).join('')}</div>`;
+    `<button class="chip-btn" data-act="aidate" data-v="${esc(keyOf(x))}" aria-pressed="${keyOf(x) === state.aiDate}">${x.generated_utc ? fStamp.format(new Date(x.generated_utc)) : fDay.format(toDate(x.date))}</button>`).join('')}</div>`;
   const tone = TONE[rep.tone] || 'neu';
   h += `<article class="ai-report">
     <div class="ai-top"><span class="tone ${tone}">${esc(rep.tone || '')}</span><span>${fDay.format(toDate(r.date))}</span>
-      ${r.generated_utc ? `<span>${L('كُتب في', 'Written')} ${fStamp.format(new Date(r.generated_utc))}</span>` : ''}<span><bdi>${esc(r.model || 'Claude')}</bdi></span></div>
+      ${r.generated_utc ? `<span>${L('كُتب في', 'Written')} ${fStamp.format(new Date(r.generated_utc))}</span>` : ''}<span><bdi>${esc(r.model || 'Claude')}</bdi></span>
+      ${(r.trigger || []).filter((t, i, a) => a.indexOf(t) === i && TRIG[t]).map(t => `<span class="chip">${L('سبب التحديث', 'Trigger')}: ${TRIG[t]}</span>`).join('')}</div>
     <h2>${esc(rep.headline || '')}</h2>
     <h3 style="margin:0 0 4px;font-size:15px">${L('الملخص', 'Summary')}</h3>
     <ul class="ai-summary">${(rep.summary || []).map(s => `<li>${esc(s)}</li>`).join('')}</ul></article>`;
@@ -1247,10 +1397,12 @@ R.ai = () => {
 function digestText(){
   const T = n => `${nf1.format(n / 1000)} ${L('طن', 't')}`, sT = n => `${sg(n)}${nf1.format(Math.abs(n) / 1000)} ${L('طن', 't')}`;
   const sC = n => `${sg(n)}${nf0.format(Math.abs(n))}`, out = [];
-  const now = DATA.generated_utc ? fStamp.format(new Date(DATA.generated_utc)) : '';
+  const stamp = (STATUS && STATUS.checked_utc) || DATA.data_utc || DATA.generated_utc, now = stamp ? fStamp.format(new Date(stamp)) : '';
   out.push(L(
     `أنت محلل محترف لسوق الذهب. فيما يلي بيانات منصة «تدفقات الذهب» (آخر تحديث: ${now}). اقرأها كاملة، ثم أجب عن أسئلتي بالاعتماد عليها، واذكر حين تكون المعلومة ناقصة. الوحدات: طن، والعقد = 100 أونصة.`,
     `You are a professional gold-market analyst. Below is data from the "Gold Flows" platform (last update: ${now}). Read all of it, then answer my questions based on it, and say when information is missing. Units: tonnes; one contract = 100 oz.`), '');
+  const pl = PRICES && PRICES.last;
+  if (pl && pl.price) out.push(`## ${L('سعر الذهب', 'Gold price')}`, `COMEX GC: $${nf2.format(pl.price)} (${pl.time ? fStamp.format(new Date(pl.time)) : ''})`, '');
   const cb = (DATA.central_banks || {}).series || [];
   if (cb.length > 13){ const a = last(cb)[1];
     out.push(`## ${L('البنوك المركزية', 'Central banks')} (${fMonth.format(toDate(last(cb)[0]))})`,
@@ -1336,35 +1488,41 @@ function renderTop(){
   document.getElementById('tagline').textContent = L('تتبّع حركة الذهب العالمية: الدول والبنوك والمؤسسات والأسواق', 'Tracking global gold: countries, banks, institutions and markets');
   document.title = L('تدفقات الذهب', 'Gold Flows');
   document.getElementById('foot').innerHTML = `<b>${L('تنبيه', 'Disclaimer')}:</b> ${L('محتوى تعليمي وليس نصيحة استثمارية.', 'Educational content, not investment advice.')} ` + L(
-    'المصادر: IMF IRFCL، وCFTC COT (Legacy وDisaggregated)، وCME (مخزون COMEX وتقرير Issues and Stops)، وSPDR وiShares، وSEC Form 13F، وLBMA، وبورصة شنغهاي للذهب، وYahoo Finance، وFrankfurter. تُحدَّث البيانات تلقائيًا ثلاث مرات يوميًا في أيام العمل ومرة يوم السبت، والتقرير الذكي يُكتب مرة يوميًا بنموذج Claude من Anthropic.',
-    'Sources: IMF IRFCL, CFTC COT (Legacy and Disaggregated), CME (COMEX vault stocks and the Issues and Stops report), SPDR and iShares, SEC Form 13F, LBMA, the Shanghai Gold Exchange, Yahoo Finance and Frankfurter. Data updates automatically three times a day on weekdays and once on Saturday; the AI report is written once a day by Anthropic’s Claude.');
+    'المصادر: IMF IRFCL، وCFTC COT (Legacy وDisaggregated)، وCME (مخزون COMEX وتقرير Issues and Stops)، وSPDR وiShares، وSEC Form 13F، وLBMA، وبورصة شنغهاي للذهب، وYahoo Finance، وFrankfurter. يُحدَّث سعر الذهب كل ساعة، ويُفحص كل مصدر قرب موعد تقريره ويُعرض بتاريخ نشره الحقيقي، ويُكتب التقرير الذكي (Claude من Anthropic) فقط عند صدور تقرير كبير جديد.',
+    'Sources: IMF IRFCL, CFTC COT (Legacy and Disaggregated), CME (COMEX vault stocks and the Issues and Stops report), SPDR and iShares, SEC Form 13F, LBMA, the Shanghai Gold Exchange, Yahoo Finance and Frankfurter. The gold price updates every hour, each source is checked around its release time and shown with its real release date, and the AI report (Anthropic’s Claude) is written only when a major new report comes out.');
 }
 
 function renderMast(){
   if (!DATA) return;
   const k = [];
+  const pl = PRICES && PRICES.last, dly = (PRICES && PRICES.daily) || [];
+  if (pl && pl.price){
+    const prev = pl.prev_close || (dly.length > 1 ? dly[dly.length - 2][1] : null), ch = prev ? (pl.price / prev - 1) * 100 : null;
+    k.push([L('سعر الذهب (COMEX GC)', 'Gold price (COMEX GC)'), USD(pl.price), `${ch == null ? '' : `<span class="${cls(ch)}">${sPCT(ch)}</span> `}${pl.time ? fStamp.format(new Date(pl.time)) : ''}`]);
+  }
   const cbs = (DATA.central_banks || {}).series || [];
   if (cbs.length > 1){ const a = cbs[cbs.length - 1], b = cbs[cbs.length - 2];
-    k.push([L('البنوك المركزية المُبلِّغة', 'Reporting central banks'), TN(a[1]), `<span class="${cls(a[1] - b[1])}">${sTN(a[1] - b[1])}</span> ${L('آخر شهر', 'last month')}`]); }
+    k.push([L('البنوك المركزية المُبلِّغة', 'Reporting central banks'), TN0(a[1]), `<span class="${cls(a[1] - b[1])}">${sTN(a[1] - b[1])}</span> ${L('آخر شهر', 'last month')}`]); }
   const tot = (DATA.comex || {}).total || [];
   if (tot.length){ const a = last(tot), d = tot.length > 1 ? a[1] - tot[tot.length - 2][1] : 0;
-    k.push([L('مخزون COMEX', 'COMEX vaults'), TN(a[1]), `<span class="${cls(d)}">${sTN(d)}</span> ${L('آخر يوم', 'last day')}`]); }
+    k.push([L('مخزون COMEX', 'COMEX vaults'), TN0(a[1]), `<span class="${cls(d)}">${sTN(d)}</span> ${L('آخر يوم', 'last day')}`]); }
   const gld = (DATA.etf || {}).GLD || [];
   if (gld.length > 1){ const a = last(gld), d = a[1] - gld[gld.length - 2][1];
-    k.push([L('الذهب في GLD', 'Gold in GLD'), TN(a[1]), `<span class="${cls(d)}">${sKG(d)}</span> ${L('آخر يوم', 'last day')}`]); }
+    k.push([L('الذهب في GLD', 'Gold in GLD'), TN0(a[1]), `<span class="${cls(d)}">${sKG(d)}</span> ${L('آخر يوم', 'last day')}`]); }
   const mm = (DATA.cot_disagg || {}).mm || [];
   if (mm.length > 26){ const v = cotIndexAt(mm, mm.length - 1, 156).idx, t = sigText('spec', v);
     k.push([L('مؤشر COT لصناديق التحوط', 'Hedge-fund COT index'), `${bd(nf0.format(v))}<small style="color:var(--muted)"> / 100</small>`, `<span class="${t[1]}">${t[0]}</span>`]); }
   const efp = (DATA.physical || {}).efp || [];
-  if (efp.length){ const a = last(efp), d = efp.length > 1 ? a[1] - efp[efp.length - 2][1] : 0;
+  if (efp.length && k.length < 6){ const a = last(efp), d = efp.length > 1 ? a[1] - efp[efp.length - 2][1] : 0;
     k.push([L('فرق COMEX عن لندن', 'COMEX vs London'), sUSD(a[1]), `<span class="${cls(d)}">${sUSD(d)}</span> ${L('آخر يوم', 'last day')}`]); }
   document.getElementById('assay').innerHTML = k.map(([l, v, s2]) => `<div class="kpi"><span>${l}</span><b>${v}</b><small>${s2}</small></div>`).join('');
   let up = '';
-  if (DATA.generated_utc){
-    const g = new Date(DATA.generated_utc), age = (Date.now() - g.getTime()) / 864e5;
-    up = `<span dir="auto">${L('آخر تحديث تلقائي', 'Last automatic update')}: ${fStamp.format(g)}</span>`;
-    up += age > 3 ? ` <span class="fresh stale">${L(`التحديث متوقف منذ ${Math.floor(age)} أيام`, `No update for ${Math.floor(age)} days`)}</span>`
-      : ` <span class="fresh ok">${L('التحديث التلقائي يعمل ✓', 'Auto-updates running ✓')}</span>`;
+  const chk = STATUS && STATUS.checked_utc;
+  if (chk){
+    const g = new Date(chk), age = (Date.now() - g.getTime()) / 36e5;
+    up = `<span dir="auto">${L('آخر فحص تلقائي', 'Last automatic check')}: ${fStamp.format(g)}</span>`;
+    up += age > 6 ? ` <span class="fresh stale">${L(`التحديث متوقف منذ ${Math.floor(age)} ساعة`, `No check for ${Math.floor(age)} hours`)}</span>`
+      : ` <span class="fresh ok">${L('يُفحص كل ساعة ✓', 'Checked hourly ✓')}</span>`;
   }
   document.getElementById('updated').innerHTML = up;
 }
@@ -1475,9 +1633,10 @@ window.addEventListener('hashchange', () => {
   if (TABS().some(([id]) => id === fromHash)) state.tab = fromHash;
   applyLang();
   try {
-    const r = await fetch('data.json?t=' + Date.now(), {cache:'no-store'});
-    if (!r.ok) throw new Error(r.status);
-    DATA = await r.json();
+    const get = f => fetch(f + '?t=' + Date.now(), {cache:'no-store'}).then(x => x.ok ? x.json() : null).catch(() => null);
+    const [d, p, s2] = await Promise.all([get('data.json'), get('prices.json'), get('status.json')]);
+    if (!d) throw new Error('data.json');
+    DATA = d; PRICES = p; STATUS = s2 || {checked_utc: d.generated_utc, sources: d.sources || {}};
     renderMast();
     render();
   } catch (err){
