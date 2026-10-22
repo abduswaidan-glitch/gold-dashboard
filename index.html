@@ -13,32 +13,28 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#F3F4F6; --surface:#FFFFFF; --surface-2:#F8F9FB; --ink:#0F1720; --muted:#5B6776; --rule:#E2E6EB;
-  --navy:#131A22; --navy-2:#232F3E; --navy-ink:#E9EDF2; --navy-muted:#9AA7B6;
-  --gold:#C99A2E; --gold-hi:#F2C14E; --gold-lo:#9C7420; --gold-ink:#241903; --gold-soft:rgba(201,154,46,.12);
-  --buy:#0B8A5A; --sell:#C9372C; --blue:#1F62D6; --orange:#D97706; --alt:#3B6EA8;
+  /* night first: deep navy surfaces, soft off-white ink, gold accent; light palette on request */
+  --bg:#0A0F15; --surface:#111821; --surface-2:#16202B; --ink:#E3E8EE; --muted:#93A0B0; --rule:#233040;
+  --navy:#0C121A; --navy-2:#1A2531; --navy-ink:#E9EDF2; --navy-muted:#9AA7B6;
+  --gold:#E0B44C; --gold-hi:#F5CE6B; --gold-lo:#B8892B; --gold-ink:#241903; --gold-soft:rgba(224,180,76,.13);
+  --buy:#3CC48C; --sell:#F06A5D; --blue:#78A6FF; --orange:#F5A142; --alt:#7FB0D1;
+  --sel-bg:var(--gold); --sel-ink:var(--gold-ink);
   --metal:var(--gold); --metal-hi:var(--gold-hi); --metal-lo:var(--gold-lo); --ingot-ink:var(--gold-ink);
-  --radius:10px; --shadow:0 1px 2px rgba(15,23,32,.05),0 1px 1px rgba(15,23,32,.03);
+  --radius:10px; --shadow:0 1px 2px rgba(0,0,0,.35);
   --sans:"IBM Plex Sans Arabic","IBM Plex Sans","Segoe UI",Tahoma,system-ui,sans-serif;
   --kufi:var(--sans);
-  color-scheme:light;
+  color-scheme:dark;
   box-sizing:border-box;
   padding-top:env(safe-area-inset-top,0px);
   padding-bottom:env(safe-area-inset-bottom,0px);
 }
-@media (prefers-color-scheme:dark){
-  :root:not([data-theme="light"]){
-    --bg:#0B1016; --surface:#121922; --surface-2:#18212C; --ink:#E7ECF2; --muted:#93A0B0; --rule:#24303D;
-    --navy:#0E141B; --navy-2:#161F2A;
-    --gold:#E0B44C; --gold-hi:#F5CE6B; --gold-lo:#A87F25; --gold-soft:rgba(224,180,76,.12);
-    --buy:#3CC48C; --sell:#F06A5D; --blue:#78A6FF; --orange:#F5A142; --alt:#7FB0D1;
-    --shadow:0 1px 2px rgba(0,0,0,.35); color-scheme:dark;
-  }
-}
-:root[data-theme="dark"]{
-  --bg:#0B1016; --surface:#121922; --surface-2:#18212C; --ink:#E7ECF2; --muted:#93A0B0; --rule:#24303D;
-  --navy:#0E141B; --navy-2:#161F2A; --gold:#E0B44C; --gold-hi:#F5CE6B; --gold-lo:#A87F25; --gold-soft:rgba(224,180,76,.12);
-  --buy:#3CC48C; --sell:#F06A5D; --blue:#78A6FF; --orange:#F5A142; --alt:#7FB0D1; --shadow:0 1px 2px rgba(0,0,0,.35); color-scheme:dark;
+:root[data-theme="light"]{
+  --bg:#F3F4F6; --surface:#FFFFFF; --surface-2:#F8F9FB; --ink:#0F1720; --muted:#5B6776; --rule:#E2E6EB;
+  --navy:#131A22; --navy-2:#232F3E;
+  --gold:#C99A2E; --gold-hi:#F2C14E; --gold-lo:#9C7420; --gold-soft:rgba(201,154,46,.12);
+  --buy:#0B8A5A; --sell:#C9372C; --blue:#1F62D6; --orange:#D97706; --alt:#3B6EA8;
+  --sel-bg:var(--navy-2); --sel-ink:#FFFFFF;
+  --shadow:0 1px 2px rgba(15,23,32,.05),0 1px 1px rgba(15,23,32,.03); color-scheme:light;
 }
 *,*::before,*::after{box-sizing:inherit}
 html{scroll-padding-top:calc(env(safe-area-inset-top,0px) + 64px)}
@@ -61,12 +57,15 @@ button{font:inherit;color:inherit}
 .brand h1{margin:0;font-size:26px;font-weight:700;letter-spacing:0;line-height:1.15}
 .brand h1 span{color:var(--gold-hi)}
 .brand p{margin:2px 0 0;font-size:13.5px;color:var(--navy-muted)}
-.lang{display:inline-flex;flex:none;margin-left:auto;border:1px solid rgba(255,255,255,.18);border-radius:99px;overflow:hidden}
+.lang{display:inline-flex;flex:none;margin-left:auto;margin-right:8px;border:1px solid rgba(255,255,255,.18);border-radius:99px;overflow:hidden}
 .lang button{display:inline-flex;align-items:center;gap:7px;border:0;background:none;padding:5px 12px;cursor:pointer;font-size:13px;color:var(--navy-ink)}
 .lang button+button{border-left:1px solid rgba(255,255,255,.18)}
 .lang button[aria-pressed="true"]{background:var(--gold);color:var(--gold-ink);font-weight:600}
 .lang img{width:20px;height:14px;object-fit:cover;border-radius:2px}
 .lang .lc{display:none}
+.theme-btn{flex:none;display:inline-flex;align-items:center;justify-content:center;width:32px;height:30px;border-radius:99px;cursor:pointer;
+  border:1px solid rgba(255,255,255,.18);background:none;color:var(--gold-hi)}
+.theme-btn svg{width:16px;height:16px}
 @media (max-width:600px){.lang .ln{display:none}.lang .lc{display:inline}.lang button{padding:5px 9px}}
 
 /* KPI strip */
@@ -124,11 +123,11 @@ main{padding:22px 0 40px}
 .seg{display:inline-flex;border:1px solid var(--rule);border-radius:8px;overflow:hidden;background:var(--surface)}
 .seg button{border:0;background:none;padding:7px 14px;cursor:pointer;font-size:14px;color:var(--muted)}
 .seg button+button{border-inline-start:1px solid var(--rule)}
-.seg button[aria-pressed="true"]{background:var(--navy-2);color:#fff}
+.seg button[aria-pressed="true"]{background:var(--sel-bg);color:var(--sel-ink)}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0}
 .chip-btn{border:1px solid var(--rule);background:var(--surface);border-radius:99px;padding:6px 13px;cursor:pointer;font-size:13.5px;color:var(--ink)}
 .chip-btn:hover{border-color:var(--gold)}
-.chip-btn[aria-pressed="true"]{background:var(--navy-2);color:#fff;border-color:var(--navy-2)}
+.chip-btn[aria-pressed="true"]{background:var(--sel-bg);color:var(--sel-ink);border-color:var(--sel-bg)}
 .picker{display:flex;align-items:center;gap:10px;margin:16px 0 12px}
 .picker label{font-weight:600;font-size:14px;display:flex;align-items:center}
 .picker select{font:inherit;font-size:14px;padding:7px 12px;border:1px solid var(--rule);background:var(--surface);color:var(--ink);border-radius:8px;min-width:200px}
@@ -181,7 +180,7 @@ main{padding:22px 0 40px}
 .rv-list{max-height:260px;overflow-y:auto;border:1px solid var(--rule);border-radius:8px;background:var(--surface)}
 .rep{display:flex;justify-content:space-between;gap:8px;width:100%;border:0;border-bottom:1px solid var(--rule);background:none;padding:7px 11px;cursor:pointer;font-size:13px;text-align:start}
 .rep:hover{background:var(--surface-2)}
-.rep[aria-pressed="true"]{background:var(--navy-2);color:#fff}
+.rep[aria-pressed="true"]{background:var(--sel-bg);color:var(--sel-ink)}
 .rep[aria-pressed="true"] .up,.rep[aria-pressed="true"] .down,.rep[aria-pressed="true"] .flat{color:inherit}
 
 /* tables & lists */
@@ -259,7 +258,7 @@ tr:last-child td{border-bottom:0}
 .tone{font-weight:700;padding:3px 12px;border-radius:99px;font-size:13px}
 .tone.pos{background:color-mix(in srgb,var(--buy) 14%,transparent);color:var(--buy)}
 .tone.neg{background:color-mix(in srgb,var(--sell) 13%,transparent);color:var(--sell)}
-.tone.neu{background:color-mix(in srgb,var(--muted) 15%,transparent);color:var(--muted)}
+.tone.neu{background:color-mix(in srgb,var(--muted) 22%,transparent);color:var(--ink)}
 .tone.mix{background:var(--gold-soft);color:var(--gold-lo)}
 .ai-report h2{font-size:24px;line-height:1.35;margin:10px 0 12px}
 .ai-summary{margin:0;padding-inline-start:20px}
@@ -279,7 +278,12 @@ tr:last-child td{border-bottom:0}
 .ol-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin-bottom:10px}
 .ol-head h3{margin:0;font-size:15px}
 .ol-head small{font-size:12.5px;color:var(--muted)}
-.ol-bias{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:12px}
+.ol-bias{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin-bottom:12px;padding:12px 14px;border-radius:10px;
+  background:var(--surface-2);border:1px solid var(--rule)}
+.bias{flex:none;font-size:15.5px;font-weight:700;padding:6px 16px;border-radius:99px;border:1.5px solid currentColor}
+.bias.pos{color:var(--buy);background:color-mix(in srgb,var(--buy) 18%,transparent)}
+.bias.neg{color:var(--sell);background:color-mix(in srgb,var(--sell) 18%,transparent)}
+.bias.neu{color:var(--blue);background:color-mix(in srgb,var(--blue) 18%,transparent)}
 .ol-bias p{margin:0;font-size:14.5px;flex:1 1 260px}
 .ol-scn{list-style:none;margin:0;padding:0;display:grid;gap:8px}
 .ol-scn li{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;align-items:center;padding:10px 14px;background:var(--surface-2);
@@ -344,7 +348,7 @@ tr.base td{background:var(--surface-2);color:var(--muted)}
 </head>
 <body>
 <header class="site-head">
-  <div class="util wrap"><p class="updated" id="updated"></p><div class="lang" id="lang" role="group" aria-label="Language / اللغة"></div></div>
+  <div class="util wrap"><p class="updated" id="updated"></p><div class="lang" id="lang" role="group" aria-label="Language / اللغة"></div><button class="theme-btn" id="theme" type="button" data-act="theme"></button></div>
   <div class="brand-row wrap">
     <div class="brand"><span class="coin" aria-hidden="true"></span><div><h1 id="title">تدفقات الذهب</h1><p id="tagline"></p></div></div>
   </div>
@@ -361,6 +365,11 @@ tr.base td{background:var(--surface-2);color:var(--muted)}
 const state = {lang:'ar', tab:'ai', aiDate:null, mode:{}, period:{}, all:false, sel:{}, country:null,
   bankView:'cot', cotCat:'swap', bank:null, vault:null, mgr:null, sig:'mm', etfFund:'GLD', phys:'efp'};
 const LANGS = ['ar', 'en', 'it', 'es'];
+/* night theme by default; the moon/sun button switches to light and is remembered */
+state.theme = 'dark';
+try { if (localStorage.getItem('gold-theme') === 'light') state.theme = 'light'; } catch (e) {}
+const applyTheme = () => { if (state.theme === 'light') document.documentElement.dataset.theme = 'light'; else delete document.documentElement.dataset.theme; };
+applyTheme();
 try { const s = localStorage.getItem('gold-lang'); if (LANGS.includes(s)) state.lang = s; } catch (e) {}
 const qLang = new URLSearchParams(location.search).get('lang');
 if (LANGS.includes(qLang)) state.lang = qLang;
@@ -1435,7 +1444,7 @@ function outlookHTML(r, rep){
   return `<section class="ai-outlook">
     <div class="ol-head"><h3>${L(`انحياز ${nm} والاحتمالات الثلاثة`, `${nm}’s bias and three scenarios`, `L’orientamento di ${nm} e tre scenari`, `El sesgo de ${nm} y tres escenarios`)}</h3>
       <small>${L('الأفق: حتى التقرير الكبير القادم (أسبوع إلى أسبوعين)', 'Horizon: until the next major report (1–2 weeks)', 'Orizzonte: fino al prossimo report importante (1–2 settimane)', 'Horizonte: hasta el próximo informe importante (1–2 semanas)')}</small></div>
-    <div class="ol-bias"><span class="tone ${bc}">${L('الانحياز', 'Bias', 'Orientamento', 'Sesgo')}: ${bl}</span><p>${esc(ro.bias_note || '')}</p></div>
+    <div class="ol-bias"><span class="bias ${bc}">${L('الانحياز', 'Bias', 'Orientamento', 'Sesgo')}: ${bl}</span><p>${esc(ro.bias_note || '')}</p></div>
     <ol class="ol-scn">${sc.slice(0, 3).map((s, i) => { const p = Math.max(0, Math.min(100, +o.p[i] || 0));
       return `<li><span class="ol-p">${bd(nf0.format(p) + '%')}</span><div class="ol-t"><b>${esc(s.title)}</b><span>${esc(s.why)}</span></div><span class="ol-bar"><i style="width:${p}%"></i></span></li>`; }).join('')}</ol>
   </section>`;
@@ -1535,6 +1544,11 @@ state.aboutClosed = {};
 function renderTop(){
   document.getElementById('lang').innerHTML = [['ar', 'sa', 'العربية'], ['en', 'gb', 'English'], ['it', 'it', 'Italiano'], ['es', 'es', 'Español']].map(([k, f, t]) =>
     `<button data-act="lang" data-v="${k}" aria-pressed="${state.lang === k}" lang="${k}" title="${t}"><img src="https://flagcdn.com/w40/${f}.png" alt="" width="20" height="14"><span class="ln">${t}</span><span class="lc">${k.toUpperCase()}</span></button>`).join('');
+  const tb = document.getElementById('theme'), dark = state.theme !== 'light';
+  tb.innerHTML = dark
+    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
+    : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="currentColor"/></svg>';
+  tb.title = dark ? L('الوضع النهاري', 'Light mode', 'Modalità chiara', 'Modo claro') : L('الوضع الليلي', 'Dark mode', 'Modalità scura', 'Modo oscuro'); tb.setAttribute('aria-label', tb.title);
   document.getElementById('title').textContent = L('تدفقات الذهب', 'Gold Flows', 'Flussi dell’oro', 'Flujos del oro');
   document.getElementById('tagline').textContent = L('تتبّع حركة الذهب العالمية: الدول والبنوك والمؤسسات والأسواق', 'Tracking global gold: countries, banks, institutions and markets', 'I movimenti dell’oro nel mondo: Paesi, banche, istituzioni e mercati', 'El oro en el mundo: países, bancos, instituciones y mercados');
   document.title = L('تدفقات الذهب', 'Gold Flows', 'Flussi dell’oro', 'Flujos del oro');
@@ -1606,6 +1620,12 @@ document.addEventListener('click', e => {
   const b = e.target.closest('[data-act]');
   if (!b || b.tagName === 'SELECT') return;
   const act = b.dataset.act, v = b.dataset.v;
+  if (act === 'theme'){
+    state.theme = state.theme === 'light' ? 'dark' : 'light';
+    try { localStorage.setItem('gold-theme', state.theme); } catch (err) {}
+    applyTheme(); renderTop();
+    return;
+  }
   if (act === 'lang'){
     state.lang = v;
     try { localStorage.setItem('gold-lang', v); } catch (err) {}
