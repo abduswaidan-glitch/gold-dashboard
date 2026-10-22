@@ -47,6 +47,7 @@ STATE = os.path.join("data", "state.json")
 RELEASES = os.path.join("data", "releases.json")
 WGC_HIST = os.path.join("data", "wgc_etf.json")
 GEX_HIST = os.path.join("data", "gex_history.json")
+F13_TYPES = os.path.join("data", "f13_types.json")
 OUTLOOK_LOG = os.path.join("data", "outlook_log.json")
 
 IMF_URL = "https://api.imf.org/external/sdmx/2.1/data/IRFCL/.IRFCLDT1_IRFCL56V_FTO..M"
@@ -962,12 +963,13 @@ def fetch_prices():
 
 
 # ---------------------------------------------------------------- macro drivers: real yield, nominal yield, breakeven, dollar
-FRED_CSV = "https://fred.stlouisfed.org/graph/fredgraph.csv?id={}&cosd=2018-01-01"
-MACRO_FRED = {"real10": "DFII10", "nom10": "DGS10", "be10": "T10YIE"}
+FRED_CSV = "https://fred.stlouisfed.org/graph/fredgraph.csv?id={}&cosd={}"
+MACRO_FRED = {"real10": "DFII10", "nom10": "DGS10", "be10": "T10YIE", "vix": "VIXCLS"}
+MACRO_SHOW = "2018-01-01"                       # ما يُعرض في الصفحة؛ الاختبار التاريخي يستخدم السجل منذ 2008
 
 
-def fred_series(sid):
-    content = browser_get(FRED_CSV.format(sid), headers={"Accept": "text/csv"}).content.decode("utf-8", "replace")
+def fred_series(sid, start=MACRO_SHOW):
+    content = browser_get(FRED_CSV.format(sid, start), headers={"Accept": "text/csv"}).content.decode("utf-8", "replace")
     rows = []
     for line in content.splitlines()[1:]:
         day, _, v = line.partition(",")
@@ -981,24 +983,82 @@ def fred_series(sid):
 
 
 def fetch_macro():
-    """محرّكات الذهب الكبرى من مصادر رسمية: العائد الحقيقي 10 سنوات (TIPS)، والاسمي، والتضخم المتوقع (FRED)، ومؤشر الدولار DXY."""
-    out, errors = {}, []
+    """محرّكات الذهب الكبرى: العائد الحقيقي 10 سنوات (TIPS)، والاسمي، والتضخم المتوقع، ومؤشر VIX (FRED)،
+    ومؤشر الدولار DXY وعقود Nasdaq 100 (NQ) من Yahoo. ومنها مراقب البيع القسري."""
+    full, errors = {}, []
     for key, sid in MACRO_FRED.items():
         try:
-            out[key] = fred_series(sid)
+            full[key] = fred_series(sid, "2008-01-01" if key in ("real10", "vix") else MACRO_SHOW)
         except Exception as e:
             errors.append(f"{sid}: {str(e)[:90]}")
-    try:
-        out["dxy"] = sorted([k, round(v, 3)] for k, v in yahoo_daily("DX-Y.NYB", dt.date(2018, 1, 1)).items())
-    except Exception as e:
-        errors.append(f"DXY: {str(e)[:90]}")
-    if "real10" not in out:
+    for key, sym, start in (("dxy", "DX-Y.NYB", dt.date(2018, 1, 1)), ("nq", "NQ=F", dt.date(2008, 1, 1))):
+        try:
+            full[key] = sorted([k, round(v, 3)] for k, v in yahoo_daily(sym, start).items())
+        except Exception as e:
+            errors.append(f"{sym}: {str(e)[:90]}")
+    if "real10" not in full:
         raise RuntimeError("macro: " + " | ".join(errors))
+    out = {k: [r for r in v if r[0] >= MACRO_SHOW] for k, v in full.items()}
     if errors:
         log("macro partial:", " | ".join(errors))
         prev = load(OUT, {}).get("macro") or {}
         out = {**{k: v for k, v in prev.items() if k not in out}, **out}
-    return {"macro": out}
+    res = {"macro": out}
+    try:
+        res["liquidation"] = liquidation_monitor(full)
+    except Exception as e:
+        log("liquidation monitor FAILED:", repr(e)[:200])
+    return res
+
+
+# ---------------------------------------------------------------- forced-selling (margin liquidation) monitor
+LIQ = {"gold3d": -2.5, "nq3d": -3.0, "vix": 25.0, "vix3d": 25.0, "real3d": 0.05}
+
+
+def liquidation_monitor(m):
+    """هل هبوط الذهب يشبه بيعًا قسريًا لتغطية Margin في أصول أخرى؟ أربعة شروط في آخر 3 جلسات:
+    الذهب −2.5٪ أو أكثر، و NQ −3٪ أو أكثر، و VIX فوق 25 أو ارتفع 25٪، والعائد الحقيقي لم يرتفع أكثر من 5bp
+    (أي أن الهبوط لا يفسّره المحرّك المعتاد). ثم نقيس ما فعله الذهب بعد كل حالة مشابهة منذ 2008."""
+    gold = [r for r in (load(PRICES_OUT, {}).get("daily") or []) if r[0] >= "2008-01-01"]
+    nq, vix, real = dict(m.get("nq") or []), m.get("vix") or [], m.get("real10") or []
+    if len(gold) < 300 or len(nq) < 300 or len(vix) < 300:
+        raise RuntimeError("not enough history")
+    vd, vv = [r[0] for r in vix], [r[1] for r in vix]
+    rd, rv = [r[0] for r in real], [r[1] for r in real]
+    at = lambda ds, vs, d: vs[bisect.bisect_right(ds, d) - 1] if bisect.bisect_right(ds, d) else None
+    days = [r[0] for r in gold if r[0] in nq]
+    g = dict(gold)
+    def state(i):
+        d, d0 = days[i], days[i - 3]
+        v, v0, r1, r0 = at(vd, vv, d), at(vd, vv, d0), at(rd, rv, d), at(rd, rv, d0)
+        x = {"date": d, "gold3d": round((g[d] / g[d0] - 1) * 100, 2), "nq3d": round((nq[d] / nq[d0] - 1) * 100, 2),
+             "vix": v, "vix3d": round((v / v0 - 1) * 100, 1) if v and v0 else None,
+             "real3d": round(r1 - r0, 3) if r1 is not None and r0 is not None else None}
+        x["met"] = {"gold": x["gold3d"] <= LIQ["gold3d"], "nq": x["nq3d"] <= LIQ["nq3d"],
+                    "vix": bool(v and (v >= LIQ["vix"] or (x["vix3d"] or 0) >= LIQ["vix3d"])),
+                    "real": x["real3d"] is not None and x["real3d"] <= LIQ["real3d"]}
+        return x
+    episodes, last_sig = [], -99
+    for i in range(3, len(days)):
+        x = state(i)
+        if all(x["met"].values()):
+            if i - last_sig > 10:                          # حالة جديدة إن مرّ أكثر من 10 جلسات على السابقة
+                fwd = {n: round((g[days[i + n]] / g[x["date"]] - 1) * 100, 2) if i + n < len(days) else None for n in (5, 10, 20)}
+                pre = g[days[i - 3]]
+                rec = next((k for k in range(1, 21) if i + k < len(days) and g[days[i + k]] >= pre), None)
+                episodes.append({**{k: x[k] for k in ("date", "gold3d", "nq3d", "vix", "real3d")},
+                                 "fwd5": fwd[5], "fwd10": fwd[10], "fwd20": fwd[20], "recovered_in": rec})
+            last_sig = i
+    done = [e for e in episodes if e["fwd20"] is not None]
+    summ = {"n": len(episodes)}
+    if done:
+        f10, f20 = sorted(e["fwd10"] for e in done), sorted(e["fwd20"] for e in done)
+        summ.update(up10=round(sum(v > 0 for v in f10) / len(f10) * 100), up20=round(sum(v > 0 for v in f20) / len(f20) * 100),
+                    med10=f10[len(f10) // 2], med20=f20[len(f20) // 2],
+                    recovered20=round(sum(e["recovered_in"] is not None for e in done) / len(done) * 100), scored=len(done))
+    today = state(len(days) - 1)
+    today["score"] = sum(today["met"].values())
+    return {"today": today, "episodes": episodes[-25:], "summary": summ, "params": LIQ, "since": days[0]}
 
 
 # ---------------------------------------------------------------- GEX on GLD (Cboe delayed options, free)
@@ -1478,7 +1538,46 @@ def fetch_f13():
         f"{last['total'] / 1000:,.1f} t), {len(out['managers'])} managers kept")
     if errors:
         log("13F partial errors:", " | ".join(errors)[:300])
+    try:
+        out["types"] = classify_f13(out)
+    except Exception as e:
+        log("13F institution types FAILED:", str(e)[:200])
+        out["types"] = load(F13_TYPES, {})
     return {"f13": out}
+
+
+F13_KINDS = ("bank", "asset_manager", "hedge_fund", "private_equity", "wealth", "broker", "insurance", "pension",
+             "sovereign", "endowment", "family_office", "other")
+F13_TYPE_SYSTEM = """Classify each institution that files SEC Form 13F by its main business, from its name and your knowledge.
+Categories: bank (commercial/universal bank or bank holding company, including its trust arm), asset_manager (mutual fund,
+ETF or institutional asset manager), hedge_fund, private_equity (private equity, private credit, alternative asset manager),
+wealth (registered investment adviser, private wealth or financial planning firm), broker (broker-dealer or market maker),
+insurance, pension (pension or retirement fund), sovereign (central bank, sovereign wealth fund, government entity),
+endowment (university endowment or charitable foundation), family_office, other.
+Return ONLY one JSON object mapping each id to one category, e.g. {"123": "bank"}."""
+
+
+def classify_f13(out):
+    """نوع كل مؤسسة (بنك، صندوق تحوّط، مدير أصول...) يصنّفه Claude Haiku مرة واحدة من اسمها، ويُحفظ ليُعاد استخدامه."""
+    types = load(F13_TYPES, {})
+    names = {cik: m["n"] for cik, m in (out.get("managers") or {}).items()}
+    for q in out.get("periods") or []:
+        for key in ("buyers", "sellers", "opened", "closed"):
+            for m in q.get(key) or []:
+                names.setdefault(m["c"], m["n"])
+    todo = [c for c in names if c not in types]
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if todo and key:
+        for i in range(0, len(todo), 120):
+            batch = todo[i:i + 120]
+            resp = _claude({"model": WGC_MODEL, "max_tokens": 4000, "system": F13_TYPE_SYSTEM,
+                            "messages": [{"role": "user", "content": "\n".join(f"{c}|{names[c]}" for c in batch)}]}, key)
+            txt = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
+            got = json.loads(txt[txt.find("{"):txt.rfind("}") + 1])
+            types.update({c: (got.get(c) if got.get(c) in F13_KINDS else "other") for c in batch if c in got})
+        save(F13_TYPES, types)
+        log(f"13F institution types: classified {len(todo)} new institutions")
+    return {c: types[c] for c in names if c in types}
 
 
 # ---------------------------------------------------------------- AI daily report (Claude API)
@@ -1575,11 +1674,17 @@ def ai_digest(d):
         g["global_gold_etfs_wgc_latest_month"] = d["wgc_etf"][-1]
     mac = d.get("macro") or {}
     for key, label in (("real10", "us_10y_real_yield_tips_pct"), ("nom10", "us_10y_nominal_yield_pct"),
-                       ("be10", "us_10y_breakeven_inflation_pct"), ("dxy", "dollar_index_dxy")):
+                       ("be10", "us_10y_breakeven_inflation_pct"), ("dxy", "dollar_index_dxy"), ("vix", "vix"),
+                       ("nq", "nasdaq100_futures_nq")):
         ser = mac.get(key) or []
         if len(ser) > 22:
             g[label] = {"date": ser[-1][0], "value": ser[-1][1], "change_1w": round(ser[-1][1] - ser[-6][1], 3),
                         "change_1m": round(ser[-1][1] - ser[-22][1], 3)}
+    lq = d.get("liquidation") or {}
+    if lq.get("today"):
+        g["forced_selling_monitor"] = {"today": lq["today"], "thresholds": lq.get("params"),
+                                       "history_since": lq.get("since"), "past_episodes_summary": lq.get("summary"),
+                                       "last_episodes": lq.get("episodes", [])[-5:]}
     gx = d.get("gex") or {}
     if gx.get("spot"):
         g["gld_options_gamma"] = {k: gx.get(k) for k in ("asof", "spot", "total_m", "zero_all", "zero_near", "near_exp",
@@ -1607,6 +1712,10 @@ Rules:
   Real and nominal yields, breakeven inflation, the dollar index and GLD gamma levels are in the platform data: take those
   numbers from there, not from search results.
 - Connect the sections: say when they agree or contradict each other (e.g. speculators crowded long while ETFs see outflows).
+- When gold has fallen in recent sessions, judge whether the drop looks like forced selling to meet margin calls elsewhere
+  (gold falling together with equities, VIX jumping, real yields not rising, the dollar bid) or a fundamental repricing
+  (real yields or the dollar driving it). Use the forced_selling_monitor and its historical base rates, plus physical demand
+  (Shanghai premium, EFP, ETF flows, central banks), and state how confident you are. A base rate is not a forecast.
 - Be factual. This is not investment advice: no buy/sell recommendations, no price targets.
 - After weighing every section and today's events, give your own analytical bias for gold over the next 14 calendar days
   and exactly three scenarios, one per direction, with estimated probabilities in whole percent that sum to 100, most likely
@@ -1844,6 +1953,10 @@ def check_data(name, d):
                 p += series_issues(k, m[k], lo, hi, jump_abs=ja, max_gap=10)
         if m.get("dxy"):
             p += series_issues("DXY", m["dxy"], 60, 160, jump=0.04, max_gap=10)
+        if m.get("vix"):
+            p += series_issues("VIX", m["vix"], 5, 150, max_gap=10)
+        if m.get("nq"):
+            p += series_issues("NQ", m["nq"], 1000, 100000, jump=0.15, max_gap=10)
     elif name == "gex":
         g = d.get("gex") or {}
         S = g.get("spot") or 0
@@ -1908,7 +2021,7 @@ SECTIONS = {
     "physical": (fetch_physical, ("physical",)),
     "f13": (fetch_f13, ("f13",)),
     "wgc": (fetch_wgc, ("wgc_etf",)),
-    "macro": (fetch_macro, ("macro",)),
+    "macro": (fetch_macro, ("macro", "liquidation")),
     "gex": (fetch_gex, ("gex",)),
 }
 CHECK_KEYS = {"comex": ("comex",), "deliveries": ("deliveries",)}     # مفاتيح تُبنى من ملفات السجل لا من دالة الجلب

@@ -302,6 +302,11 @@ tr:last-child td{border-bottom:0}
 .dir.up{background:color-mix(in srgb,var(--buy) 16%,transparent)} .dir.down{background:color-mix(in srgb,var(--sell) 16%,transparent)}
 .dir.flat{background:color-mix(in srgb,var(--blue) 16%,transparent);color:var(--blue)}
 .ai-card.track{margin-bottom:18px}
+.ai-card.liq{margin:0 0 18px}
+.liq-list{list-style:none;padding:0;margin:0 0 14px;display:grid;gap:6px}
+.liq-list li{display:grid;grid-template-columns:22px 1fr auto;gap:10px;align-items:center;padding:8px 12px;background:var(--surface-2);border:1px solid var(--rule);border-radius:8px;font-size:14px}
+.kind{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:99px;color:var(--k);white-space:nowrap;vertical-align:middle;
+  background:color-mix(in srgb,var(--k) 16%,transparent);border:1px solid color-mix(in srgb,var(--k) 40%,transparent);margin-inline-start:6px}
 .ai-card.track .figs{margin:6px 0 12px}
 .ol-bar{grid-column:1/-1;height:5px;border-radius:99px;background:var(--rule);overflow:hidden}
 .ol-bar i{display:block;height:100%;background:var(--gold)}
@@ -1110,7 +1115,7 @@ function f13Name(raw){
   return titleCase(raw);
 }
 const nm13 = raw => `<bdi>${esc(f13Name(raw))}</bdi>`;
-const mgrBtn = (cik, name) => `<button class="linkish" data-act="mgr" data-v="${esc(cik)}">${nm13(name)}</button>`;
+const mgrBtn = (cik, name) => `<button class="linkish" data-act="mgr" data-v="${esc(cik)}">${nm13(name)}</button>${kindBadge(cik)}`;
 const moveTxt = m => `${nm13(m.n)} (${sTN(m.b - m.a)}${m.s === 'new' || m.s === 'first' ? L('، مركز جديد', ', new position', ', nuova posizione', ', nueva posición') : m.s === 'closed' ? L('، أغلق مركزه بالكامل', ', closed out completely', ', posizione chiusa del tutto', ', posición cerrada por completo') : ''})`;
 
 function f13Intro(){
@@ -1197,6 +1202,7 @@ R.f13 = () => {
       return `<tr><td>${mgrBtn(x.cik, x.m.n)}</td><td class="n">${TN(x.v)}</td><td class="n ${d == null ? 'flat' : cls(d)}">${d == null ? '—' : sTN(d)}</td><td>${badge(x.st)}</td>
         <td class="n">${x.h.GLD ? bd(nf0.format(x.h.GLD)) : '—'}</td><td class="n">${x.h.IAU ? bd(nf0.format(x.h.IAU)) : '—'}</td></tr>`; }).join('')}
     </tbody></table></div><p class="explain">${L('أعمدة GLD وIAU بعدد الأسهم.', 'GLD and IAU columns are in shares.', 'Le colonne GLD e IAU sono espresse in azioni.', 'Las columnas GLD e IAU están en acciones.')}</p>`;
+  h += kindTable(M, pi);
   const list = Object.entries(M).map(([cik, m]) => ({cik, m, last: (m.s.slice().reverse().find(x => x[1] != null) || [])[1] || 0})).sort((a, b) => b.last - a.last);
   if (list.length){
     if (!state.mgr || !M[state.mgr]) state.mgr = (list.find(x => /GOLDMAN/i.test(x.m.n)) || list[0]).cik;
@@ -1205,8 +1211,8 @@ R.f13 = () => {
       delta: i ? x[1] - ser[i - 1][1] : 0, pct: i && ser[i - 1][1] ? (x[1] - ser[i - 1][1]) / ser[i - 1][1] * 100 : null,
       d3: i >= 3 ? x[1] - ser[i - 3][1] : null})).map(q => ({...q, buy: Math.max(q.delta, 0), sell: Math.max(-q.delta, 0)})).slice(-WINDOW);
     h += `<div class="picker" id="mgr-anchor"><label for="mgr-pick">${L('مؤسسة بعينها', 'A specific institution', 'Un’istituzione specifica', 'Una institución concreta')}</label><select id="mgr-pick" data-act="mgr-pick">${list.map(x =>
-      `<option value="${esc(x.cik)}" ${x.cik === state.mgr ? 'selected' : ''}>${esc(f13Name(x.m.n))}</option>`).join('')}</select></div>`;
-    h += reportView('mg-' + state.mgr, `${nm13(mm.n)}: ${L('حيازتها ربعًا بربع', 'holdings quarter by quarter', 'partecipazione trimestre per trimestre', 'participación trimestre a trimestre')}`, mpts, kgCfg({
+      `<option value="${esc(x.cik)}" ${x.cik === state.mgr ? 'selected' : ''}>${esc(f13Name(x.m.n))}${KIND()[kindOf(x.cik)] ? ` · ${KIND()[kindOf(x.cik)][0]}` : ''}</option>`).join('')}</select></div>`;
+    h += reportView('mg-' + state.mgr, `${nm13(mm.n)} ${kindBadge(state.mgr)} · ${L('حيازتها ربعًا بربع', 'holdings quarter by quarter', 'partecipazione trimestre per trimestre', 'participación trimestre a trimestre')}`, mpts, kgCfg({
       monthly:true, buy: L('شراء', 'Bought', 'Acquistato', 'Comprado'), sell: L('بيع', 'Sold', 'Venduto', 'Vendido'), line: L('الحيازة', 'Holdings', 'Riserve', 'Tenencias'),
       extra: q => `<div><span>${L('الحالة', 'Status', 'Stato', 'Estado')}</span><b>${stLabel(q.st)}</b></div>`,
       cells: q => [
@@ -1472,12 +1478,18 @@ R.macro = () => {
     ${yfig(L('التضخم المتوقع 10 سنوات (Breakeven)', '10-year breakeven inflation', 'Inflazione attesa a 10 anni (breakeven)', 'Inflación esperada a 10 años (breakeven)'), m.be10)}
     ${dx.length > 22 ? `<div class="fig"><h3>${L('مؤشر الدولار DXY', 'Dollar index (DXY)', 'Indice del dollaro (DXY)', 'Índice del dólar (DXY)')}</h3><div class="v">${bd(nf2.format(last(dx)[1]))}</div>
       <div class="sub">${L('أسبوع', '1 week', '1 settimana', '1 semana')}: <span class="${cls(-(last(dx)[1] - dx[dx.length - 6][1]))}">${sPCT((last(dx)[1] / dx[dx.length - 6][1] - 1) * 100)}</span> · ${L('شهر', '1 month', '1 mese', '1 mes')}: <span class="${cls(-(last(dx)[1] - dx[dx.length - 22][1]))}">${sPCT((last(dx)[1] / dx[dx.length - 22][1] - 1) * 100)}</span></div>
-      <div class="sub">${fDay.format(toDate(last(dx)[0]))}</div></div>` : ''}</div>`;
+      <div class="sub">${fDay.format(toDate(last(dx)[0]))}</div></div>` : ''}
+    ${(m.vix || []).length > 22 ? `<div class="fig"><h3>${L('مؤشر الخوف VIX', 'VIX (fear gauge)', 'VIX (indice della paura)', 'VIX (índice del miedo)')}</h3><div class="v ${last(m.vix)[1] >= 25 ? 'down' : ''}">${bd(nf2.format(last(m.vix)[1]))}</div>
+      <div class="sub">${L('أسبوع', '1 week', '1 settimana', '1 semana')}: ${bd(sg(last(m.vix)[1] - m.vix[m.vix.length - 6][1]) + nf2.format(Math.abs(last(m.vix)[1] - m.vix[m.vix.length - 6][1])))} · ${last(m.vix)[1] >= 25 ? L('توتر مرتفع', 'high stress', 'stress elevato', 'tensión alta') : last(m.vix)[1] >= 18 ? L('حذر', 'caution', 'cautela', 'cautela') : L('هدوء', 'calm', 'calma', 'calma')}</div>
+      <div class="sub">${fDay.format(toDate(last(m.vix)[0]))}</div></div>` : ''}</div>`;
   h += `<p class="explain">${L('الألوان من منظور الذهب: الأخضر يعني تغيرًا داعمًا للذهب (عائد أو دولار أدنى)، والأحمر ضاغطًا عليه.', 'Colours are from gold’s point of view: green means a change that supports gold (a lower yield or dollar), red one that weighs on it.', 'I colori sono dal punto di vista dell’oro: verde indica una variazione favorevole all’oro (rendimento o dollaro più bassi), rosso una sfavorevole.', 'Los colores son desde el punto de vista del oro: verde indica un cambio que favorece al oro (rentabilidad o dólar más bajos) y rojo, uno que lo presiona.')}</p>`;
-  const cr = changeCorr(r, 60, false), cd = dx.length ? changeCorr(dx, 60, true) : null;
+  const cr = changeCorr(r, 60, false), cd = dx.length ? changeCorr(dx, 60, true) : null, cn = (m.nq || []).length ? changeCorr(m.nq, 60, true) : null;
+  const nqRead = cn == null ? '—' : `${bd((cn > 0 ? '+' : cn < 0 ? '−' : '') + nf2.format(Math.abs(cn)))} · ${cn >= 0.3 ? L('يتحركان معًا (في أوقات الضغط قد يعني بيعًا للسيولة)', 'moving together (under stress this can mean selling for cash)', 'si muovono insieme (sotto stress può indicare vendite per liquidità)', 'se mueven juntos (bajo tensión puede indicar ventas por liquidez)')
+    : cn <= -0.3 ? L('الذهب يتحرك عكس الأسهم (سلوك الملاذ الآمن)', 'gold moving against stocks (safe-haven behaviour)', 'l’oro si muove contro le azioni (comportamento da bene rifugio)', 'el oro se mueve en contra de las acciones (comportamiento de refugio)') : L('علاقة ضعيفة حاليًا', 'weak link for now', 'legame debole al momento', 'relación débil por ahora')}`;
   h += `<div class="brief"><h3>${L('هل ما زال الذهب يتبع العوائد والدولار؟', 'Is gold still following yields and the dollar?', 'L’oro segue ancora rendimenti e dollaro?', '¿Sigue el oro a las rentabilidades y al dólar?')}</h3>
     <p>${L('ارتباط التغيرات اليومية خلال آخر 60 يوم تداول', 'Correlation of daily changes over the last 60 trading days', 'Correlazione delle variazioni giornaliere nelle ultime 60 sedute', 'Correlación de las variaciones diarias en las últimas 60 sesiones')}:</p>
-    <p>${L('الذهب والعائد الحقيقي', 'Gold and the real yield', 'Oro e rendimento reale', 'Oro y rentabilidad real')}: <b>${corrRead(cr)}</b><br>${L('الذهب والدولار', 'Gold and the dollar', 'Oro e dollaro', 'Oro y dólar')}: <b>${corrRead(cd)}</b></p></div>`;
+    <p>${L('الذهب والعائد الحقيقي', 'Gold and the real yield', 'Oro e rendimento reale', 'Oro y rentabilidad real')}: <b>${corrRead(cr)}</b><br>${L('الذهب والدولار', 'Gold and the dollar', 'Oro e dollaro', 'Oro y dólar')}: <b>${corrRead(cd)}</b><br>${L('الذهب وNasdaq (NQ)', 'Gold and the Nasdaq (NQ)', 'Oro e Nasdaq (NQ)', 'Oro y Nasdaq (NQ)')}: <b>${nqRead}</b></p></div>`;
+  h += liqHTML();
   const P = state.macroP || '1y', from = P === 'all' ? '0000' : new Date(Date.now() - (P === '1y' ? 365 : 1095) * 864e5).toISOString().slice(0, 10);
   h += chips('macrop', MACRO_P(), P);
   const gold = ((PRICES && PRICES.daily) || []).filter(x => x[0] >= from && x[0] >= '2018-01-01');
@@ -1591,6 +1603,71 @@ function trackHTML(){
         ${r ? `<td class="n">${USD(r.price)} <span class="${cls(r.ret)}">${sPCT(r.ret)}</span></td><td><span class="${D[r.outcome][2]}">${D[r.outcome][0]} ${D[r.outcome][1]}</span> ${r.bias_hit ? '✓' : '✗'}</td><td class="n">${bd(nf2.format(r.brier))}</td>`
           : `<td class="n muted" colspan="3">${L('يُقيَّم في', 'Scored on', 'Valutato il', 'Se evalúa el')} ${fDay.format(due)}</td>`}</tr>`; }).join('')}</tbody></table></div></section>`;
   return h;
+}
+
+/* ---------- forced-selling (margin liquidation) monitor ---------- */
+function liqHTML(){
+  const q = DATA.liquidation;
+  if (!q || !q.today) return '';
+  const t = q.today, p = q.params, s = q.summary || {}, ok = b => b ? '<b class="up">✓</b>' : '<span class="muted">✗</span>';
+  const pc = v => v == null ? '—' : sPCT(v);
+  const conds = [
+    [t.met.gold, L(`الذهب هبط ${nf1.format(Math.abs(p.gold3d))}٪ أو أكثر في 3 جلسات`, `Gold down ${nf1.format(Math.abs(p.gold3d))}% or more over 3 sessions`, `Oro in calo del ${nf1.format(Math.abs(p.gold3d))}% o più in 3 sedute`, `Oro con caída del ${nf1.format(Math.abs(p.gold3d))} % o más en 3 sesiones`), pc(t.gold3d)],
+    [t.met.nq, L(`الأسهم (NQ) هبطت ${nf0.format(Math.abs(p.nq3d))}٪ أو أكثر معه`, `Stocks (NQ) down ${nf0.format(Math.abs(p.nq3d))}% or more alongside`, `Azioni (NQ) in calo del ${nf0.format(Math.abs(p.nq3d))}% o più insieme`, `Acciones (NQ) con caída del ${nf0.format(Math.abs(p.nq3d))} % o más a la vez`), pc(t.nq3d)],
+    [t.met.vix, L(`VIX فوق ${nf0.format(p.vix)} أو ارتفع ${nf0.format(p.vix3d)}٪`, `VIX above ${nf0.format(p.vix)} or up ${nf0.format(p.vix3d)}%`, `VIX sopra ${nf0.format(p.vix)} o in aumento del ${nf0.format(p.vix3d)}%`, `VIX por encima de ${nf0.format(p.vix)} o subida del ${nf0.format(p.vix3d)} %`), `${t.vix == null ? '—' : bd(nf1.format(t.vix))} (${pc(t.vix3d)})`],
+    [t.met.real, L('العائد الحقيقي لم يرتفع (الهبوط لا يفسّره المحرّك المعتاد)', 'The real yield did not rise (the usual driver does not explain the drop)', 'Il rendimento reale non è salito (il solito motore non spiega il calo)', 'La rentabilidad real no subió (el motor habitual no explica la caída)'), t.real3d == null ? '—' : bd(sg(t.real3d) + nf0.format(Math.abs(t.real3d * 100)) + ' bp')],
+  ];
+  const verdict = t.score === 4 ? ['neg', L('إشارة بيع قسري نشطة', 'Forced-selling signal active', 'Segnale di vendite forzate attivo', 'Señal de venta forzada activa')]
+    : t.score >= 2 && t.met.gold ? ['mix', L(`إشارة جزئية (${t.score} من 4)`, `Partial signal (${t.score} of 4)`, `Segnale parziale (${t.score} su 4)`, `Señal parcial (${t.score} de 4)`)]
+    : ['neu', L('لا توجد إشارة بيع قسري', 'No forced-selling signal', 'Nessun segnale di vendite forzate', 'Sin señal de venta forzada')];
+  let h = `<section class="ai-card liq"><h3>${L('مراقب البيع القسري: هل الهبوط مؤقت بسبب تغطية Margin؟', 'Forced-selling monitor: is a drop temporary margin-driven selling?', 'Monitor delle vendite forzate: il calo è temporaneo e legato ai margini?', 'Monitor de ventas forzadas: ¿la caída es temporal por márgenes?')}</h3>
+    <p class="explain">${L('حين يحتاج المستثمرون سيولة لتغطية خسائر أو طلبات Margin في الأسهم، يبيعون الذهب لأنه سهل التسييل، فيهبط مع الأسهم رغم أن أسبابه الأساسية لم تتغير. هذا النوع من الهبوط كان مؤقتًا في أغلب الحالات التاريخية، لكنه نمط تاريخي لا ضمان.',
+      'When investors need cash to cover losses or margin calls in stocks, they sell gold because it is easy to liquidate, so it falls with stocks even though its fundamentals have not changed. Historically this kind of drop was usually temporary, but that is a historical pattern, not a guarantee.',
+      'Quando gli investitori hanno bisogno di liquidità per coprire perdite o margin call sulle azioni, vendono oro perché è facile da liquidare, e così scende con le azioni anche se i suoi fondamentali non sono cambiati. Storicamente questo tipo di calo è stato per lo più temporaneo, ma è un modello storico, non una garanzia.',
+      'Cuando los inversores necesitan liquidez para cubrir pérdidas o llamadas de margen en acciones, venden oro porque es fácil de liquidar, así que cae con las acciones aunque sus fundamentos no hayan cambiado. Históricamente este tipo de caída fue casi siempre temporal, pero es un patrón histórico, no una garantía.')}</p>
+    <div class="ol-bias"><span class="bias ${verdict[0]}">${verdict[1]}</span><p>${L('آخر 3 جلسات حتى', 'Last 3 sessions to', 'Ultime 3 sedute fino al', 'Últimas 3 sesiones hasta el')} ${fDay.format(toDate(t.date))}</p></div>
+    <ul class="liq-list">${conds.map(([m, txt, val]) => `<li>${ok(m)}<span>${txt}</span><b>${val}</b></li>`).join('')}</ul>`;
+  if (s.scored){
+    h += `<div class="figs">
+      <div class="fig"><h3>${L('حالات مشابهة منذ', 'Similar episodes since', 'Episodi simili dal', 'Episodios similares desde')} ${q.since.slice(0, 4)}</h3><div class="v">${bd(nf0.format(s.n))}</div><div class="sub">${L('بكل الشروط الأربعة', 'with all four conditions', 'con tutte e quattro le condizioni', 'con las cuatro condiciones')}</div></div>
+      <div class="fig"><h3>${L('الذهب أعلى بعد 10 جلسات', 'Gold higher after 10 sessions', 'Oro più alto dopo 10 sedute', 'Oro más alto tras 10 sesiones')}</h3><div class="v">${bd(nf0.format(s.up10) + '%')}</div><div class="sub">${L('الوسيط', 'Median', 'Mediana', 'Mediana')}: ${sPCT(s.med10)}</div></div>
+      <div class="fig"><h3>${L('الذهب أعلى بعد 20 جلسة', 'Gold higher after 20 sessions', 'Oro più alto dopo 20 sedute', 'Oro más alto tras 20 sesiones')}</h3><div class="v">${bd(nf0.format(s.up20) + '%')}</div><div class="sub">${L('الوسيط', 'Median', 'Mediana', 'Mediana')}: ${sPCT(s.med20)}</div></div>
+      <div class="fig"><h3>${L('استعاد مستواه قبل البيع خلال 20 جلسة', 'Back to its pre-selloff level within 20 sessions', 'Tornato al livello pre-vendite entro 20 sedute', 'Recuperó su nivel previo en 20 sesiones')}</h3><div class="v">${bd(nf0.format(s.recovered20) + '%')}</div><div class="sub">${L('من الحالات', 'of episodes', 'degli episodi', 'de los episodios')}</div></div></div>`;
+    h += `<div class="tablebox"><table><thead><tr><th>${L('التاريخ', 'Date', 'Data', 'Fecha')}</th><th class="n">${L('الذهب 3 جلسات', 'Gold 3 sessions', 'Oro 3 sedute', 'Oro 3 sesiones')}</th><th class="n">NQ</th><th class="n">VIX</th><th class="n">${L('بعد 10 جلسات', 'After 10', 'Dopo 10', 'Tras 10')}</th><th class="n">${L('بعد 20 جلسة', 'After 20', 'Dopo 20', 'Tras 20')}</th><th class="n">${L('استعاد خلال', 'Recovered in', 'Recupero in', 'Recuperó en')}</th></tr></thead><tbody>
+      ${q.episodes.slice().reverse().map(e => `<tr><td>${fDay.format(toDate(e.date))}</td><td class="n down">${sPCT(e.gold3d)}</td><td class="n down">${sPCT(e.nq3d)}</td><td class="n">${bd(nf1.format(e.vix))}</td>
+        <td class="n ${cls(e.fwd10)}">${pc(e.fwd10)}</td><td class="n ${cls(e.fwd20)}">${pc(e.fwd20)}</td><td class="n">${e.recovered_in == null ? (e.fwd20 == null ? '…' : '—') : bd(nf0.format(e.recovered_in)) + ' ' + L('جلسة', 'sessions', 'sedute', 'sesiones')}</td></tr>`).join('')}</tbody></table></div>`;
+  }
+  return h + '</section>';
+}
+
+/* ---------- 13F institution type badges ---------- */
+const KIND = () => ({bank: [L('بنك', 'Bank', 'Banca', 'Banco'), 'var(--blue)'], asset_manager: [L('مدير أصول', 'Asset manager', 'Gestore patrimoniale', 'Gestora de activos'), 'var(--alt)'],
+  hedge_fund: [L('صندوق تحوّط', 'Hedge fund', 'Hedge fund', 'Hedge fund'), 'var(--orange)'], private_equity: [L('استثمار خاص وائتمان', 'Private equity & credit', 'Private equity e credito', 'Capital privado y crédito'), '#A78BFA'],
+  wealth: [L('إدارة ثروات', 'Wealth manager', 'Gestione patrimoniale privata', 'Gestión patrimonial'), 'var(--buy)'], broker: [L('وسيط ومتداول', 'Broker-dealer', 'Intermediario (broker-dealer)', 'Intermediario (broker-dealer)'), '#2DD4BF'],
+  insurance: [L('تأمين', 'Insurance', 'Assicurazione', 'Aseguradora'), '#F472B6'], pension: [L('صندوق تقاعد', 'Pension fund', 'Fondo pensione', 'Fondo de pensiones'), '#FB923C'],
+  sovereign: [L('بنك مركزي أو صندوق سيادي', 'Central bank or sovereign fund', 'Banca centrale o fondo sovrano', 'Banco central o fondo soberano'), 'var(--gold)'], endowment: [L('وقف أو مؤسسة خيرية', 'Endowment or foundation', 'Fondazione o dotazione', 'Fundación o dotación'), '#A3E635'],
+  family_office: [L('مكتب عائلي', 'Family office', 'Family office', 'Family office'), '#E879F9'], other: [L('أخرى', 'Other', 'Altro', 'Otro'), 'var(--muted)']});
+const kindOf = cik => ((DATA.f13 || {}).types || {})[cik];
+const kindBadge = cik => { const k = KIND()[kindOf(cik)]; return k ? `<span class="kind" style="--k:${k[1]}">${k[0]}</span>` : ''; };
+function kindTable(M, pi){
+  const agg = {};
+  Object.entries(M).forEach(([cik, m]) => {
+    const k = kindOf(cik); if (!k) return;
+    const s = m.s[pi] || [], v = s[1], prev = pi ? (m.s.slice(0, pi).reverse().find(x => x[1] != null) || [])[1] : null;
+    if (v == null) return;
+    const a = agg[k] = agg[k] || {n: 0, hold: 0, net: 0};
+    a.n++; a.hold += v; if (prev != null) a.net += v - prev;
+  });
+  const rows = Object.entries(agg).sort((x, y) => y[1].net - x[1].net);
+  if (!rows.length) return '';
+  const K = KIND();
+  return `<h3 class="rv-title">${L('صافي الشراء حسب نوع المؤسسة', 'Net buying by type of institution', 'Acquisti netti per tipo di istituzione', 'Compras netas por tipo de institución')}</h3>
+    <div class="tablebox"><table><thead><tr><th>${L('النوع', 'Type', 'Tipo', 'Tipo')}</th><th class="n">${L('عدد المؤسسات', 'Institutions', 'Istituzioni', 'Instituciones')}</th><th class="n">${L('الحيازة', 'Holdings', 'Riserve', 'Tenencias')}</th><th class="n">${L('صافي التغير', 'Net change', 'Variazione netta', 'Variación neta')}</th></tr></thead><tbody>
+    ${rows.map(([k, a]) => `<tr><td><span class="kind" style="--k:${K[k][1]}">${K[k][0]}</span></td><td class="n">${bd(nf0.format(a.n))}</td><td class="n">${TN(a.hold)}</td><td class="n ${cls(a.net)}">${sTN(a.net)}</td></tr>`).join('')}</tbody></table></div>
+    <p class="explain">${L(`بين أكبر ${nf0.format(Object.keys(M).length)} مؤسسة يتابعها هذا القسم. نوع كل مؤسسة يصنّفه Claude من اسمها ومعرفته العامة، وهو تصنيف تقريبي قد يخطئ في الشركات الصغيرة أو متعددة الأنشطة.`,
+      `Among the ${nf0.format(Object.keys(M).length)} largest institutions this section tracks. Each institution’s type is classified by Claude from its name and general knowledge; it is approximate and can be wrong for small or multi-business firms.`,
+      `Tra le ${nf0.format(Object.keys(M).length)} maggiori istituzioni seguite da questa sezione. Il tipo di ogni istituzione è classificato da Claude in base al nome e alle conoscenze generali; è approssimativo e può sbagliare per società piccole o con più attività.`,
+      `Entre las ${nf0.format(Object.keys(M).length)} mayores instituciones que sigue esta sección. El tipo de cada institución lo clasifica Claude a partir de su nombre y su conocimiento general; es aproximado y puede fallar en empresas pequeñas o con varias actividades.`)}</p>`;
 }
 
 /* ---------- AI summary & report ---------- */
@@ -1724,7 +1801,9 @@ function digestText(){
   const mc = DATA.macro || {};
   if ((mc.real10 || []).length){ const v = k => (mc[k] && mc[k].length) ? `${nf2.format(last(mc[k])[1])}${k === 'dxy' ? '' : '%'}` : '-';
     out.push('', `## ${L('العوائد والدولار', 'Yields & dollar', 'Rendimenti e dollaro', 'Rentabilidades y dólar')} (${fDay.format(toDate(last(mc.real10)[0]))})`,
-      `${L('العائد الحقيقي 10 سنوات', '10-year real yield', 'Rendimento reale a 10 anni', 'Rentabilidad real a 10 años')} ${v('real10')} | ${L('الاسمي', 'nominal', 'nominale', 'nominal')} ${v('nom10')} | Breakeven ${v('be10')} | DXY ${v('dxy')}`); }
+      `${L('العائد الحقيقي 10 سنوات', '10-year real yield', 'Rendimento reale a 10 anni', 'Rentabilidad real a 10 años')} ${v('real10')} | ${L('الاسمي', 'nominal', 'nominale', 'nominal')} ${v('nom10')} | Breakeven ${v('be10')} | DXY ${v('dxy')} | VIX ${v('vix').replace('%', '')}`); }
+  const lq = DATA.liquidation;
+  if (lq && lq.today) out.push(`${L('مراقب البيع القسري', 'Forced-selling monitor', 'Monitor delle vendite forzate', 'Monitor de ventas forzadas')}: ${lq.today.score}/4 (${L('الذهب', 'gold', 'oro', 'oro')} ${lq.today.gold3d}%, NQ ${lq.today.nq3d}%, VIX ${lq.today.vix})`);
   const gq = DATA.gex;
   if (gq && gq.spot){ const f = x => x == null ? '-' : `GLD ${nf2.format(x)}${gq.gc_ratio ? ` (≈GC ${nf0.format(x * gq.gc_ratio)})` : ''}`;
     out.push('', `## GEX GLD (${fStamp.format(new Date(gq.asof))})`, `Net GEX ${sg(gq.total_m)}$${nf0.format(Math.abs(gq.total_m))}M / 1% | ${QUAD()[gexQuad(gq)][0]}`,
