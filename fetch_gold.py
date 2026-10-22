@@ -18,6 +18,7 @@ import csv
 import datetime as dt
 import io
 import json
+import math
 import os
 import re
 import statistics
@@ -45,6 +46,9 @@ GLD_LBMA = os.path.join("data", "gld_lbma_pm.json")
 STATE = os.path.join("data", "state.json")
 RELEASES = os.path.join("data", "releases.json")
 WGC_HIST = os.path.join("data", "wgc_etf.json")
+GEX_HIST = os.path.join("data", "gex_history.json")
+F13_TYPES = os.path.join("data", "f13_types.json")
+OUTLOOK_LOG = os.path.join("data", "outlook_log.json")
 
 IMF_URL = "https://api.imf.org/external/sdmx/2.1/data/IRFCL/.IRFCLDT1_IRFCL56V_FTO..M"
 COT_URLS = [
@@ -904,19 +908,26 @@ def _day(t):
     return dt.datetime.fromtimestamp(t, dt.timezone.utc).date().isoformat()
 
 
+def yahoo_daily(symbol, start):
+    """إغلاقات يومية فعلية من تاريخ معيّن: range الطويل يعيد نقاطًا شهرية، فنطلب الفترة بتواريخ صريحة على دفعات."""
+    a0 = int(dt.datetime.combine(start, dt.time(), dt.timezone.utc).timestamp())
+    end = int(dt.datetime.now(dt.timezone.utc).timestamp())
+    out = {}
+    for a in range(a0, end, 1500 * 86400):
+        _, rows = yahoo_chart(symbol, None, "1d", (a, min(a + 1500 * 86400, end)))
+        out.update((_day(t), round(c, 3)) for t, c in rows)
+    return out
+
+
 def fetch_prices():
     """سعر الذهب (عقود COMEX الأقرب GC=F): إغلاقات يومية منذ 2008، وأسعار الساعة لآخر 5 أيام."""
     d = dict(load(PRICES_OUT, {}).get("daily") or [])
     meta, recent = yahoo_chart("GC=F", "1mo", "1d")
     # range=max يعيد نقطة شهرية واحدة لا إغلاقات يومية، فنعيد بناء السجل مرة واحدة بفترات صريحة
     if sum(1 for k in d if k >= START_DAY_PRICES) < 3000:
-        start = int(dt.datetime(2008, 1, 1, tzinfo=dt.timezone.utc).timestamp())
-        end = int(dt.datetime.now(dt.timezone.utc).timestamp())
         full = {}
         try:
-            for a in range(start, end, 1500 * 86400):
-                _, rows = yahoo_chart("GC=F", None, "1d", (a, min(a + 1500 * 86400, end)))
-                full.update((_day(t), round(c, 2)) for t, c in rows)
+            full = {k: round(v, 2) for k, v in yahoo_daily("GC=F", dt.date(2008, 1, 1)).items()}
         except Exception as e:
             log("daily price backfill failed:", str(e)[:200])
         if len(full) >= 3000:
@@ -941,9 +952,201 @@ def fetch_prices():
             "prev_close": round(recent[-2][1], 2) if len(recent) > 1 else None}
     out = {"symbol": "GC=F", "updated_utc": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(),
            "last": last, "daily": sorted([k, v] for k, v in d.items()), "hourly": h[-150:]}
+    problems = series_issues("gold price", out["daily"], 300, 20000, jump=0.08, max_gap=5, tail=60)
+    if last["price"] and last["prev_close"] and abs(last["price"] / last["prev_close"] - 1) > 0.08:
+        problems.append(f"gold price: {(last['price'] / last['prev_close'] - 1) * 100:+.1f}% vs previous close")
+    if problems:
+        raise RuntimeError("data check: " + "; ".join(problems))
     save(PRICES_OUT, out)
     log(f"price ok: ${last['price']} at {last['time']} ({len(d)} daily closes, {len(h)} hourly)")
     return {}
+
+
+# ---------------------------------------------------------------- macro drivers: real yield, nominal yield, breakeven, dollar
+FRED_CSV = "https://fred.stlouisfed.org/graph/fredgraph.csv?id={}&cosd={}"
+MACRO_FRED = {"real10": "DFII10", "nom10": "DGS10", "be10": "T10YIE", "vix": "VIXCLS"}
+MACRO_SHOW = "2018-01-01"                       # ما يُعرض في الصفحة؛ الاختبار التاريخي يستخدم السجل منذ 2008
+
+
+def fred_series(sid, start=MACRO_SHOW):
+    content = browser_get(FRED_CSV.format(sid, start), headers={"Accept": "text/csv"}).content.decode("utf-8", "replace")
+    rows = []
+    for line in content.splitlines()[1:]:
+        day, _, v = line.partition(",")
+        try:
+            rows.append([day.strip(), round(float(v), 3)])
+        except ValueError:
+            pass                                    # "." = يوم عطلة بلا قيمة
+    if len(rows) < 200:
+        raise RuntimeError(f"FRED {sid}: only {len(rows)} rows")
+    return rows
+
+
+def fetch_macro():
+    """محرّكات الذهب الكبرى: العائد الحقيقي 10 سنوات (TIPS)، والاسمي، والتضخم المتوقع، ومؤشر VIX (FRED)،
+    ومؤشر الدولار DXY وعقود Nasdaq 100 (NQ) من Yahoo. ومنها مراقب البيع القسري."""
+    full, errors = {}, []
+    for key, sid in MACRO_FRED.items():
+        try:
+            full[key] = fred_series(sid, "2008-01-01" if key in ("real10", "vix") else MACRO_SHOW)
+        except Exception as e:
+            errors.append(f"{sid}: {str(e)[:90]}")
+    for key, sym, start in (("dxy", "DX-Y.NYB", dt.date(2018, 1, 1)), ("nq", "NQ=F", dt.date(2008, 1, 1))):
+        try:
+            full[key] = sorted([k, round(v, 3)] for k, v in yahoo_daily(sym, start).items())
+        except Exception as e:
+            errors.append(f"{sym}: {str(e)[:90]}")
+    if "real10" not in full:
+        raise RuntimeError("macro: " + " | ".join(errors))
+    out = {k: [r for r in v if r[0] >= MACRO_SHOW] for k, v in full.items()}
+    if errors:
+        log("macro partial:", " | ".join(errors))
+        prev = load(OUT, {}).get("macro") or {}
+        out = {**{k: v for k, v in prev.items() if k not in out}, **out}
+    res = {"macro": out}
+    try:
+        res["liquidation"] = liquidation_monitor(full)
+    except Exception as e:
+        log("liquidation monitor FAILED:", repr(e)[:200])
+    return res
+
+
+# ---------------------------------------------------------------- forced-selling (margin liquidation) monitor
+LIQ = {"gold3d": -2.5, "nq3d": -3.0, "vix": 25.0, "vix3d": 25.0, "real3d": 0.05}
+
+
+def liquidation_monitor(m):
+    """هل هبوط الذهب يشبه بيعًا قسريًا لتغطية Margin في أصول أخرى؟ أربعة شروط في آخر 3 جلسات:
+    الذهب −2.5٪ أو أكثر، و NQ −3٪ أو أكثر، و VIX فوق 25 أو ارتفع 25٪، والعائد الحقيقي لم يرتفع أكثر من 5bp
+    (أي أن الهبوط لا يفسّره المحرّك المعتاد). ثم نقيس ما فعله الذهب بعد كل حالة مشابهة منذ 2008."""
+    gold = [r for r in (load(PRICES_OUT, {}).get("daily") or []) if r[0] >= "2008-01-01"]
+    nq, vix, real = dict(m.get("nq") or []), m.get("vix") or [], m.get("real10") or []
+    if len(gold) < 300 or len(nq) < 300 or len(vix) < 300:
+        raise RuntimeError("not enough history")
+    vd, vv = [r[0] for r in vix], [r[1] for r in vix]
+    rd, rv = [r[0] for r in real], [r[1] for r in real]
+    at = lambda ds, vs, d: vs[bisect.bisect_right(ds, d) - 1] if bisect.bisect_right(ds, d) else None
+    days = [r[0] for r in gold if r[0] in nq]
+    g = dict(gold)
+    def state(i):
+        d, d0 = days[i], days[i - 3]
+        v, v0, r1, r0 = at(vd, vv, d), at(vd, vv, d0), at(rd, rv, d), at(rd, rv, d0)
+        x = {"date": d, "gold3d": round((g[d] / g[d0] - 1) * 100, 2), "nq3d": round((nq[d] / nq[d0] - 1) * 100, 2),
+             "vix": v, "vix3d": round((v / v0 - 1) * 100, 1) if v and v0 else None,
+             "real3d": round(r1 - r0, 3) if r1 is not None and r0 is not None else None}
+        x["met"] = {"gold": x["gold3d"] <= LIQ["gold3d"], "nq": x["nq3d"] <= LIQ["nq3d"],
+                    "vix": bool(v and (v >= LIQ["vix"] or (x["vix3d"] or 0) >= LIQ["vix3d"])),
+                    "real": x["real3d"] is not None and x["real3d"] <= LIQ["real3d"]}
+        return x
+    episodes, last_sig = [], -99
+    for i in range(3, len(days)):
+        x = state(i)
+        if all(x["met"].values()):
+            if i - last_sig > 10:                          # حالة جديدة إن مرّ أكثر من 10 جلسات على السابقة
+                fwd = {n: round((g[days[i + n]] / g[x["date"]] - 1) * 100, 2) if i + n < len(days) else None for n in (5, 10, 20)}
+                pre = g[days[i - 3]]
+                rec = next((k for k in range(1, 21) if i + k < len(days) and g[days[i + k]] >= pre), None)
+                episodes.append({**{k: x[k] for k in ("date", "gold3d", "nq3d", "vix", "real3d")},
+                                 "fwd5": fwd[5], "fwd10": fwd[10], "fwd20": fwd[20], "recovered_in": rec})
+            last_sig = i
+    done = [e for e in episodes if e["fwd20"] is not None]
+    summ = {"n": len(episodes)}
+    if done:
+        f10, f20 = sorted(e["fwd10"] for e in done), sorted(e["fwd20"] for e in done)
+        summ.update(up10=round(sum(v > 0 for v in f10) / len(f10) * 100), up20=round(sum(v > 0 for v in f20) / len(f20) * 100),
+                    med10=f10[len(f10) // 2], med20=f20[len(f20) // 2],
+                    recovered20=round(sum(e["recovered_in"] is not None for e in done) / len(done) * 100), scored=len(done))
+    today = state(len(days) - 1)
+    today["score"] = sum(today["met"].values())
+    return {"today": today, "episodes": episodes[-25:], "summary": summ, "params": LIQ, "since": days[0]}
+
+
+# ---------------------------------------------------------------- GEX on GLD (Cboe delayed options, free)
+CBOE_URL = "https://cdn.cboe.com/api/global/delayed_quotes/options/{}.json"
+OCC = re.compile(r"^([A-Z.]+?)(\d{6})([CP])(\d{8})$")
+
+
+def _bs_gamma(S, K, T, iv, r=0.04):
+    v = iv * math.sqrt(T)
+    d1 = (math.log(S / K) + (r + iv * iv / 2) * T) / v
+    return math.exp(-d1 * d1 / 2) / math.sqrt(2 * math.pi) / (S * v)
+
+
+def _zero_cross(profile, S):
+    """أقرب سعر إلى السعر الحالي ينقلب عنده مجموع GEX من سالب إلى موجب."""
+    best = None
+    for (x1, y1), (x2, y2) in zip(profile, profile[1:]):
+        if y1 == 0 or (y1 < 0) != (y2 < 0):
+            z = x1 if y1 == y2 else x1 + (x2 - x1) * (-y1) / (y2 - y1)
+            if best is None or abs(z - S) < abs(best - S):
+                best = z
+    return round(best, 2) if best is not None else None
+
+
+def gex_from_chain(opts, S, now):
+    """GEX بالدولار لكل حركة 1٪: Gamma × OI × 100 × S² × 0.01، الـ Calls موجبة والـ Puts سالبة (العرف المعتاد:
+    المتعاملون Long Calls و Short Puts). Zero Gamma من إعادة حساب Gamma بنموذج Black-Scholes عند أسعار افتراضية."""
+    ivs = sorted(num(o.get("iv")) or 0 for o in opts)
+    iv_scale = 100 if ivs and ivs[len(ivs) // 2] > 3 else 1         # إن جاءت التقلبات الضمنية بالنسبة المئوية لا كسرًا عشريًا
+    rows = []
+    for o in opts:
+        m = OCC.match(str(o.get("option", "")))
+        oi, iv = num(o.get("open_interest")) or 0, (num(o.get("iv")) or 0) / iv_scale
+        if not m or oi <= 0 or iv <= 0.01:
+            continue
+        K = int(m.group(4)) / 1000
+        if not 0.6 * S <= K <= 1.4 * S:
+            continue
+        exp = dt.datetime.strptime(m.group(2), "%y%m%d").replace(hour=20, tzinfo=dt.timezone.utc)
+        T = (exp - now).total_seconds() / (365 * 86400)
+        if T <= 0:
+            continue
+        rows.append((K, exp.date().isoformat(), 1 if m.group(3) == "C" else -1, oi, iv, max(T, 1 / (365 * 24))))
+    if len(rows) < 100:
+        raise RuntimeError(f"GEX: only {len(rows)} usable options")
+    gex = lambda x, sel: sum(sg * _bs_gamma(x, K, T, iv) * oi * 100 * x * x * 0.01 for K, e, sg, oi, iv, T in sel)
+    grid = [S * (0.85 + 0.0025 * i) for i in range(121)]
+    near = min(r[1] for r in rows)
+    near_rows = [r for r in rows if r[1] == near]
+    prof_all = [(x, gex(x, rows)) for x in grid]
+    prof_near = [(x, gex(x, near_rows)) for x in grid]
+    by_k, walls = {}, {}
+    struct = [r for r in rows if r[5] > 1.5 / 365] or rows    # الجدران هيكلية: نستبعد عقود اليوم الأخير التي تتركّز عند السعر الحالي
+    for K, e, sg, oi, iv, T in rows:
+        g = _bs_gamma(S, K, T, iv) * oi * 100 * S * S * 0.01
+        by_k.setdefault(K, [0.0, 0.0])[0 if sg > 0 else 1] += g * sg
+    for K, e, sg, oi, iv, T in struct:
+        walls.setdefault(K, [0.0, 0.0])[0 if sg > 0 else 1] += _bs_gamma(S, K, T, iv) * oi * 100 * S * S * 0.01 * sg
+    above = {K: v for K, v in walls.items() if S <= K <= 1.10 * S} or walls     # جدار قريب يمكن أن يُختبر خلال أسابيع،
+    below = {K: v for K, v in walls.items() if 0.90 * S <= K <= S} or walls     # لا عقود LEAPS بعيدة بفائدة مفتوحة ضخمة
+    call_wall = max(above, key=lambda K: above[K][0])            # أكبر Gamma للـ Calls عند السعر أو فوقه
+    put_wall = min(below, key=lambda K: below[K][1])             # أكبر Gamma للـ Puts عند السعر أو تحته
+    return {"spot": round(S, 2), "total_m": round(gex(S, rows) / 1e6, 1), "near_total_m": round(gex(S, near_rows) / 1e6, 1),
+            "zero_all": _zero_cross(prof_all, S), "zero_near": _zero_cross(prof_near, S), "near_exp": near,
+            "call_wall": call_wall, "put_wall": put_wall, "n_options": len(rows),
+            "profile": [[round(x, 2), round(y / 1e6, 2)] for x, y in prof_all[::2]],
+            "strikes": [[K, round(v[0] / 1e6, 2), round(v[1] / 1e6, 2)] for K, v in sorted(by_k.items()) if 0.88 * S <= K <= 1.12 * S]}
+
+
+def fetch_gex():
+    """مستويات Gamma لصندوق GLD من بيانات Cboe المؤجلة 15 دقيقة. نحفظ المستويات المحسوبة فقط، لا الأسعار الخام."""
+    j = browser_get(CBOE_URL.format("GLD"), headers={"Accept": "application/json"}).json()
+    d = j.get("data") or {}
+    S = num(d.get("current_price")) or num(d.get("close"))
+    if not S:
+        raise RuntimeError("Cboe GLD: no current price")
+    now = dt.datetime.now(dt.timezone.utc)
+    g = gex_from_chain(d.get("options") or [], S, now)
+    g["asof"] = now.replace(microsecond=0).isoformat()          # لحظة الجلب (UTC)؛ توقيت Cboe الخام بلا منطقة زمنية
+    g["cboe_ts"] = str(j.get("timestamp") or "")
+    gc = (load(PRICES_OUT, {}).get("last") or {}).get("price")
+    g["gc_ratio"] = round(gc / S, 4) if gc else None                # مستوى GLD × النسبة ≈ مستوى عقد الذهب GC
+    hist = [h for h in load(GEX_HIST, []) if h.get("d") != now.date().isoformat()]
+    hist.append({"d": now.date().isoformat(), **{k: g[k] for k in ("spot", "total_m", "zero_all", "zero_near", "call_wall", "put_wall", "gc_ratio")}})
+    save(GEX_HIST, hist[-120:])
+    g["history"] = hist[-30:]
+    log(f"GEX ok: GLD {S}, net {g['total_m']}M per 1%, zero {g['zero_all']} / near {g['zero_near']}, walls {g['put_wall']}-{g['call_wall']}")
+    return {"gex": g}
 
 
 # ---------------------------------------------------------------- World Gold Council: global ETF flows (monthly)
@@ -1335,7 +1538,49 @@ def fetch_f13():
         f"{last['total'] / 1000:,.1f} t), {len(out['managers'])} managers kept")
     if errors:
         log("13F partial errors:", " | ".join(errors)[:300])
+    try:
+        out["types"] = classify_f13(out)
+    except Exception as e:
+        log("13F institution types FAILED:", str(e)[:200])
+        out["types"] = load(F13_TYPES, {})
     return {"f13": out}
+
+
+F13_KINDS = ("bank", "asset_manager", "hedge_fund", "private_equity", "wealth", "broker", "insurance", "pension",
+             "sovereign", "endowment", "family_office", "other")
+F13_TYPE_SYSTEM = """Classify each institution that files SEC Form 13F by its main business, from its name and your knowledge.
+Categories: bank (commercial/universal bank or bank holding company, including its trust arm), asset_manager (mutual fund,
+ETF or institutional asset manager), hedge_fund, private_equity (private equity, private credit, alternative asset manager),
+wealth (registered investment adviser, private wealth or financial planning firm), broker (broker-dealer or market maker),
+insurance, pension (pension or retirement fund), sovereign (central bank, sovereign wealth fund, government entity),
+endowment (university endowment or charitable foundation), family_office, other.
+Return ONLY one JSON object mapping each id to one category, e.g. {"123": "bank"}."""
+
+
+def classify_f13(out):
+    """نوع كل مؤسسة (بنك، صندوق تحوّط، مدير أصول...) يصنّفه Claude Haiku مرة واحدة من اسمها، ويُحفظ ليُعاد استخدامه."""
+    types = load(F13_TYPES, {})
+    names = {cik: m["n"] for cik, m in (out.get("managers") or {}).items()}
+    for q in out.get("periods") or []:
+        for key in ("buyers", "sellers", "opened", "closed"):
+            for m in q.get(key) or []:
+                names.setdefault(m["c"], m["n"])
+    todo = [c for c in names if c not in types]
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if todo and key:
+        for i in range(0, len(todo), 80):
+            batch = todo[i:i + 80]
+            # تصنيف بسيط: بلا تفكير مطوّل كي لا يستهلك حدّ Tokens قبل كتابة الجواب
+            resp = _claude({"model": WGC_MODEL, "max_tokens": 8000, "thinking": {"type": "disabled"}, "system": F13_TYPE_SYSTEM,
+                            "messages": [{"role": "user", "content": "\n".join(f"{c}|{names[c]}" for c in batch)}]}, key)
+            txt = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
+            if "{" not in txt:
+                raise RuntimeError(f"no JSON in reply (stop_reason {resp.get('stop_reason')})")
+            got = json.loads(txt[txt.find("{"):txt.rfind("}") + 1])
+            types.update({c: (got.get(c) if got.get(c) in F13_KINDS else "other") for c in batch if c in got})
+            save(F13_TYPES, types)
+        log(f"13F institution types: classified {len(todo)} new institutions")
+    return {c: types[c] for c in names if c in types}
 
 
 # ---------------------------------------------------------------- AI daily report (Claude API)
@@ -1430,6 +1675,27 @@ def ai_digest(d):
                                   "change_1m_pct": round((dly[-1][1] / back(21) - 1) * 100, 2) if back(21) else None}
     if d.get("wgc_etf"):
         g["global_gold_etfs_wgc_latest_month"] = d["wgc_etf"][-1]
+    mac = d.get("macro") or {}
+    for key, label in (("real10", "us_10y_real_yield_tips_pct"), ("nom10", "us_10y_nominal_yield_pct"),
+                       ("be10", "us_10y_breakeven_inflation_pct"), ("dxy", "dollar_index_dxy"), ("vix", "vix"),
+                       ("nq", "nasdaq100_futures_nq")):
+        ser = mac.get(key) or []
+        if len(ser) > 22:
+            g[label] = {"date": ser[-1][0], "value": ser[-1][1], "change_1w": round(ser[-1][1] - ser[-6][1], 3),
+                        "change_1m": round(ser[-1][1] - ser[-22][1], 3)}
+    lq = d.get("liquidation") or {}
+    if lq.get("today"):
+        g["forced_selling_monitor"] = {"today": lq["today"], "thresholds": lq.get("params"),
+                                       "history_since": lq.get("since"), "past_episodes_summary": lq.get("summary"),
+                                       "last_episodes": lq.get("episodes", [])[-5:]}
+    gx = d.get("gex") or {}
+    if gx.get("spot"):
+        g["gld_options_gamma"] = {k: gx.get(k) for k in ("asof", "spot", "total_m", "zero_all", "zero_near", "near_exp",
+                                                         "call_wall", "put_wall", "gc_ratio")}
+        g["gld_options_gamma"]["note"] = "GLD levels; multiply by gc_ratio for COMEX gold (GC) equivalents; total_m = USD millions per 1% move"
+    tr = (d.get("outlook_track") or {}).get("summary")
+    if tr and tr.get("n"):
+        g["your_track_record"] = tr
     f = d.get("f13") or {}
     if f.get("periods"):
         q = f["periods"][-1]
@@ -1446,16 +1712,24 @@ Rules:
 - Every number about flows, positions, holdings and spreads must come from the platform data. Never invent numbers.
 - Use web search (up to 4 searches) only for today's gold-relevant events: Federal Reserve and rates, US dollar and yields,
   geopolitics, central-bank gold news, China and India demand, major ETF or bank news. Cite each event's source URL.
+  Real and nominal yields, breakeven inflation, the dollar index and GLD gamma levels are in the platform data: take those
+  numbers from there, not from search results.
 - Connect the sections: say when they agree or contradict each other (e.g. speculators crowded long while ETFs see outflows).
+- When gold has fallen in recent sessions, judge whether the drop looks like forced selling to meet margin calls elsewhere
+  (gold falling together with equities, VIX jumping, real yields not rising, the dollar bid) or a fundamental repricing
+  (real yields or the dollar driving it). Use the forced_selling_monitor and its historical base rates, plus physical demand
+  (Shanghai premium, EFP, ETF flows, central banks), and state how confident you are. A base rate is not a forecast.
 - Be factual. This is not investment advice: no buy/sell recommendations, no price targets.
-- After weighing every section and today's events, give your own analytical bias for gold over the next 1-2 weeks
-  (until the next major report) and three distinct scenarios for that horizon with estimated probabilities: whole
-  percentages that sum to 100, most likely first. Each scenario gets one short line on why, grounded in the data or events.
+- After weighing every section and today's events, give your own analytical bias for gold over the next 14 calendar days
+  and exactly three scenarios, one per direction, with estimated probabilities in whole percent that sum to 100, most likely
+  first. The directions are scored objectively later against the COMEX gold close 14 days from now:
+  "up" = more than 2% above today's price, "down" = more than 2% below, "flat" = within ±2%. Calibrate: your track record
+  is public. Each scenario gets one short line on why, grounded in the data or events.
 - Write the same report in four languages, with the same content and numbers in each:
   Arabic in correct Modern Standard Arabic (فصحى); clear, professional English; natural, correct professional Italian;
   natural, correct professional Spanish (Spain). Keep technical terms in English in every language (COT, EFP, ETF, Long, Short).
 Return ONLY one JSON object, no markdown fences, with exactly this shape:
-{"outlook": {"bias": "bullish|bearish|neutral", "probabilities": [p1, p2, p3]},
+{"outlook": {"bias": "bullish|bearish|neutral", "scenarios": [{"dir": "up|flat|down", "p": 45}, {"dir": "...", "p": 30}, {"dir": "...", "p": 25}]},
  "ar": {"headline": "...", "tone": "إيجابي|سلبي|محايد|متباين", "summary": ["...", "..."],
         "sections": [{"title": "...", "body": "..."}], "events": [{"title": "...", "impact": "...", "source": "https://..."}],
         "watch": ["..."], "risks": "...",
@@ -1463,7 +1737,7 @@ Return ONLY one JSON object, no markdown fences, with exactly this shape:
  "en": {same keys, "tone": "positive|negative|neutral|mixed"},
  "it": {same keys, "tone": "positivo|negativo|neutrale|misto"},
  "es": {same keys, "tone": "positivo|negativo|neutral|mixto"}}
-The three scenarios in every language follow the order of "probabilities".
+The three scenarios in every language follow the order of outlook.scenarios; each direction appears exactly once.
 summary: 4 to 6 short points. sections: 4 to 6 (central banks and countries, banks and COT positioning, ETFs and institutions,
 physical market and vaults, and anything else notable). events: 2 to 5. watch: 2 to 4 things to watch next."""
 
@@ -1493,7 +1767,15 @@ def _cost(model, u):
 def _outlook(rep):
     """الانحياز والاحتمالات الثلاثة: نتحقق من شكلها، ونسقطها بدل إسقاط التقرير كله إن جاءت ناقصة."""
     o = rep.get("outlook") or {}
-    p = o.get("probabilities")
+    dirs = None
+    if isinstance(o.get("scenarios"), list):
+        sc = [x for x in o["scenarios"] if isinstance(x, dict)]
+        dirs = [x.get("dir") for x in sc]
+        p = [x.get("p") for x in sc]
+        if sorted(map(str, dirs)) != ["down", "flat", "up"]:
+            dirs = None                                 # اتجاهات غير واضحة: نعرض الاحتمالات ولا نقيّمها
+    else:
+        p = o.get("probabilities")
     if o.get("bias") not in ("bullish", "bearish", "neutral") or not isinstance(p, list) or len(p) != 3:
         return None
     try:
@@ -1513,7 +1795,7 @@ def _outlook(rep):
             rep[lang]["outlook"] = {"bias_note": str(lo.get("bias_note") or ""),
                                     "scenarios": [{"title": str(x.get("title") or ""), "why": str(x.get("why") or "")}
                                                   for x in sc[:3] if isinstance(x, dict)]}
-    return {"bias": o["bias"], "p": p}
+    return {"bias": o["bias"], "p": p, **({"dirs": dirs} if dirs else {})}
 
 
 def ai_report(data, prev, new_major, releases):
@@ -1591,6 +1873,12 @@ def ai_report(data, prev, new_major, releases):
               **langs, "outlook": outlook, "sources": sources[:10],
               "usage": {"input_tokens": u.get("input_tokens"), "output_tokens": u.get("output_tokens"),
                         "searches": (u.get("server_tool_use") or {}).get("web_search_requests", 0), "est_cost_usd": round(cost, 4)}}
+    last_price = load(PRICES_OUT, {}).get("last") or {}
+    if outlook and outlook.get("dirs") and last_price.get("price"):
+        olog = load(OUTLOOK_LOG, [])
+        olog.append({"id": latest["generated_utc"], "date": today, "model": model, "bias": outlook["bias"], "p": outlook["p"],
+                     "dirs": outlook["dirs"], "base": {"date": str(last_price.get("time") or today)[:10], "price": last_price["price"]}})
+        save(OUTLOOK_LOG, olog[-300:])
     hist = load(AI_HIST, [])
     hist = [h for h in hist if h.get("generated_utc") != latest["generated_utc"]] + [latest]
     hist = hist[-30:]
@@ -1606,6 +1894,123 @@ def ai_report(data, prev, new_major, releases):
                                            "trigger": h.get("trigger", [])} for h in hist[-14:]]}, True
 
 
+# ---------------------------------------------------------------- data checks before publishing
+def series_issues(label, s, lo=None, hi=None, jump=None, jump_abs=None, max_gap=None, tail=30):
+    """أخطاء منطقية في آخر نقاط سلسلة [[تاريخ، قيمة], ...]: قيمة خارج المدى، قفزة غير معقولة، فجوة تواريخ، ترتيب أو تاريخ مستقبلي."""
+    if not s:
+        return [f"{label}: empty"]
+    t, out = s[-tail:], []
+    v = t[-1][1]
+    if lo is not None and not lo <= v <= hi:
+        out.append(f"{label}: latest value {v} outside {lo}..{hi}")
+    if t[-1][0][:10] > (dt.date.today() + dt.timedelta(days=2)).isoformat():
+        out.append(f"{label}: date in the future ({t[-1][0]})")
+    for a, b in zip(t, t[1:]):
+        gap = (dt.date.fromisoformat(b[0][:10]) - dt.date.fromisoformat(a[0][:10])).days
+        if gap <= 0:
+            out.append(f"{label}: dates out of order at {b[0]}")
+        elif max_gap and gap > max_gap:
+            out.append(f"{label}: {gap}-day gap before {b[0]}")
+        elif jump and a[1] and abs(b[1] / a[1] - 1) > jump:
+            out.append(f"{label}: {(b[1] / a[1] - 1) * 100:+.1f}% jump on {b[0]}")
+        elif jump_abs and abs(b[1] - a[1]) > jump_abs:
+            out.append(f"{label}: {b[1] - a[1]:+.2f} jump on {b[0]}")
+        else:
+            continue
+        break
+    return out
+
+
+def check_data(name, d):
+    """فحص ما جُلب للتو قبل نشره. أي مشكلة تعني: نبقي آخر بيانات سليمة ونُظهر تحذيرًا في القسم."""
+    p = []
+    if name == "comex":
+        c = d.get("comex") or {}
+        p += series_issues("COMEX total", c.get("total"), 50_000, 3_000_000, jump=0.15)
+        if c.get("registered") and c.get("total") and c["registered"][-1][1] > c["total"][-1][1]:
+            p.append("COMEX registered above total")
+    elif name == "etf":
+        p += series_issues("GLD", (d.get("etf") or {}).get("GLD"), 200_000, 2_500_000, jump=0.05)
+    elif name == "etf2":
+        for k, ser in (d.get("etf2") or {}).items():
+            if ser:
+                p += series_issues(k, ser, 1_000, 2_500_000, jump=0.10)
+    elif name == "physical":
+        ph = d.get("physical") or {}
+        if ph.get("efp"):
+            p += series_issues("EFP", [r[:2] for r in ph["efp"]], -300, 300, jump_abs=150, max_gap=10)
+        if ph.get("sh"):
+            p += series_issues("Shanghai premium", [r[:2] for r in ph["sh"]], -400, 400, jump_abs=200, max_gap=14)
+    elif name in ("cot", "cot_legacy"):
+        recs = (d.get("cot_disagg") or {}).get("mm") if name == "cot" else d.get("noncomm")
+        p += series_issues(name, [r[:2] for r in recs or []], 0, 2_000_000, tail=12)
+        if recs and min(recs[-1][1], recs[-1][2]) < 0:
+            p.append(f"{name}: negative positions")
+    elif name == "imf":
+        p += series_issues("central banks", (d.get("central_banks") or {}).get("series"), 10_000_000, 50_000_000, jump=0.03, max_gap=45, tail=12)
+    elif name == "macro":
+        m = d.get("macro") or {}
+        p += series_issues("real 10y", m.get("real10"), -4, 8, jump_abs=0.6, max_gap=10)
+        for k, lo, hi, ja in (("nom10", -1, 15, 0.6), ("be10", -1, 6, 0.5)):
+            if m.get(k):
+                p += series_issues(k, m[k], lo, hi, jump_abs=ja, max_gap=10)
+        if m.get("dxy"):
+            p += series_issues("DXY", m["dxy"], 60, 160, jump=0.04, max_gap=10)
+        if m.get("vix"):
+            p += series_issues("VIX", m["vix"], 5, 150, max_gap=10)
+        if m.get("nq"):
+            p += series_issues("NQ", m["nq"], 1000, 100000, jump=0.15, max_gap=10)
+    elif name == "gex":
+        g = d.get("gex") or {}
+        S = g.get("spot") or 0
+        if not 50 <= S <= 2000:
+            p.append(f"GEX: GLD price {S} out of range")
+        for k in ("call_wall", "put_wall", "zero_all"):
+            if g.get(k) is not None and S and abs(g[k] / S - 1) > 0.3:
+                p.append(f"GEX: {k} {g[k]} too far from price {S}")
+    return p
+
+
+# ---------------------------------------------------------------- bias track record (scored after 14 days)
+OUTLOOK_DAYS, OUTLOOK_BAND = 14, 0.02
+
+
+def score_outlooks():
+    """يقارن كل انحياز واحتمالاته بما فعله الذهب بعد 14 يومًا: صعود إن زاد أكثر من 2٪، هبوط إن نقص أكثر من 2٪، وإلا عرضي.
+    Brier = مجموع (الاحتمال − النتيجة)² على الاتجاهات الثلاثة: 0 مثالي، و0.667 لمن يعطي كل اتجاه الثلث."""
+    log_ = load(OUTLOOK_LOG, [])
+    daily = load(PRICES_OUT, {}).get("daily") or []
+    if not log_ or not daily:
+        return None
+    days = [r[0] for r in daily]
+    changed = False
+    for e in log_:
+        if e.get("result") or not e.get("base"):
+            continue
+        due = (dt.date.fromisoformat(e["base"]["date"]) + dt.timedelta(days=OUTLOOK_DAYS)).isoformat()
+        if days[-1] <= due:
+            continue                                    # لم تُغلق جلسة بعد تاريخ الاستحقاق
+        i = bisect.bisect_right(days, due) - 1
+        close = daily[i][1]
+        ret = close / e["base"]["price"] - 1
+        out = "up" if ret > OUTLOOK_BAND else "down" if ret < -OUTLOOK_BAND else "flat"
+        probs = dict(zip(e["dirs"], [x / 100 for x in e["p"]]))
+        brier = sum((probs.get(k, 0) - (k == out)) ** 2 for k in ("up", "flat", "down"))
+        e["result"] = {"date": daily[i][0], "price": close, "ret": round(ret * 100, 2), "outcome": out,
+                       "bias_hit": {"bullish": "up", "bearish": "down", "neutral": "flat"}[e["bias"]] == out,
+                       "p_outcome": round(probs.get(out, 0) * 100), "brier": round(brier, 3)}
+        changed = True
+    if changed:
+        save(OUTLOOK_LOG, log_)
+    done = [e["result"] for e in log_ if e.get("result")]
+    summ = {"n": len(done), "pending": len(log_) - len(done)}
+    if done:
+        summ.update(hit=round(sum(r["bias_hit"] for r in done) / len(done) * 100),
+                    brier=round(sum(r["brier"] for r in done) / len(done), 3), brier_naive=0.667,
+                    p_outcome=round(sum(r["p_outcome"] for r in done) / len(done)))
+    return {"summary": summ, "days": OUTLOOK_DAYS, "band": OUTLOOK_BAND * 100, "rows": log_[-30:]}
+
+
 # ---------------------------------------------------------------- main: release-aware scheduler
 SECTIONS = {
     "price": (fetch_prices, ()),
@@ -1619,7 +2024,10 @@ SECTIONS = {
     "physical": (fetch_physical, ("physical",)),
     "f13": (fetch_f13, ("f13",)),
     "wgc": (fetch_wgc, ("wgc_etf",)),
+    "macro": (fetch_macro, ("macro", "liquidation")),
+    "gex": (fetch_gex, ("gex",)),
 }
+CHECK_KEYS = {"comex": ("comex",), "deliveries": ("deliveries",)}     # مفاتيح تُبنى من ملفات السجل لا من دالة الجلب
 MAJOR = ("cot", "cot_legacy", "imf", "f13", "wgc")      # تقارير كبرى تستحق تقريرًا ذكيًا جديدًا
 
 
@@ -1646,6 +2054,10 @@ def latest_of(name, d):
             return d["f13"]["periods"][-1]["p"]
         if name == "wgc":
             return d["wgc_etf"][-1]["data_month"]
+        if name == "macro":
+            return d["macro"]["real10"][-1][0]
+        if name == "gex":
+            return d["gex"]["asof"][:10]
     except Exception:
         return None
     return None
@@ -1672,7 +2084,7 @@ def is_due(name, st, prev):
         # ونستمر كل ساعة حتى يظهر التقرير (يتأخر أحيانًا إلى الاثنين بسبب العطل الرسمية).
         expected = dt.datetime.fromisoformat(last).replace(tzinfo=dt.timezone.utc) + dt.timedelta(days=10, hours=19)
         return now >= expected
-    if name in ("deliveries", "comex", "etf", "etf2", "physical"):
+    if name in ("deliveries", "comex", "etf", "etf2", "physical", "macro", "gex"):
         return now.weekday() != 6 and hours_since(st.get("checked")) >= 2.8      # تقارير يومية: كل 3 ساعات
     if name in ("imf", "f13", "wgc"):
         return hours_since(st.get("checked")) >= 11.5                          # شهرية وربعية: مرتين يوميًا
@@ -1701,6 +2113,9 @@ def main():
             if name == "deliveries":
                 dh = load(DELIV_HIST, {"daily": {}, "mtd": {}})
                 data["deliveries"] = {"daily": {d: dh["daily"][d] for d in sorted(dh["daily"])[-120:]}, "mtd": dh.get("mtd", {})}
+            problems = check_data(name, data)
+            if problems:
+                raise RuntimeError("data check: " + "; ".join(problems)[:260])
             st.update(ok=True, last_ok=now, error=None)
             after = latest_of(name, data)
             if after and after != before:
@@ -1714,7 +2129,7 @@ def main():
         except Exception as e:
             log(name, "FAILED:", repr(e)[:300])
             st.update(ok=False, error=(str(e) or repr(e))[:300])
-            for key in keys:
+            for key in keys + CHECK_KEYS.get(name, ()):
                 if key in prev:
                     data[key] = prev[key]
         status["sources"][name] = {**st}
@@ -1735,6 +2150,12 @@ def main():
         status["sources"]["ai"] = {"ok": False, "checked": now, "error": str(e)[:300]}
         if prev.get("ai"):
             data["ai"] = prev["ai"]
+    try:
+        track = score_outlooks()
+        if track:
+            data["outlook_track"] = track
+    except Exception as e:
+        log("outlook scoring FAILED:", repr(e)[:200])
     # data.json لا يُكتب إلا إذا تغيّرت البيانات فعلًا، كي لا يتضخم سجل المستودع
     core = lambda x: json.dumps({k: v for k, v in x.items() if k not in ("generated_utc", "sources", "data_utc")},
                                 ensure_ascii=False, sort_keys=True)
