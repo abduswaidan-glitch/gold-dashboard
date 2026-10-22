@@ -1568,14 +1568,17 @@ def classify_f13(out):
     todo = [c for c in names if c not in types]
     key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if todo and key:
-        for i in range(0, len(todo), 120):
-            batch = todo[i:i + 120]
-            resp = _claude({"model": WGC_MODEL, "max_tokens": 4000, "system": F13_TYPE_SYSTEM,
+        for i in range(0, len(todo), 80):
+            batch = todo[i:i + 80]
+            # تصنيف بسيط: بلا تفكير مطوّل كي لا يستهلك حدّ Tokens قبل كتابة الجواب
+            resp = _claude({"model": WGC_MODEL, "max_tokens": 8000, "thinking": {"type": "disabled"}, "system": F13_TYPE_SYSTEM,
                             "messages": [{"role": "user", "content": "\n".join(f"{c}|{names[c]}" for c in batch)}]}, key)
             txt = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
+            if "{" not in txt:
+                raise RuntimeError(f"no JSON in reply (stop_reason {resp.get('stop_reason')})")
             got = json.loads(txt[txt.find("{"):txt.rfind("}") + 1])
             types.update({c: (got.get(c) if got.get(c) in F13_KINDS else "other") for c in batch if c in got})
-        save(F13_TYPES, types)
+            save(F13_TYPES, types)
         log(f"13F institution types: classified {len(todo)} new institutions")
     return {c: types[c] for c in names if c in types}
 
