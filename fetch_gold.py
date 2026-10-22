@@ -1057,8 +1057,8 @@ def gex_from_chain(opts, S, now):
         by_k.setdefault(K, [0.0, 0.0])[0 if sg > 0 else 1] += g * sg
     for K, e, sg, oi, iv, T in struct:
         walls.setdefault(K, [0.0, 0.0])[0 if sg > 0 else 1] += _bs_gamma(S, K, T, iv) * oi * 100 * S * S * 0.01 * sg
-    above = {K: v for K, v in walls.items() if S <= K <= 1.25 * S} or walls
-    below = {K: v for K, v in walls.items() if 0.75 * S <= K <= S} or walls
+    above = {K: v for K, v in walls.items() if S <= K <= 1.10 * S} or walls     # جدار قريب يمكن أن يُختبر خلال أسابيع،
+    below = {K: v for K, v in walls.items() if 0.90 * S <= K <= S} or walls     # لا عقود LEAPS بعيدة بفائدة مفتوحة ضخمة
     call_wall = max(above, key=lambda K: above[K][0])            # أكبر Gamma للـ Calls عند السعر أو فوقه
     put_wall = min(below, key=lambda K: below[K][1])             # أكبر Gamma للـ Puts عند السعر أو تحته
     return {"spot": round(S, 2), "total_m": round(gex(S, rows) / 1e6, 1), "near_total_m": round(gex(S, near_rows) / 1e6, 1),
