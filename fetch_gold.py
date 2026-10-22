@@ -1318,7 +1318,7 @@ def fetch_f13():
 
 # ---------------------------------------------------------------- AI daily report (Claude API)
 AI_HIST = os.path.join("data", "ai_history.json")
-AI_MODEL = os.environ.get("AI_MODEL", "claude-fable-5-1")
+AI_MODEL = os.environ.get("AI_MODEL", "claude-opus-5-5")
 AI_URL = "https://api.anthropic.com/v1/messages"
 AI_LANGS = ("ar", "en", "it", "es")
 PRICES_PER_MTOK = (("claude-fable", 10, 50), ("claude-mythos", 10, 50), ("claude-opus-5-5", 4, 20), ("claude-opus", 5, 25),
@@ -1520,7 +1520,8 @@ def ai_report(data, prev, new_major, releases):
     # fallbacks "default": إن رفض النموذج الطلب يُعاد تشغيله على نموذج بديل من Anthropic تلقائيًا (ويُعرض اسمه الحقيقي)
     for tools, fallback in ((ws_new, True), (ws_old, True), (ws_new, False), (None, False)):
         try:
-            payload = {"model": AI_MODEL, "max_tokens": 32000, "system": AI_SYSTEM, "messages": list(messages)}
+            payload = {"model": AI_MODEL, "max_tokens": 32000, "system": AI_SYSTEM, "messages": list(messages),
+                       "output_config": {"effort": "high"}}      # Opus 5.5 يبدأ افتراضيًا بـ medium
             if tools:
                 payload["tools"] = tools
             if fallback:
