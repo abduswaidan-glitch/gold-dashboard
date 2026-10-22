@@ -1542,7 +1542,9 @@ R.gex = () => {
   if (st.length > 2){
     const W = 640, H = 240, T = 10, B = 10, n = st.length, cw = W / n;
     const nets = st.map(s => s[1] + s[2]), mx = Math.max(1e-9, ...nets.map(Math.abs)), zy = T + (H - T - B) / 2, sc = (H - T - B) / 2 / mx;
-    const xOf = K => { const k0 = st[0][0], k1 = st[n - 1][0]; return ((K - k0) / (k1 - k0) * (W - cw) + cw / 2).toFixed(1); };
+    /* bars sit one per strike (strike spacing widens away from the money), so lines are placed between the same bars */
+    const xOf = K => { let i = 0; while (i < n - 2 && st[i + 1][0] < K) i++;
+      const f = Math.max(0, Math.min(1, (K - st[i][0]) / ((st[i + 1][0] - st[i][0]) || 1))); return ((i + f) * cw + cw / 2).toFixed(1); };
     let svg = `<svg class="rvc" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Net GEX by strike">`;
     st.forEach((s, i) => { const v = nets[i], x = (i * cw + cw * .15).toFixed(1), w = (cw * .7).toFixed(1), hh = Math.max(1, Math.abs(v) * sc);
       svg += `<rect class="${v >= 0 ? 'b-up' : 'b-down'}" x="${x}" y="${(v >= 0 ? zy - hh : zy).toFixed(1)}" width="${w}" height="${hh.toFixed(1)}"><title>GLD ${s[0]}${r ? ` ≈ GC ${nf0.format(s[0] * r)}` : ''}: ${sg(v)}$${nf1.format(Math.abs(v))}M</title></rect>`; });
