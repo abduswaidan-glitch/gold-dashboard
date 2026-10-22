@@ -30,6 +30,7 @@ CONTRACT_OZ = 100              # COMEX GC = 100 oz
 MAX_COUNTRY_KG = 9_000_000     # سقف منطقي: أكبر حائز (الولايات المتحدة) ~8,133 طن
 START_MONTH = "2022-01"
 START_DAY = "2022-01-01"
+START_DAY_PRICES = "2008-01-01"
 
 OUT = "data.json"
 STATUS_OUT = "status.json"              # يتغير كل ساعة: حالة الفحص فقط
@@ -885,10 +886,11 @@ def fetch_physical():
 
 
 # ---------------------------------------------------------------- gold price (hourly)
-def yahoo_chart(symbol, rng, interval):
+def yahoo_chart(symbol, rng, interval, period=None):
     errors = []
+    span = f"period1={period[0]}&period2={period[1]}" if period else f"range={rng}"
     for host in ("query1", "query2"):
-        url = f"https://{host}.finance.yahoo.com/v8/finance/chart/{symbol}?range={rng}&interval={interval}"
+        url = f"https://{host}.finance.yahoo.com/v8/finance/chart/{symbol}?{span}&interval={interval}"
         try:
             res = browser_get(url, headers={"Accept": "application/json"}).json()["chart"]["result"][0]
             q = res["indicators"]["quote"][0]["close"]
@@ -898,14 +900,33 @@ def yahoo_chart(symbol, rng, interval):
     raise RuntimeError(f"Yahoo {symbol} {interval}: " + " | ".join(errors))
 
 
+def _day(t):
+    return dt.datetime.fromtimestamp(t, dt.timezone.utc).date().isoformat()
+
+
 def fetch_prices():
     """سعر الذهب (عقود COMEX الأقرب GC=F): إغلاقات يومية منذ 2008، وأسعار الساعة لآخر 5 أيام."""
-    meta, daily = yahoo_chart("GC=F", "max", "1d")
-    d = {}
-    for t, c in daily:
-        day = dt.datetime.fromtimestamp(t, dt.timezone.utc).date().isoformat()
-        if day >= "2008-01-01":
-            d[day] = round(c, 2)
+    d = dict(load(PRICES_OUT, {}).get("daily") or [])
+    meta, recent = yahoo_chart("GC=F", "1mo", "1d")
+    # range=max يعيد نقطة شهرية واحدة لا إغلاقات يومية، فنعيد بناء السجل مرة واحدة بفترات صريحة
+    if sum(1 for k in d if k >= START_DAY_PRICES) < 3000:
+        start = int(dt.datetime(2008, 1, 1, tzinfo=dt.timezone.utc).timestamp())
+        end = int(dt.datetime.now(dt.timezone.utc).timestamp())
+        full = {}
+        try:
+            for a in range(start, end, 1500 * 86400):
+                _, rows = yahoo_chart("GC=F", None, "1d", (a, min(a + 1500 * 86400, end)))
+                full.update((_day(t), round(c, 2)) for t, c in rows)
+        except Exception as e:
+            log("daily price backfill failed:", str(e)[:200])
+        if len(full) >= 3000:
+            d = full
+            log(f"daily price history rebuilt: {len(full)} closes")
+        elif full:
+            log(f"daily price backfill returned only {len(full)} points; keeping the stored history")
+    for t, c in recent:
+        d[_day(t)] = round(c, 2)
+    d = {k: v for k, v in d.items() if k >= START_DAY_PRICES}
     try:
         _, hourly = yahoo_chart("GC=F", "5d", "60m")
         h = [[dt.datetime.fromtimestamp(t, dt.timezone.utc).replace(microsecond=0).isoformat(), round(c, 2)] for t, c in hourly]
@@ -916,7 +937,8 @@ def fetch_prices():
     ptime = meta.get("regularMarketTime")
     last = {"price": round(float(price), 2) if price else None,
             "time": dt.datetime.fromtimestamp(ptime, dt.timezone.utc).isoformat() if ptime else (h[-1][0] if h else None),
-            "prev_close": meta.get("chartPreviousClose") or meta.get("previousClose")}
+            # الإغلاق السابق = إغلاق الجلسة التي قبل الجلسة الأخيرة (chartPreviousClose يخص بداية النطاق، لا أمس)
+            "prev_close": round(recent[-2][1], 2) if len(recent) > 1 else None}
     out = {"symbol": "GC=F", "updated_utc": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(),
            "last": last, "daily": sorted([k, v] for k, v in d.items()), "hourly": h[-150:]}
     save(PRICES_OUT, out)
