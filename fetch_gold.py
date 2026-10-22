@@ -931,7 +931,8 @@ WGC_SYSTEM = """Extract numbers from a World Gold Council monthly "Gold ETF Flow
 {"data_month":"YYYY-MM","global_holdings_t":number|null,"global_demand_t":number|null,"global_flow_usd_bn":number|null,
  "aum_usd_bn":number|null,
  "regions":{"north_america":{"flow_usd_bn":number|null,"demand_t":number|null},"europe":{...},"asia":{...},"other":{...}},
- "headline_en":"one sentence","headline_ar":"جملة واحدة بالعربية الفصحى"}
+ "headline_en":"one sentence","headline_ar":"جملة واحدة بالعربية الفصحى","headline_it":"una frase in italiano",
+ "headline_es":"una frase en español"}
 Use null when a number is not stated. Outflows are negative. data_month is the month the data covers (not the publication month).
 US$ millions must be converted to billions (e.g. US$495mn = 0.495)."""
 
@@ -1317,8 +1318,11 @@ def fetch_f13():
 
 # ---------------------------------------------------------------- AI daily report (Claude API)
 AI_HIST = os.path.join("data", "ai_history.json")
-AI_MODEL = os.environ.get("AI_MODEL", "claude-sonnet-5-5")
+AI_MODEL = os.environ.get("AI_MODEL", "claude-opus-5-5")
 AI_URL = "https://api.anthropic.com/v1/messages"
+AI_LANGS = ("ar", "en", "it", "es")
+PRICES_PER_MTOK = (("claude-fable", 10, 50), ("claude-mythos", 10, 50), ("claude-opus-5-5", 4, 20), ("claude-opus", 5, 25),
+                   ("claude-sonnet", 2, 10), ("claude-haiku-5-5", 0.1, 0.5), ("claude-haiku", 1, 5))
 
 
 def _t(kg):
@@ -1421,24 +1425,73 @@ Rules:
 - Use web search (up to 4 searches) only for today's gold-relevant events: Federal Reserve and rates, US dollar and yields,
   geopolitics, central-bank gold news, China and India demand, major ETF or bank news. Cite each event's source URL.
 - Connect the sections: say when they agree or contradict each other (e.g. speculators crowded long while ETFs see outflows).
-- Be factual and neutral. This is not investment advice: no buy/sell recommendations, no price targets.
-- Arabic must be correct Modern Standard Arabic (فصحى) with English technical terms kept in English (COT, EFP, ETF, Long, Short).
-- English must be clear, professional British/US English.
+- Be factual. This is not investment advice: no buy/sell recommendations, no price targets.
+- After weighing every section and today's events, give your own analytical bias for gold over the next 1-2 weeks
+  (until the next major report) and three distinct scenarios for that horizon with estimated probabilities: whole
+  percentages that sum to 100, most likely first. Each scenario gets one short line on why, grounded in the data or events.
+- Write the same report in four languages, with the same content and numbers in each:
+  Arabic in correct Modern Standard Arabic (فصحى); clear, professional English; natural, correct professional Italian;
+  natural, correct professional Spanish (Spain). Keep technical terms in English in every language (COT, EFP, ETF, Long, Short).
 Return ONLY one JSON object, no markdown fences, with exactly this shape:
-{"ar": {"headline": "...", "tone": "إيجابي|سلبي|محايد|متباين", "summary": ["...", "..."],
+{"outlook": {"bias": "bullish|bearish|neutral", "probabilities": [p1, p2, p3]},
+ "ar": {"headline": "...", "tone": "إيجابي|سلبي|محايد|متباين", "summary": ["...", "..."],
         "sections": [{"title": "...", "body": "..."}], "events": [{"title": "...", "impact": "...", "source": "https://..."}],
-        "watch": ["..."], "risks": "..."},
- "en": {same keys, "tone": "positive|negative|neutral|mixed"}}
+        "watch": ["..."], "risks": "...",
+        "outlook": {"bias_note": "one line on why", "scenarios": [{"title": "...", "why": "..."}, {...}, {...}]}},
+ "en": {same keys, "tone": "positive|negative|neutral|mixed"},
+ "it": {same keys, "tone": "positivo|negativo|neutrale|misto"},
+ "es": {same keys, "tone": "positivo|negativo|neutral|mixto"}}
+The three scenarios in every language follow the order of "probabilities".
 summary: 4 to 6 short points. sections: 4 to 6 (central banks and countries, banks and COT positioning, ETFs and institutions,
 physical market and vaults, and anything else notable). events: 2 to 5. watch: 2 to 4 things to watch next."""
 
 
-def _claude(payload, key):
-    r = requests.post(AI_URL, json=payload, timeout=300, headers={
-        "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+class ClaudeHTTPError(RuntimeError):
+    def __init__(self, status, text):
+        super().__init__(f"Claude API HTTP {status}: {text[:200]}")
+        self.status = status
+
+
+def _claude(payload, key, beta=None, timeout=300):
+    headers = {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+    if beta:
+        headers["anthropic-beta"] = beta
+    r = requests.post(AI_URL, json=payload, timeout=timeout, headers=headers)
     if r.status_code >= 400:
-        raise RuntimeError(f"Claude API HTTP {r.status_code}: {r.text[:200]}")
+        raise ClaudeHTTPError(r.status_code, r.text)
     return r.json()
+
+
+def _cost(model, u):
+    pin, pout = next(((i, o) for pre, i, o in PRICES_PER_MTOK if str(model).startswith(pre)), (10, 50))
+    return (u.get("input_tokens", 0) * pin + u.get("output_tokens", 0) * pout) / 1e6 \
+        + ((u.get("server_tool_use") or {}).get("web_search_requests", 0)) * 0.01
+
+
+def _outlook(rep):
+    """الانحياز والاحتمالات الثلاثة: نتحقق من شكلها، ونسقطها بدل إسقاط التقرير كله إن جاءت ناقصة."""
+    o = rep.get("outlook") or {}
+    p = o.get("probabilities")
+    if o.get("bias") not in ("bullish", "bearish", "neutral") or not isinstance(p, list) or len(p) != 3:
+        return None
+    try:
+        p = [max(0.0, float(x)) for x in p]
+    except (TypeError, ValueError):
+        return None
+    if not sum(p):
+        return None
+    p = [round(x * 100 / sum(p)) for x in p]
+    p[0] += 100 - sum(p)                                    # التقريب قد يترك فرق 1٪
+    for lang in AI_LANGS:
+        lo = (rep.get(lang) or {}).get("outlook") or {}
+        sc = lo.get("scenarios")
+        if lang in ("ar", "en") and not (isinstance(sc, list) and len(sc) >= 3):
+            return None
+        if isinstance(rep.get(lang), dict) and isinstance(sc, list):
+            rep[lang]["outlook"] = {"bias_note": str(lo.get("bias_note") or ""),
+                                    "scenarios": [{"title": str(x.get("title") or ""), "why": str(x.get("why") or "")}
+                                                  for x in sc[:3] if isinstance(x, dict)]}
+    return {"bias": o["bias"], "p": p}
 
 
 def ai_report(data, prev, new_major, releases):
@@ -1462,24 +1515,34 @@ def ai_report(data, prev, new_major, releases):
             "Search for today's key gold-related events, then return the JSON report.")
     messages = [{"role": "user", "content": user}]
     sources, text, resp = [], "", None
-    for tools in ([{"type": "web_search_20260209", "name": "web_search", "max_uses": 4}],
-                  [{"type": "web_search_20250305", "name": "web_search", "max_uses": 4}], None):
+    ws_new = [{"type": "web_search_20260209", "name": "web_search", "max_uses": 4}]
+    ws_old = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 4}]
+    # fallbacks "default": إن رفض النموذج الطلب يُعاد تشغيله على نموذج بديل من Anthropic تلقائيًا (ويُعرض اسمه الحقيقي)
+    for tools, fallback in ((ws_new, True), (ws_old, True), (ws_new, False), (None, False)):
         try:
-            payload = {"model": AI_MODEL, "max_tokens": 9000, "system": AI_SYSTEM, "messages": list(messages)}
+            payload = {"model": AI_MODEL, "max_tokens": 32000, "system": AI_SYSTEM, "messages": list(messages),
+                       "output_config": {"effort": "high"}}      # Opus 5.5 يبدأ افتراضيًا بـ medium
             if tools:
                 payload["tools"] = tools
-            resp = _claude(payload, key)
+            if fallback:
+                payload["fallbacks"] = "default"
+            beta = "server-side-fallback-2026-07-01" if fallback else None
+            resp = _claude(payload, key, beta, timeout=900)
             for _ in range(3):                       # البحث الطويل قد يتوقف مؤقتًا (pause_turn) فنكمله
                 if resp.get("stop_reason") != "pause_turn":
                     break
                 payload["messages"] = payload["messages"] + [{"role": "assistant", "content": resp["content"]}]
-                resp = _claude(payload, key)
+                resp = _claude(payload, key, beta, timeout=900)
             break
-        except Exception as e:
-            log("AI request failed" + (" (with web search)" if tools else "") + ":", str(e)[:200])
+        except ClaudeHTTPError as e:
+            if not 400 <= e.status < 500 or e.status == 429:
+                raise                                # خطأ خادم أو ضغط: نعيد المحاولة في التشغيل التالي بدل تكرار طلب مكلف
+            log("AI request rejected" + (" (with web search)" if tools else "") + (" (with fallbacks)" if fallback else "") + ":", str(e)[:200])
             resp = None
     if not resp:
         raise RuntimeError("Claude API: all attempts failed")
+    if resp.get("stop_reason") == "refusal":
+        raise RuntimeError(f"Claude API: request declined ({(resp.get('stop_details') or {}).get('category')})")
     for b in resp.get("content", []):
         if b.get("type") == "text":
             text += b.get("text", "")
@@ -1495,11 +1558,15 @@ def ai_report(data, prev, new_major, releases):
             raise ValueError("missing ar/en")
     except Exception as e:
         raise RuntimeError(f"AI report: could not parse JSON ({e}); first chars: {text[:120]!r}")
+    outlook = _outlook(rep)
+    if not outlook:
+        log("AI report: bias/scenarios missing or malformed; report kept without them")
     u = resp.get("usage") or {}
-    cost = (u.get("input_tokens", 0) * 2 + u.get("output_tokens", 0) * 10) / 1e6 \
-        + ((u.get("server_tool_use") or {}).get("web_search_requests", 0)) * 0.01
-    latest = {"date": today, "generated_utc": now.replace(microsecond=0).isoformat(), "model": resp.get("model", AI_MODEL),
-              "ar": rep["ar"], "en": rep["en"], "sources": sources[:10],
+    model = resp.get("model", AI_MODEL)
+    cost = _cost(model, u)
+    langs = {k: rep[k] for k in AI_LANGS if isinstance(rep.get(k), dict)}  # it/es اختياريتان: الواجهة تعرض الإنجليزية إن غابتا
+    latest = {"date": today, "generated_utc": now.replace(microsecond=0).isoformat(), "model": model,
+              **langs, "outlook": outlook, "sources": sources[:10],
               "usage": {"input_tokens": u.get("input_tokens"), "output_tokens": u.get("output_tokens"),
                         "searches": (u.get("server_tool_use") or {}).get("web_search_requests", 0), "est_cost_usd": round(cost, 4)}}
     hist = load(AI_HIST, [])
@@ -1511,7 +1578,8 @@ def ai_report(data, prev, new_major, releases):
     latest["trigger"] = list((new_major or {}).keys()) or ["manual"]
     hist[-1]["trigger"] = latest["trigger"]
     save(AI_HIST, hist)
-    return {"latest": latest, "history": [{"date": h["date"], "ar": h["ar"], "en": h["en"], "sources": h.get("sources", []),
+    return {"latest": latest, "history": [{"date": h["date"], **{k: h[k] for k in AI_LANGS if k in h}, "outlook": h.get("outlook"),
+                                           "sources": h.get("sources", []),
                                            "model": h.get("model"), "generated_utc": h.get("generated_utc"),
                                            "trigger": h.get("trigger", [])} for h in hist[-14:]]}, True
 
