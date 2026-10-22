@@ -1050,14 +1050,17 @@ def gex_from_chain(opts, S, now):
     near_rows = [r for r in rows if r[1] == near]
     prof_all = [(x, gex(x, rows)) for x in grid]
     prof_near = [(x, gex(x, near_rows)) for x in grid]
-    by_k = {}
+    by_k, walls = {}, {}
+    struct = [r for r in rows if r[5] > 1.5 / 365] or rows    # الجدران هيكلية: نستبعد عقود اليوم الأخير التي تتركّز عند السعر الحالي
     for K, e, sg, oi, iv, T in rows:
         g = _bs_gamma(S, K, T, iv) * oi * 100 * S * S * 0.01
-        c = by_k.setdefault(K, [0.0, 0.0])
-        c[0 if sg > 0 else 1] += g * sg
-    band = {K: v for K, v in by_k.items() if 0.75 * S <= K <= 1.25 * S}
-    call_wall = max(band, key=lambda K: band[K][0])
-    put_wall = min(band, key=lambda K: band[K][1])
+        by_k.setdefault(K, [0.0, 0.0])[0 if sg > 0 else 1] += g * sg
+    for K, e, sg, oi, iv, T in struct:
+        walls.setdefault(K, [0.0, 0.0])[0 if sg > 0 else 1] += _bs_gamma(S, K, T, iv) * oi * 100 * S * S * 0.01 * sg
+    above = {K: v for K, v in walls.items() if S <= K <= 1.25 * S} or walls
+    below = {K: v for K, v in walls.items() if 0.75 * S <= K <= S} or walls
+    call_wall = max(above, key=lambda K: above[K][0])            # أكبر Gamma للـ Calls عند السعر أو فوقه
+    put_wall = min(below, key=lambda K: below[K][1])             # أكبر Gamma للـ Puts عند السعر أو تحته
     return {"spot": round(S, 2), "total_m": round(gex(S, rows) / 1e6, 1), "near_total_m": round(gex(S, near_rows) / 1e6, 1),
             "zero_all": _zero_cross(prof_all, S), "zero_near": _zero_cross(prof_near, S), "near_exp": near,
             "call_wall": call_wall, "put_wall": put_wall, "n_options": len(rows),
@@ -1074,7 +1077,8 @@ def fetch_gex():
         raise RuntimeError("Cboe GLD: no current price")
     now = dt.datetime.now(dt.timezone.utc)
     g = gex_from_chain(d.get("options") or [], S, now)
-    g["asof"] = str(j.get("timestamp") or now.replace(microsecond=0).isoformat())
+    g["asof"] = now.replace(microsecond=0).isoformat()          # لحظة الجلب (UTC)؛ توقيت Cboe الخام بلا منطقة زمنية
+    g["cboe_ts"] = str(j.get("timestamp") or "")
     gc = (load(PRICES_OUT, {}).get("last") or {}).get("price")
     g["gc_ratio"] = round(gc / S, 4) if gc else None                # مستوى GLD × النسبة ≈ مستوى عقد الذهب GC
     hist = [h for h in load(GEX_HIST, []) if h.get("d") != now.date().isoformat()]
