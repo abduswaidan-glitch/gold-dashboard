@@ -303,6 +303,7 @@ tr:last-child td{border-bottom:0}
 .dir.flat{background:color-mix(in srgb,var(--blue) 16%,transparent);color:var(--blue)}
 .ai-card.track{margin-bottom:18px}
 .ai-card.liq{margin:0 0 18px}
+.ol-bias small{font-size:12.5px}
 .liq-list{list-style:none;padding:0;margin:0 0 14px;display:grid;gap:6px}
 .liq-list li{display:grid;grid-template-columns:22px 1fr auto;gap:10px;align-items:center;padding:8px 12px;background:var(--surface-2);border:1px solid var(--rule);border-radius:8px;font-size:14px}
 .kind{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:99px;color:var(--k);white-space:nowrap;vertical-align:middle;
@@ -1483,6 +1484,7 @@ R.macro = () => {
       <div class="sub">${L('أسبوع', '1 week', '1 settimana', '1 semana')}: ${bd(sg(last(m.vix)[1] - m.vix[m.vix.length - 6][1]) + nf2.format(Math.abs(last(m.vix)[1] - m.vix[m.vix.length - 6][1])))} · ${last(m.vix)[1] >= 25 ? L('توتر مرتفع', 'high stress', 'stress elevato', 'tensión alta') : last(m.vix)[1] >= 18 ? L('حذر', 'caution', 'cautela', 'cautela') : L('هدوء', 'calm', 'calma', 'calma')}</div>
       <div class="sub">${fDay.format(toDate(last(m.vix)[0]))}</div></div>` : ''}</div>`;
   h += `<p class="explain">${L('الألوان من منظور الذهب: الأخضر يعني تغيرًا داعمًا للذهب (عائد أو دولار أدنى)، والأحمر ضاغطًا عليه.', 'Colours are from gold’s point of view: green means a change that supports gold (a lower yield or dollar), red one that weighs on it.', 'I colori sono dal punto di vista dell’oro: verde indica una variazione favorevole all’oro (rendimento o dollaro più bassi), rosso una sfavorevole.', 'Los colores son desde el punto de vista del oro: verde indica un cambio que favorece al oro (rentabilidad o dólar más bajos) y rojo, uno que lo presiona.')}</p>`;
+  h += fedHTML(m.fed);
   const cr = changeCorr(r, 60, false), cd = dx.length ? changeCorr(dx, 60, true) : null, cn = (m.nq || []).length ? changeCorr(m.nq, 60, true) : null;
   const nqRead = cn == null ? '—' : `${bd((cn > 0 ? '+' : cn < 0 ? '−' : '') + nf2.format(Math.abs(cn)))} · ${cn >= 0.3 ? L('يتحركان معًا (في أوقات الضغط قد يعني بيعًا للسيولة)', 'moving together (under stress this can mean selling for cash)', 'si muovono insieme (sotto stress può indicare vendite per liquidità)', 'se mueven juntos (bajo tensión puede indicar ventas por liquidez)')
     : cn <= -0.3 ? L('الذهب يتحرك عكس الأسهم (سلوك الملاذ الآمن)', 'gold moving against stocks (safe-haven behaviour)', 'l’oro si muove contro le azioni (comportamento da bene rifugio)', 'el oro se mueve en contra de las acciones (comportamiento de refugio)') : L('علاقة ضعيفة حاليًا', 'weak link for now', 'legame debole al momento', 'relación débil por ahora')}`;
@@ -1501,6 +1503,37 @@ R.macro = () => {
     {aName: L('الذهب (GC)', 'Gold (GC)', 'Oro (GC)', 'Oro (GC)'), bName: 'DXY', invertB: true, aFmt: gUSD, bFmt: v => bd(nf2.format(v))});
   return h;
 };
+
+/* ---------- Fed & inflation ---------- */
+function fedHTML(f){
+  if (!f || !f.effr) return '';
+  const pc = v => v == null ? '—' : bd(nf2.format(v) + '%'), mo = m => fMonth.format(toDate(m + '-01'));
+  const sp = f.y2_minus_effr, spRead = sp == null ? '' : sp <= -0.25 ? ['pos', L('السوق يسعّر خفضًا للفائدة', 'Market prices in rate cuts', 'Il mercato prezza tagli dei tassi', 'El mercado descuenta recortes de tipos')]
+    : sp >= 0.25 ? ['neg', L('السوق يسعّر رفعًا للفائدة', 'Market prices in rate hikes', 'Il mercato prezza rialzi dei tassi', 'El mercado descuenta subidas de tipos')] : ['neu', L('لا تغيير كبير متوقع', 'No big change expected', 'Nessun grande cambiamento atteso', 'Sin grandes cambios esperados')];
+  const ch = f.last_fed_change, infl = (label, c) => c ? `<div class="fig"><h3>${label} (${mo(c.month)})</h3><div class="v">${pc(c.yoy)}</div>
+      <div class="sub">${L('سنويًا · الشهر السابق', 'year on year · prior month', 'su base annua · mese precedente', 'interanual · mes anterior')}: ${pc(c.yoy_prev)}</div>
+      <div class="sub">${L('آخر 3 أشهر سنويًا', '3-month annualized', 'ultimi 3 mesi annualizzati', 'últimos 3 meses anualizados')}: <b class="${c.ann3m > c.yoy ? 'down' : 'up'}">${pc(c.ann3m)}</b> · ${L('شهريًا', 'month', 'mese', 'mes')}: ${pc(c.mom)}</div></div>` : '';
+  let h = `<h3 class="rv-title">${L('الفيدرالي والتضخم', 'The Fed and inflation', 'La Fed e l’inflazione', 'La Fed y la inflación')}</h3><div class="figs">
+    <div class="fig"><h3>${L('سعر الفائدة الفيدرالي (الحد الأعلى)', 'Fed funds rate (upper bound)', 'Tasso Fed (limite superiore)', 'Tipo de la Fed (límite superior)')}</h3><div class="v">${pc((f.fed_upper || [])[1])}</div>
+      <div class="sub">${L('الفعلي', 'Effective', 'Effettivo', 'Efectivo')}: ${pc(f.effr[1])}</div>
+      <div class="sub">${ch ? `${L('آخر تغيير', 'Last change', 'Ultima variazione', 'Último cambio')}: ${fDay.format(toDate(ch.date))} (${pc(ch.from)} → ${pc(ch.to)})` : ''}</div></div>
+    <div class="fig"><h3>${L('عائد السنتين ناقص الفعلي (إشارة مبكرة)', '2-year yield minus effective rate (early signal)', 'Rendimento a 2 anni meno tasso effettivo (segnale anticipato)', 'Rentabilidad a 2 años menos tipo efectivo (señal temprana)')}</h3><div class="v ${spRead[0] === 'pos' ? 'up' : spRead[0] === 'neg' ? 'down' : ''}">${sp == null ? '—' : bd(sg(sp) + nf0.format(Math.abs(sp * 100)) + ' bp')}</div>
+      <div class="sub">${spRead[1] || ''}</div><div class="sub">${L('عائد السنتين', '2-year yield', 'Rendimento a 2 anni', 'Rentabilidad a 2 años')}: ${pc((f.y2 || [])[1])}</div></div>
+    ${infl(L('التضخم CPI', 'CPI inflation', 'Inflazione CPI', 'Inflación CPI'), f.cpi)}
+    ${infl(L('التضخم الأساسي Core CPI', 'Core CPI', 'CPI core', 'CPI subyacente'), f.core)}
+    <div class="fig"><h3>${L('الفائدة الحقيقية للفيدرالي', 'Real Fed rate', 'Tasso Fed reale', 'Tipo real de la Fed')}</h3><div class="v">${pc(f.real_fed)}</div>
+      <div class="sub">${L('الفعلي ناقص CPI السنوي؛ كلما ارتفعت زاد تشدد السياسة', 'Effective minus CPI YoY; higher means tighter policy', 'Effettivo meno CPI annuo; più alto significa politica più restrittiva', 'Efectivo menos CPI interanual; más alto significa política más restrictiva')}</div></div></div>
+    <p class="explain">${L('آخر 3 أشهر سنويًا أعلى من الرقم السنوي (بالأحمر) يعني أن التضخم يتسارع، وأدنى منه (بالأخضر) يعني أنه يتباطأ. عائد السنتين يتحرك قبل قرارات الفيدرالي، فهو أبكر من CPI الذي يصف الشهر الماضي.',
+      'A 3-month annualized rate above the yearly figure (red) means inflation is accelerating; below it (green) means it is slowing. The 2-year yield moves ahead of Fed decisions, so it is earlier than CPI, which describes last month.',
+      'Un tasso annualizzato a 3 mesi sopra il dato annuo (rosso) indica un’inflazione in accelerazione; sotto (verde) indica un rallentamento. Il rendimento a 2 anni si muove prima delle decisioni della Fed, quindi anticipa il CPI, che descrive il mese scorso.',
+      'Una tasa anualizada a 3 meses por encima del dato anual (rojo) indica que la inflación se acelera; por debajo (verde), que se frena. La rentabilidad a 2 años se mueve antes que las decisiones de la Fed, así que se adelanta al CPI, que describe el mes pasado.')}</p>`;
+  const H = (f.history || []).filter(x => x[4] != null);
+  if (H.length > 12) h += dualChart(L('سعر الفيدرالي الفعلي مقابل التضخم CPI منذ 2008', 'Effective Fed rate vs CPI inflation since 2008', 'Tasso Fed effettivo contro inflazione CPI dal 2008', 'Tipo efectivo de la Fed frente a la inflación CPI desde 2008'),
+    H.map(x => [x[0] + '-01', x[2]]), H.map(x => [x[0] + '-01', x[4]]),
+    {aName: L('الفيدرالي الفعلي', 'Effective Fed rate', 'Tasso Fed effettivo', 'Tipo efectivo de la Fed'), bName: 'CPI', aFmt: pc, bFmt: pc,
+     note: L('حين يبقى التضخم فوق سعر الفيدرالي تكون الفائدة الحقيقية سالبة، وكانت تلك تاريخيًا بيئة داعمة للذهب.', 'When inflation stays above the Fed rate, the real rate is negative; historically that has been a supportive backdrop for gold.', 'Quando l’inflazione resta sopra il tasso Fed, il tasso reale è negativo; storicamente è stato un contesto favorevole all’oro.', 'Cuando la inflación se mantiene por encima del tipo de la Fed, el tipo real es negativo; históricamente ese ha sido un entorno favorable para el oro.')});
+  return h;
+}
 
 /* ---------- GEX on GLD ---------- */
 const QUAD = () => ({
@@ -1738,6 +1771,17 @@ R.ai = () => {
 /* the model's bias and its three scenarios, shown under the summary */
 const BIAS = () => ({bullish:['pos', L('صاعد', 'Bullish', 'Rialzista', 'Alcista')], bearish:['neg', L('هابط', 'Bearish', 'Ribassista', 'Bajista')],
   neutral:['neu', L('محايد', 'Neutral', 'Neutrale', 'Neutral')]});
+/* lean = P(up) − P(down): shows the tilt that a "neutral" label can hide */
+function leanHTML(o){
+  if (!o.dirs) return '';
+  const P = Object.fromEntries(o.dirs.map((d, i) => [d, +o.p[i] || 0])), x = (P.up || 0) - (P.down || 0);
+  const t = x >= 10 ? ['pos', L('ميل صعودي واضح', 'Clear upward lean', 'Inclinazione rialzista netta', 'Inclinación alcista clara')]
+    : x >= 4 ? ['pos', L('ميل صعودي طفيف', 'Slight upward lean', 'Lieve inclinazione rialzista', 'Ligera inclinación alcista')]
+    : x <= -10 ? ['neg', L('ميل هبوطي واضح', 'Clear downward lean', 'Inclinazione ribassista netta', 'Inclinación bajista clara')]
+    : x <= -4 ? ['neg', L('ميل هبوطي طفيف', 'Slight downward lean', 'Lieve inclinazione ribassista', 'Ligera inclinación bajista')]
+    : ['neu', L('بلا ميل', 'No lean', 'Nessuna inclinazione', 'Sin inclinación')];
+  return `<span class="bias sm ${t[0]}">${t[1]}</span><small class="muted">${bd(`↑ ${P.up}% / ↓ ${P.down}%`)}</small>`;
+}
 function outlookHTML(r, rep){
   const o = r.outlook, ro = rep.outlook, sc = (ro && ro.scenarios) || [];
   if (!o || !BIAS()[o.bias] || !Array.isArray(o.p) || sc.length < 3) return '';
@@ -1746,7 +1790,7 @@ function outlookHTML(r, rep){
     <div class="ol-head"><h3>${L(`انحياز ${nm} والاحتمالات الثلاثة`, `${nm}’s bias and three scenarios`, `L’orientamento di ${nm} e tre scenari`, `El sesgo de ${nm} y tres escenarios`)}</h3>
       <small>${o.dirs ? L('الأفق: 14 يومًا · صعود أو هبوط = تحرّك أكثر من 2٪ · يُقيَّم تلقائيًا', 'Horizon: 14 days · up or down = a move of more than 2% · scored automatically', 'Orizzonte: 14 giorni · rialzo o ribasso = movimento oltre il 2% · valutato automaticamente', 'Horizonte: 14 días · subida o bajada = movimiento de más del 2 % · se evalúa automáticamente')
         : L('الأفق: حتى التقرير الكبير القادم (أسبوع إلى أسبوعين)', 'Horizon: until the next major report (1–2 weeks)', 'Orizzonte: fino al prossimo report importante (1–2 settimane)', 'Horizonte: hasta el próximo informe importante (1–2 semanas)')}</small></div>
-    <div class="ol-bias"><span class="bias ${bc}">${L('الانحياز', 'Bias', 'Orientamento', 'Sesgo')}: ${bl}</span><p>${esc(ro.bias_note || '')}</p></div>
+    <div class="ol-bias"><span class="bias ${bc}">${L('الانحياز', 'Bias', 'Orientamento', 'Sesgo')}: ${bl}</span>${leanHTML(o)}<p>${esc(ro.bias_note || '')}</p></div>
     <ol class="ol-scn">${sc.slice(0, 3).map((s, i) => { const p = Math.max(0, Math.min(100, +o.p[i] || 0));
       const dd = o.dirs && DIRS()[o.dirs[i]];
       return `<li><span class="ol-p">${bd(nf0.format(p) + '%')}</span><div class="ol-t"><b>${dd ? `<span class="dir ${dd[2]}">${dd[0]} ${dd[1]}</span> ` : ''}${esc(s.title)}</b><span>${esc(s.why)}</span></div><span class="ol-bar"><i style="width:${p}%"></i></span></li>`; }).join('')}</ol>
