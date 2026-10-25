@@ -48,6 +48,17 @@ button{font:inherit;color:inherit}
 /* ---------- header ---------- */
 .site-head{background:var(--navy);color:var(--navy-ink);border-bottom:3px solid var(--gold)}
 .util{display:flex;justify-content:space-between;align-items:center;gap:8px 12px;direction:ltr;padding:10px 20px 0;font-size:12.5px;color:var(--navy-muted);flex-wrap:wrap-reverse}
+.live{display:inline-flex;align-items:center;gap:7px;padding:3px 12px 3px 10px;border-radius:99px;font-size:12.5px;white-space:nowrap;
+  border:1px solid color-mix(in srgb,var(--buy) 45%,transparent);background:color-mix(in srgb,var(--buy) 12%,transparent);color:var(--navy-ink)}
+.live b{color:var(--buy);font-weight:700}
+.live i{width:8px;height:8px;border-radius:50%;background:var(--buy);box-shadow:0 0 0 0 color-mix(in srgb,var(--buy) 60%,transparent);animation:livepulse 2s infinite}
+.live.slow{border-color:color-mix(in srgb,var(--orange) 45%,transparent);background:color-mix(in srgb,var(--orange) 12%,transparent)}
+.live.slow b{color:var(--orange)} .live.slow i{background:var(--orange);animation:none}
+.live.late{border-color:color-mix(in srgb,var(--sell) 45%,transparent);background:color-mix(in srgb,var(--sell) 12%,transparent)}
+.live.late b{color:var(--sell)} .live.late i{background:var(--sell);animation:none}
+@keyframes livepulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--buy) 60%,transparent)}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
+@media (prefers-reduced-motion:reduce){.live i{animation:none}}
+@media (max-width:600px){.util .updated > span:not(.live){display:none}}
 .util .updated{direction:inherit;margin:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .brand-row{display:flex;align-items:center;justify-content:space-between;gap:20px;padding-top:12px;padding-bottom:18px;flex-wrap:wrap}
 .brand{display:flex;align-items:center;gap:14px;text-decoration:none;color:inherit}
@@ -1914,6 +1925,19 @@ function renderTop(){
     'Sources: IMF IRFCL, CFTC COT (Legacy and Disaggregated), CME (COMEX vault stocks and the Issues and Stops report), SPDR and iShares, SEC Form 13F, LBMA, the Shanghai Gold Exchange, Yahoo Finance and Frankfurter. The gold price updates every hour, each source is checked around its release time and shown with its real release date, and the AI report (Claude Opus 5.5 from Anthropic) is written only when a major new report comes out.', 'Fonti: IMF IRFCL, CFTC COT (Legacy e Disaggregated), CME (scorte dei caveau COMEX e report Issues and Stops), SPDR e iShares, SEC Form 13F, LBMA, Shanghai Gold Exchange, Yahoo Finance e Frankfurter. Il prezzo dell’oro si aggiorna ogni ora, ogni fonte viene controllata in prossimità del suo orario di pubblicazione ed è mostrata con la sua data di pubblicazione reale, e il report AI (Claude Opus 5.5 di Anthropic) viene scritto solo quando esce un nuovo report importante.', 'Fuentes: IMF IRFCL, CFTC COT (Legacy y Disaggregated), CME (existencias en las bóvedas de COMEX e informe Issues and Stops), SPDR e iShares, SEC Form 13F, LBMA, la Bolsa de Oro de Shanghái, Yahoo Finance y Frankfurter. El precio del oro se actualiza cada hora, cada fuente se revisa en torno a su hora de publicación y se muestra con su fecha de publicación real, y el informe de IA (Claude Opus 5.5, de Anthropic) solo se escribe cuando sale un nuevo informe importante.');
 }
 
+/* "live" pill: green pulsing dot + time since the last automatic check (amber after 3 hours, red after 6) */
+function liveHTML(){
+  const chk = STATUS && STATUS.checked_utc;
+  if (!chk) return '';
+  const mins = Math.max(0, Math.round((Date.now() - new Date(chk).getTime()) / 6e4));
+  let rel;
+  try { const rtf = new Intl.RelativeTimeFormat(DATE_LOCALE[state.lang], {numeric:'auto'});
+    rel = mins < 60 ? rtf.format(-mins, 'minute') : rtf.format(-Math.round(mins / 60), 'hour'); } catch (e) { rel = `${mins} min`; }
+  const st = mins > 360 ? 'late' : mins > 180 ? 'slow' : 'ok';
+  return `<span class="live ${st}" dir="auto" title="${L('البيانات تُحدَّث تلقائيًا', 'Data updates automatically', 'I dati si aggiornano automaticamente', 'Los datos se actualizan automáticamente')}"><i aria-hidden="true"></i><b>${L('مباشر', 'Live', 'Live', 'En directo')}</b><span>· ${L('آخر تحديث', 'Updated', 'Aggiornato', 'Actualizado')} ${rel}</span></span>`;
+}
+setInterval(() => { if (STATUS) renderMast(); }, 60000);
+
 function renderMast(){
   if (!DATA) return;
   const k = [];
@@ -1944,11 +1968,11 @@ function renderMast(){
   if (efp.length && k.length < 6){ const a = last(efp), d = efp.length > 1 ? a[1] - efp[efp.length - 2][1] : 0;
     k.push([L('فرق COMEX عن لندن', 'COMEX vs London', 'COMEX rispetto a Londra', 'COMEX frente a Londres'), sUSD(a[1]), `<span class="${cls(d)}">${sUSD(d)}</span> ${L('آخر يوم', 'last day', 'ultimo giorno', 'último día')}`]); }
   document.getElementById('assay').innerHTML = k.slice(0, 6).map(([l, v, s2]) => `<div class="kpi"><span>${l}</span><b>${v}</b><small>${s2}</small></div>`).join('');
-  let up = '';
+  let up = liveHTML();
   const chk = STATUS && STATUS.checked_utc;
   if (chk){
     const g = new Date(chk), age = (Date.now() - g.getTime()) / 36e5;
-    up = `<span dir="auto">${L('آخر فحص تلقائي', 'Last automatic check', 'Ultimo controllo automatico', 'Última revisión automática')}: ${fStamp.format(g)}</span>`;
+    up += `<span dir="auto">${L('آخر فحص تلقائي', 'Last automatic check', 'Ultimo controllo automatico', 'Última revisión automática')}: ${fStamp.format(g)}</span>`;
     up += age > 6 ? ` <span class="fresh stale">${L(`التحديث متوقف منذ ${Math.floor(age)} ساعة`, `No check for ${Math.floor(age)} hours`, `Nessun controllo da ${Math.floor(age)} ore`, `Sin revisión desde hace ${Math.floor(age)} horas`)}</span>`
       : ` <span class="fresh ok">${L('يُفحص كل ساعة ✓', 'Checked hourly ✓', 'Controllo ogni ora ✓', 'Revisión cada hora ✓')}</span>`;
   }
