@@ -1670,6 +1670,14 @@ R.gex = () => {
 
 /* ---------- bias track record ---------- */
 const DIRS = () => ({up: ['↑', L('صعود', 'Up', 'Rialzo', 'Subida'), 'up'], flat: ['→', L('عرضي', 'Flat', 'Laterale', 'Lateral'), 'flat'], down: ['↓', L('هبوط', 'Down', 'Ribasso', 'Bajada'), 'down']});
+function costNote(){
+  const c = DATA.ai && DATA.ai.cost_30d;
+  if (!c || !c.reports) return '';
+  return `<p class="explain">${L(`كلفة تقارير Claude في آخر 30 يومًا: ${USD(c.usd)} (عدد التقارير: ${nf0.format(c.reports)}؛ تقدير من عدد التوكنز وعمليات البحث في كل الاستدعاءات). التقارير قبل 25/10/2026 كانت كلفتها تُحسب ناقصة لأنها لم تجمع كل الاستدعاءات، فلا تدخل في المجموع وتظهر بلا كلفة في الجدول.`,
+    `Claude report cost over the last 30 days: ${USD(c.usd)} (reports: ${nf0.format(c.reports)}; estimated from tokens and searches across every call). Reports before 25/10/2026 were undercounted because they did not sum every call, so they are left out of the total and show no cost in the table.`,
+    `Costo dei report di Claude negli ultimi 30 giorni: ${USD(c.usd)} (report: ${nf0.format(c.reports)}; stima da token e ricerche su tutte le chiamate). I report precedenti al 25/10/2026 erano sottostimati perché non sommavano tutte le chiamate, quindi sono esclusi dal totale e la tabella non ne mostra il costo.`,
+    `Coste de los informes de Claude en los últimos 30 días: ${USD(c.usd)} (informes: ${nf0.format(c.reports)}; estimación a partir de tokens y búsquedas en todas las llamadas). Los informes anteriores al 25/10/2026 se infravaloraban porque no sumaban todas las llamadas, así que quedan fuera del total y la tabla no muestra su coste.`)}</p>`;
+}
 function trackHTML(){
   const t = DATA.outlook_track, rows = t ? t.rows.slice().reverse() : [];
   const D = DIRS(), B = BIAS();
@@ -1685,12 +1693,12 @@ function trackHTML(){
     <div class="fig"><h3>${L('الانحياز أصاب', 'Bias right', 'Bias corretto', 'Sesgo acertado')}</h3><div class="v">${bd(nf0.format(s.hit) + '%')}</div><div class="sub">${L('التخمين ≈ 33٪', 'Guessing ≈ 33%', 'A caso ≈ 33%', 'Al azar ≈ 33 %')}</div></div>
     <div class="fig"><h3>${L('متوسط Brier', 'Average Brier', 'Brier medio', 'Brier medio')}</h3><div class="v ${s.brier < s.brier_naive ? 'up' : 'down'}">${bd(nf2.format(s.brier))}</div><div class="sub">${L('التخمين', 'Guessing', 'A caso', 'Al azar')}: ${bd(nf2.format(s.brier_naive))}</div></div>
     <div class="fig"><h3>${L('احتمال النتيجة الفعلية', 'Probability given to the outcome', 'Probabilità data all’esito', 'Probabilidad dada al resultado')}</h3><div class="v">${bd(nf0.format(s.p_outcome) + '%')}</div><div class="sub">${L('التخمين ≈ 33٪', 'Guessing ≈ 33%', 'A caso ≈ 33%', 'Al azar ≈ 33 %')}</div></div></div>`;
-  h += `<div class="tablebox"><table><thead><tr><th>${L('التاريخ', 'Date', 'Data', 'Fecha')}</th><th>${L('الانحياز', 'Bias', 'Bias', 'Sesgo')}</th><th>${bd(`${D.up[0]} / ${D.flat[0]} / ${D.down[0]}`)}</th><th class="n">${L('سعر البداية', 'Start price', 'Prezzo iniziale', 'Precio inicial')}</th><th class="n">${L('بعد 14 يومًا', 'After 14 days', 'Dopo 14 giorni', 'Tras 14 días')}</th><th>${L('النتيجة', 'Outcome', 'Esito', 'Resultado')}</th><th class="n">Brier</th></tr></thead><tbody>
+  h += `<div class="tablebox"><table><thead><tr><th>${L('التاريخ', 'Date', 'Data', 'Fecha')}</th><th>${L('الانحياز', 'Bias', 'Bias', 'Sesgo')}</th><th>${bd(`${D.up[0]} / ${D.flat[0]} / ${D.down[0]}`)}</th><th class="n">${L('سعر البداية', 'Start price', 'Prezzo iniziale', 'Precio inicial')}</th><th class="n">${L('بعد 14 يومًا', 'After 14 days', 'Dopo 14 giorni', 'Tras 14 días')}</th><th>${L('النتيجة', 'Outcome', 'Esito', 'Resultado')}</th><th class="n">Brier</th><th class="n">${L('الكلفة', 'Cost', 'Costo', 'Coste')}</th></tr></thead><tbody>
     ${rows.map(e => { const p = Object.fromEntries(e.dirs.map((d, i) => [d, e.p[i]])), r = e.result;
       const due = new Date(toDate(e.base.date).getTime() + t.days * 864e5);
       return `<tr><td>${fDay.format(toDate(e.date))}</td><td><span class="bias ${B[e.bias][0]} sm">${B[e.bias][1]}</span></td><td>${bd(`${p.up}% / ${p.flat}% / ${p.down}%`)}</td><td class="n">${USD(e.base.price)}</td>
         ${r ? `<td class="n">${USD(r.price)} <span class="${cls(r.ret)}">${sPCT(r.ret)}</span></td><td><span class="${D[r.outcome][2]}">${D[r.outcome][0]} ${D[r.outcome][1]}</span> ${r.bias_hit ? '✓' : '✗'}</td><td class="n">${bd(nf2.format(r.brier))}</td>`
-          : `<td class="n muted" colspan="3">${L('يُقيَّم في', 'Scored on', 'Valutato il', 'Se evalúa el')} ${fDay.format(due)}</td>`}</tr>`; }).join('')}</tbody></table></div></section>`;
+          : `<td class="n muted" colspan="3">${L('يُقيَّم في', 'Scored on', 'Valutato il', 'Se evalúa el')} ${fDay.format(due)}</td>`}<td class="n">${e.cost_usd != null ? USD(e.cost_usd) : '<span class="muted">—</span>'}</td></tr>`; }).join('')}</tbody></table></div>${costNote()}</section>`;
   return h;
 }
 
@@ -1805,6 +1813,7 @@ R.ai = () => {
   h += `<article class="ai-report">
     <div class="ai-top"><span class="tone ${tone}">${esc(rep.tone || '')}</span><span>${fDay.format(toDate(r.date))}</span>
       ${r.generated_utc ? `<span>${L('كُتب في', 'Written', 'Scritto il', 'Escrito el')} ${fStamp.format(new Date(r.generated_utc))}</span>` : ''}<span class="ai-model"><bdi>${esc(modelName(r.model))}</bdi></span>
+      ${r.usage && r.usage.calls ? `<span class="chip" title="${L(`${r.usage.calls} استدعاء، ${r.usage.searches || 0} بحث`, `${r.usage.calls} calls, ${r.usage.searches || 0} searches`, `${r.usage.calls} chiamate, ${r.usage.searches || 0} ricerche`, `${r.usage.calls} llamadas, ${r.usage.searches || 0} búsquedas`)}">${L('كلفة التقرير', 'Report cost', 'Costo del report', 'Coste del informe')}: ${USD(r.usage.est_cost_usd)}</span>` : ''}
       ${(r.trigger || []).filter((t, i, a) => a.indexOf(t) === i && TRIG[t]).map(t => `<span class="chip">${L('سبب التحديث', 'Trigger', 'Motivo dell’aggiornamento', 'Motivo de la actualización')}: ${TRIG[t]}</span>`).join('')}</div>
     <h2>${esc(rep.headline || '')}</h2>
     <h3 style="margin:0 0 4px;font-size:15px">${L('الملخص', 'Summary', 'Sintesi', 'Resumen')}</h3>
