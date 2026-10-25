@@ -415,7 +415,78 @@ def fetch_cot_legacy():
     if not recs:
         raise RuntimeError("COT legacy: parsed 0 rows")
     log(f"COT non-commercial ok: {len(recs)} weeks, latest {recs[-1][0]}")
-    return {"noncomm": recs}
+    out = {"noncomm": recs}
+    try:
+        out["cot_extra"] = legacy_extra(rows)
+    except Exception as e:
+        log("COT concentration/traders FAILED:", str(e)[:200])
+    try:
+        fo = socrata_gold(LEGACY_URLS[1:], limit=160)
+        ko = find_key(fo[0], ("open_interest",))
+        out["oi_fo"] = [[r[0], r[1]] for r in cot_records(fo, [ko])] if ko else []
+    except Exception as e:
+        log("COT futures+options OI FAILED:", str(e)[:200])
+    return out
+
+
+EXTRA_AVOID = ("change", "pct", "old", "other")
+EXTRA_FIELDS = (("traders_total", ("traders", "tot")), ("traders_nc_long", ("traders", "noncomm", "long")),
+                ("traders_nc_short", ("traders", "noncomm", "short")), ("traders_c_long", ("traders", "comm", "long")),
+                ("traders_c_short", ("traders", "comm", "short")),
+                ("g4_long", ("conc", "gross", "4", "long")), ("g4_short", ("conc", "gross", "4", "short")),
+                ("g8_long", ("conc", "gross", "8", "long")), ("g8_short", ("conc", "gross", "8", "short")),
+                ("n4_long", ("conc", "net", "4", "long")), ("n4_short", ("conc", "net", "4", "short")),
+                ("n8_long", ("conc", "net", "8", "long")), ("n8_short", ("conc", "net", "8", "short")))
+
+
+def legacy_extra(rows):
+    """من تقرير Legacy نفسه: عدد المتداولين في كل فئة، وتركّز المراكز لدى أكبر 4 و8 متداولين (٪ من Open Interest)."""
+    s = rows[0]
+    keys = {}
+    for name, must in EXTRA_FIELDS:
+        avoid = EXTRA_AVOID + (("noncomm", "rept") if name.startswith("traders_c_") else ("rept",) if name == "traders_total" else ())
+        keys[name] = find_key(s, must, avoid)
+    if not keys["g4_long"] or not keys["traders_total"]:
+        raise RuntimeError(f"fields not found: {[n for n, k in keys.items() if not k]}")
+    out = {}
+    for r in rows:
+        d = str(r.get("report_date_as_yyyy_mm_dd", ""))[:10]
+        if d:
+            out[d] = [d] + [num(r.get(keys[n])) if keys[n] else None for n, _ in EXTRA_FIELDS]
+    return {"columns": [n for n, _ in EXTRA_FIELDS], "rows": [out[d] for d in sorted(out)][-160:]}
+
+
+# ---------------------------------------------------------------- daily open interest (CME, best effort)
+OI_DAILY = os.path.join("data", "oi_daily.json")
+CME_VOL_URL = "https://www.cmegroup.com/CmeWS/mvc/Volume/Details/F/437/{}/P"      # 437 = COMEX Gold (GC)
+
+
+def fetch_oi_daily():
+    """الـ Open Interest اليومي لعقود GC من نشرة CME اليومية؛ أسرع من تقرير COT الأسبوعي بثلاثة أيام."""
+    hist = load(OI_DAILY, [])
+    have = {h[0] for h in hist}
+    errors, added = [], 0
+    day = dt.date.today()
+    for back in range(1, 8):
+        d = day - dt.timedelta(days=back)
+        if d.weekday() > 4 or d.isoformat() in have:
+            continue
+        try:
+            j = browser_get(CME_VOL_URL.format(d.strftime("%Y%m%d")), headers={"Accept": "application/json"}).json()
+            t = j.get("totals") or {}
+            oi = num(t.get("atClose") or t.get("openInterest"))
+            vol = num(t.get("totalVolume"))
+            if oi:
+                hist.append([d.isoformat(), int(oi), int(vol or 0)])
+                added += 1
+        except Exception as e:
+            errors.append(f"{d}: {str(e)[:80]}")
+    hist = sorted({h[0]: h for h in hist}.values())[-260:]
+    if not hist:
+        raise RuntimeError("CME daily OI: " + (" | ".join(errors) or "no data")[:240])
+    save(OI_DAILY, hist)
+    log(f"CME daily OI ok: {len(hist)} days, latest {hist[-1]}" + (f" ({len(errors)} days failed)" if errors else ""))
+    return {"oi_daily": hist[-120:]}
 
 
 # ---------------------------------------------------------------- CME COMEX
@@ -1784,6 +1855,13 @@ def ai_digest(d):
         g["fed_and_inflation"] = {k: fd.get(k) for k in ("fed_upper", "effr", "y2", "y2_minus_effr", "last_fed_change", "cpi", "core", "real_fed")}
         g["fed_and_inflation"]["last_24_months"] = fd.get("history", [])[-24:]
         g["fed_and_inflation"]["columns"] = "month, fed upper bound %, effective fed funds %, 2y yield %, CPI YoY %, effective minus CPI"
+    if d.get("positioning"):
+        g["futures_positioning"] = {k: v for k, v in d["positioning"].items() if k not in ("oi_series",)}
+        if "mm_cost" in g["futures_positioning"]:
+            g["futures_positioning"]["mm_cost"] = {k: v for k, v in d["positioning"]["mm_cost"].items() if k != "series"}
+        g["futures_positioning"]["note"] = ("oi read: new_longs/new_shorts = fresh money, short_covering/long_liquidation = "
+                                            "exits; mm_cost = estimated average entry of Managed Money net long (approximate); "
+                                            "concentration = % of open interest held by the largest 4/8 traders")
     tr = trend_and_base_rates()
     if tr:
         g["gold_trend_and_base_rates"] = tr
@@ -1822,6 +1900,9 @@ Rules:
 - Anchor your three probabilities on gold_trend_and_base_rates (the historical frequency of each outcome in similar
   conditions) and move away from those base rates only for reasons you name. Read the trend (moving averages, distance
   from the 52-week high, down-day streaks, realized volatility) as well as the fundamentals.
+- Use futures_positioning to say who is moving price: whether open interest shows fresh shorts or longs or exits, whether
+  the largest traders are concentrating on one side, and whether Managed Money is selling at a profit or a loss versus its
+  estimated average cost. Do not call a drop profit-taking unless this data supports it.
 - Use fed_and_inflation for policy: the Fed rate, the 2-year yield minus the effective rate as the market's early signal of
   cuts or hikes, CPI and core CPI (YoY, last month, 3-month annualized for acceleration) and the real Fed rate.
 - When gold has fallen in recent sessions, judge whether the drop looks like forced selling to meet margin calls elsewhere
@@ -2003,6 +2084,63 @@ def ai_report(data, prev, new_major, releases):
                                            "trigger": h.get("trigger", [])} for h in hist[-14:]]}, True
 
 
+# ---------------------------------------------------------------- positioning: OI read, concentration, MM cost basis
+def _price_at(daily, d):
+    i = bisect.bisect_right([r[0] for r in daily], d) - 1
+    return daily[i][1] if i >= 0 else None
+
+
+def positioning(d):
+    """قراءة Open Interest مع السعر، وتغيّر تركّز أكبر المتداولين، ومتوسط تكلفة صافي Long لدى Managed Money.
+    التكلفة: كلما زاد صافي Long يُضاف الجزء الجديد بسعر الذهب يوم التقرير (متوسط مرجّح)، ولا تتغير عند التقليص،
+    وتبدأ من جديد إن انقلب الصافي إلى Short. تقدير تقريبي: لا نعرف أسعار تنفيذهم الفعلية."""
+    daily = load(PRICES_OUT, {}).get("daily") or []
+    nc, mm = d.get("noncomm") or [], (d.get("cot_disagg") or {}).get("mm") or []
+    if len(nc) < 5 or not daily:
+        return None
+    def oi_read(a, b):
+        pa, pb = _price_at(daily, a[0]), _price_at(daily, b[0])
+        dp, doi = pb / pa - 1, b[4] - a[4]
+        kind = ("new_longs" if doi > 0 else "short_covering") if dp > 0 else ("new_shorts" if doi > 0 else "long_liquidation")
+        return {"from": a[0], "to": b[0], "price_pct": round(dp * 100, 2), "oi_change": doi, "oi": b[4], "read": kind}
+    out = {"oi_1w": oi_read(nc[-2], nc[-1]), "oi_3w": oi_read(nc[-4], nc[-1]),
+           "oi_series": [[r[0], r[4], _price_at(daily, r[0])] for r in nc[-104:]]}
+    cost, net0, ser = None, 0, []
+    for r in mm[-260:]:
+        net, px = r[1] - r[2], _price_at(daily, r[0])
+        if px is None:
+            continue
+        if net <= 0:
+            cost = None
+        elif cost is None or net0 <= 0:
+            cost = px
+        elif net > net0:
+            cost = (cost * net0 + px * (net - net0)) / net
+        net0 = net
+        ser.append([r[0], net, round(cost, 1) if cost else None, px])
+    if ser and ser[-1][2]:
+        last_px = (load(PRICES_OUT, {}).get("last") or {}).get("price") or daily[-1][1]
+        adds = [(ser[i][1] - ser[i - 1][1], ser[i][3]) for i in range(max(1, len(ser) - 13), len(ser)) if ser[i][1] > ser[i - 1][1]]
+        recent = round(sum(a * px for a, px in adds) / sum(a for a, _ in adds), 1) if adds else None
+        out["mm_cost"] = {"date": ser[-1][0], "net": ser[-1][1], "avg_cost": ser[-1][2], "price_now": last_px,
+                          "pnl_pct": round((last_px / ser[-1][2] - 1) * 100, 2),
+                          "recent_cost_13w": recent, "recent_added_13w": sum(a for a, _ in adds),
+                          "recent_pnl_pct": round((last_px / recent - 1) * 100, 2) if recent else None, "series": ser[-60:]}
+    ex = (d.get("cot_extra") or {})
+    if ex.get("rows"):
+        cols, rows = ex["columns"], ex["rows"]
+        get = lambda row, c: row[1 + cols.index(c)]
+        out["concentration"] = {c: {"now": get(rows[-1], c), "4w_ago": get(rows[-5], c) if len(rows) > 4 else None}
+                                for c in cols}
+        out["concentration"]["date"] = rows[-1][0]
+    od = d.get("oi_daily") or []
+    if len(od) > 1:
+        a, b = od[-2], od[-1]
+        out["oi_daily_last"] = {"date": b[0], "oi": b[1], "change": b[1] - a[1], "volume": b[2],
+                                "price_pct": round((_price_at(daily, b[0]) / _price_at(daily, a[0]) - 1) * 100, 2)}
+    return out
+
+
 # ---------------------------------------------------------------- data checks before publishing
 def series_issues(label, s, lo=None, hi=None, jump=None, jump_abs=None, max_gap=None, tail=30):
     """أخطاء منطقية في آخر نقاط سلسلة [[تاريخ، قيمة], ...]: قيمة خارج المدى، قفزة غير معقولة، فجوة تواريخ، ترتيب أو تاريخ مستقبلي."""
@@ -2076,6 +2214,8 @@ def check_data(name, d):
             for k in ("cpi", "core"):
                 if f.get(k) and not -5 <= f[k]["yoy"] <= 25:
                     p.append(f"{k} YoY {f[k]['yoy']} out of range")
+    elif name == "oi_daily":
+        p += series_issues("CME daily OI", [r[:2] for r in d.get("oi_daily") or []], 100_000, 2_000_000, jump=0.15, max_gap=7)
     elif name == "gex":
         g = d.get("gex") or {}
         S = g.get("spot") or 0
@@ -2132,7 +2272,7 @@ SECTIONS = {
     "price": (fetch_prices, ()),
     "imf": (fetch_imf, ("countries", "central_banks")),
     "cot": (fetch_cot, ("banks", "cot_disagg")),
-    "cot_legacy": (fetch_cot_legacy, ("noncomm",)),
+    "cot_legacy": (fetch_cot_legacy, ("noncomm", "cot_extra", "oi_fo")),
     "deliveries": (fetch_deliveries, ()),
     "comex": (fetch_comex, ()),
     "etf": (fetch_gld, ("etf",)),
@@ -2142,6 +2282,7 @@ SECTIONS = {
     "wgc": (fetch_wgc, ("wgc_etf",)),
     "macro": (fetch_macro, ("macro", "liquidation")),
     "gex": (fetch_gex, ("gex",)),
+    "oi_daily": (fetch_oi_daily, ("oi_daily",)),
 }
 CHECK_KEYS = {"comex": ("comex",), "deliveries": ("deliveries",)}     # مفاتيح تُبنى من ملفات السجل لا من دالة الجلب
 MAJOR = ("cot", "cot_legacy", "imf", "f13", "wgc")      # تقارير كبرى تستحق تقريرًا ذكيًا جديدًا
@@ -2174,6 +2315,8 @@ def latest_of(name, d):
             return d["macro"]["real10"][-1][0]
         if name == "gex":
             return d["gex"]["asof"][:10]
+        if name == "oi_daily":
+            return d["oi_daily"][-1][0]
     except Exception:
         return None
     return None
@@ -2200,7 +2343,7 @@ def is_due(name, st, prev):
         # ونستمر كل ساعة حتى يظهر التقرير (يتأخر أحيانًا إلى الاثنين بسبب العطل الرسمية).
         expected = dt.datetime.fromisoformat(last).replace(tzinfo=dt.timezone.utc) + dt.timedelta(days=10, hours=19)
         return now >= expected
-    if name in ("deliveries", "comex", "etf", "etf2", "physical", "macro", "gex"):
+    if name in ("deliveries", "comex", "etf", "etf2", "physical", "macro", "gex", "oi_daily"):
         return now.weekday() != 6 and hours_since(st.get("checked")) >= 2.8      # تقارير يومية: كل 3 ساعات
     if name in ("imf", "f13", "wgc"):
         return hours_since(st.get("checked")) >= 11.5                          # شهرية وربعية: مرتين يوميًا
@@ -2252,6 +2395,12 @@ def main():
     for k in releases:
         releases[k] = dict(sorted(releases[k].items())[-80:])
     data["releases"] = releases
+    try:
+        pos = positioning(data)
+        if pos:
+            data["positioning"] = pos
+    except Exception as e:
+        log("positioning FAILED:", repr(e)[:200])
     pending = state.get("ai_pending") or {}
     new_major = {**pending, **new_major}
     try:
