@@ -1516,7 +1516,7 @@ function fedHTML(f){
   let h = `<h3 class="rv-title">${L('الفيدرالي والتضخم', 'The Fed and inflation', 'La Fed e l’inflazione', 'La Fed y la inflación')}</h3><div class="figs">
     <div class="fig"><h3>${L('سعر الفائدة الفيدرالي (الحد الأعلى)', 'Fed funds rate (upper bound)', 'Tasso Fed (limite superiore)', 'Tipo de la Fed (límite superior)')}</h3><div class="v">${pc((f.fed_upper || [])[1])}</div>
       <div class="sub">${L('الفعلي', 'Effective', 'Effettivo', 'Efectivo')}: ${pc(f.effr[1])}</div>
-      <div class="sub">${ch ? `${L('آخر تغيير', 'Last change', 'Ultima variazione', 'Último cambio')}: ${fDay.format(toDate(ch.date))} (${pc(ch.from)} → ${pc(ch.to)})` : ''}</div></div>
+      <div class="sub">${ch ? `${L('آخر تغيير', 'Last change', 'Ultima variazione', 'Último cambio')}: ${fDay.format(toDate(ch.date))} ${bd(`(${nf2.format(ch.from)}% → ${nf2.format(ch.to)}%)`)}` : ''}</div></div>
     <div class="fig"><h3>${L('عائد السنتين ناقص الفعلي (إشارة مبكرة)', '2-year yield minus effective rate (early signal)', 'Rendimento a 2 anni meno tasso effettivo (segnale anticipato)', 'Rentabilidad a 2 años menos tipo efectivo (señal temprana)')}</h3><div class="v ${spRead[0] === 'pos' ? 'up' : spRead[0] === 'neg' ? 'down' : ''}">${sp == null ? '—' : bd(sg(sp) + nf0.format(Math.abs(sp * 100)) + ' bp')}</div>
       <div class="sub">${spRead[1] || ''}</div><div class="sub">${L('عائد السنتين', '2-year yield', 'Rendimento a 2 anni', 'Rentabilidad a 2 años')}: ${pc((f.y2 || [])[1])}</div></div>
     ${infl(L('التضخم CPI', 'CPI inflation', 'Inflazione CPI', 'Inflación CPI'), f.cpi)}
