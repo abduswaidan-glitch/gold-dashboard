@@ -964,7 +964,10 @@ def fetch_prices():
 
 # ---------------------------------------------------------------- macro drivers: real yield, nominal yield, breakeven, dollar
 FRED_CSV = "https://fred.stlouisfed.org/graph/fredgraph.csv?id={}&cosd={}"
-MACRO_FRED = {"real10": "DFII10", "nom10": "DGS10", "be10": "T10YIE", "vix": "VIXCLS"}
+MACRO_FRED = {"real10": "DFII10", "nom10": "DGS10", "be10": "T10YIE", "vix": "VIXCLS",
+              "fedu": "DFEDTARU", "effr": "DFF", "y2": "DGS2", "cpi": "CPIAUCSL", "core": "CPILFESL"}
+MACRO_LONG = ("real10", "vix", "fedu", "effr", "y2")       # سجل منذ 2008 للاختبار التاريخي والرسوم الطويلة
+MACRO_MONTHLY = ("cpi", "core")                           # CPI شهري: نجلبه منذ 2007 لنحسب التغير السنوي منذ 2008
 MACRO_SHOW = "2018-01-01"                       # ما يُعرض في الصفحة؛ الاختبار التاريخي يستخدم السجل منذ 2008
 
 
@@ -988,7 +991,7 @@ def fetch_macro():
     full, errors = {}, []
     for key, sid in MACRO_FRED.items():
         try:
-            full[key] = fred_series(sid, "2008-01-01" if key in ("real10", "vix") else MACRO_SHOW)
+            full[key] = fred_series(sid, "2007-01-01" if key in MACRO_MONTHLY else "2008-01-01" if key in MACRO_LONG else MACRO_SHOW)
         except Exception as e:
             errors.append(f"{sid}: {str(e)[:90]}")
     for key, sym, start in (("dxy", "DX-Y.NYB", dt.date(2018, 1, 1)), ("nq", "NQ=F", dt.date(2008, 1, 1))):
@@ -998,7 +1001,11 @@ def fetch_macro():
             errors.append(f"{sym}: {str(e)[:90]}")
     if "real10" not in full:
         raise RuntimeError("macro: " + " | ".join(errors))
-    out = {k: [r for r in v if r[0] >= MACRO_SHOW] for k, v in full.items()}
+    out = {k: [r for r in v if r[0] >= MACRO_SHOW] for k, v in full.items() if k not in MACRO_MONTHLY + ("fedu", "effr", "y2")}
+    try:
+        out["fed"] = fed_inflation(full)
+    except Exception as e:
+        log("fed/CPI block FAILED:", repr(e)[:200])
     if errors:
         log("macro partial:", " | ".join(errors))
         prev = load(OUT, {}).get("macro") or {}
@@ -1009,6 +1016,95 @@ def fetch_macro():
     except Exception as e:
         log("liquidation monitor FAILED:", repr(e)[:200])
     return res
+
+
+def _monthly(rows):
+    """آخر قيمة لكل شهر من سلسلة يومية."""
+    m = {}
+    for d, v in rows:
+        m[d[:7]] = v
+    return m
+
+
+def fed_inflation(m):
+    """الفيدرالي والتضخم: سعر الفائدة (الحد الأعلى DFEDTARU والفعلي DFF)، وعائد السنتين ناقص الفعلي كإشارة مبكرة
+    لما يسعّره السوق، وCPI الكلي والأساسي سنويًا وآخر 3 أشهر سنويًا (تسارع أو تباطؤ)، والفائدة الحقيقية للفيدرالي."""
+    cpi, core = m.get("cpi") or [], m.get("core") or []
+    if len(cpi) < 30 or not m.get("effr"):
+        raise RuntimeError("not enough CPI / Fed data")
+    def yoy(rows):
+        v = {r[0][:7]: r[1] for r in rows}
+        out = []
+        for d, x in rows:
+            y0 = f"{int(d[:4]) - 1}{d[4:7]}"
+            if y0 in v:
+                out.append([d[:7], round((x / v[y0] - 1) * 100, 2)])
+        return out
+    def ann3(rows):
+        return round(((rows[-1][1] / rows[-4][1]) ** 4 - 1) * 100, 2) if len(rows) > 4 else None
+    cy, ky = yoy(cpi), yoy(core)
+    effr = _monthly(m["effr"]); fedu = _monthly(m.get("fedu") or []); y2 = _monthly(m.get("y2") or [])
+    months = sorted(effr)
+    hist = []
+    for mo in months:
+        if mo < "2008-01":
+            continue
+        c = next((x[1] for x in cy if x[0] == mo), None)
+        hist.append([mo, fedu.get(mo), effr[mo], y2.get(mo), c, round(effr[mo] - c, 2) if c is not None else None])
+    last_effr, last_y2 = m["effr"][-1], (m.get("y2") or [[None, None]])[-1]
+    spread = round(last_y2[1] - last_effr[1], 2) if last_y2[1] is not None else None
+    fedu_rows = m.get("fedu") or []
+    change = next(({"date": fedu_rows[i][0], "from": fedu_rows[i - 1][1], "to": fedu_rows[i][1]}
+                   for i in range(len(fedu_rows) - 1, 0, -1) if fedu_rows[i][1] != fedu_rows[i - 1][1]), None)
+    return {"fed_upper": fedu_rows[-1] if fedu_rows else None, "effr": last_effr, "y2": last_y2, "y2_minus_effr": spread,
+            "last_fed_change": change,
+            "cpi": {"month": cy[-1][0], "yoy": cy[-1][1], "mom": round((cpi[-1][1] / cpi[-2][1] - 1) * 100, 2), "ann3m": ann3(cpi),
+                    "yoy_prev": cy[-2][1]},
+            "core": {"month": ky[-1][0], "yoy": ky[-1][1], "mom": round((core[-1][1] / core[-2][1] - 1) * 100, 2), "ann3m": ann3(core),
+                     "yoy_prev": ky[-2][1]},
+            "real_fed": round(last_effr[1] - cy[-1][1], 2),
+            "history": hist}            # [شهر، الحد الأعلى، الفعلي، عائد السنتين، CPI سنوي، فائدة حقيقية]
+
+
+# ---------------------------------------------------------------- trend & base rates (for the AI report's calibration)
+def trend_and_base_rates():
+    """اتجاه الذهب: البعد عن متوسطات 20 و50 و200 جلسة، والبعد عن أعلى سعر في سنة، وأيام الهبوط المتتالية، والتقلب الفعلي.
+    والنسب التاريخية منذ 2008 لنتيجة 10 جلسات (صعود/عرضي/هبوط ±2٪) في كل الأيام وفي الأيام المشابهة لليوم."""
+    rows = [r for r in (load(PRICES_OUT, {}).get("daily") or []) if r[0] >= "2008-01-01"]
+    if len(rows) < 400:
+        return None
+    px = [r[1] for r in rows]
+    ma = lambda n, i: sum(px[i - n + 1:i + 1]) / n
+    lr = [math.log(px[i] / px[i - 1]) for i in range(1, len(px))]
+    vol = lambda i, n=20: statistics.pstdev(lr[i - n:i]) * math.sqrt(252) * 100
+    i = len(px) - 1
+    streak = 0
+    while streak < i and px[i - streak] < px[i - streak - 1]:
+        streak += 1
+    hi = max(px[-252:])
+    now = {"date": rows[-1][0], "price": px[-1], "vs_ma20_pct": round((px[i] / ma(20, i) - 1) * 100, 2),
+           "vs_ma50_pct": round((px[i] / ma(50, i) - 1) * 100, 2), "vs_ma200_pct": round((px[i] / ma(200, i) - 1) * 100, 2),
+           "from_52w_high_pct": round((px[i] / hi - 1) * 100, 2), "down_days_in_a_row": streak,
+           "ret_1w_pct": round((px[i] / px[i - 5] - 1) * 100, 2), "ret_1m_pct": round((px[i] / px[i - 21] - 1) * 100, 2),
+           "ret_3m_pct": round((px[i] / px[i - 63] - 1) * 100, 2), "realized_vol_20d_pct": round(vol(i), 1)}
+    wk = lambda j: px[j] / px[j - 5] - 1
+    bucket = lambda r: "≤-4%" if r <= -0.04 else "-4..-2%" if r <= -0.02 else "-2..+2%" if r < 0.02 else "+2..+4%" if r < 0.04 else "≥+4%"
+    groups = {"all_days": lambda j: True,
+              f"week_return_{bucket(wk(i))}": lambda j: bucket(wk(j)) == bucket(wk(i)),
+              "same_side_of_ma200": lambda j: (px[j] > ma(200, j)) == (px[i] > ma(200, i)),
+              "same_week_bucket_and_ma200_side": lambda j: bucket(wk(j)) == bucket(wk(i)) and (px[j] > ma(200, j)) == (px[i] > ma(200, i))}
+    base = {}
+    for name, f in groups.items():
+        c = {"up": 0, "flat": 0, "down": 0}
+        for j in range(200, len(px) - 10):
+            if f(j):
+                r = px[j + 10] / px[j] - 1
+                c["up" if r > 0.02 else "down" if r < -0.02 else "flat"] += 1
+        n = sum(c.values())
+        if n:
+            base[name] = {**{k: round(v / n * 100) for k, v in c.items()}, "n": n}
+    return {"now": now, "base_rates_10_sessions": base,
+            "note": "outcome after 10 sessions (≈14 calendar days): up > +2%, down < −2%, flat otherwise; COMEX GC since 2008"}
 
 
 # ---------------------------------------------------------------- forced-selling (margin liquidation) monitor
@@ -1683,6 +1779,14 @@ def ai_digest(d):
         if len(ser) > 22:
             g[label] = {"date": ser[-1][0], "value": ser[-1][1], "change_1w": round(ser[-1][1] - ser[-6][1], 3),
                         "change_1m": round(ser[-1][1] - ser[-22][1], 3)}
+    fd = mac.get("fed") or {}
+    if fd:
+        g["fed_and_inflation"] = {k: fd.get(k) for k in ("fed_upper", "effr", "y2", "y2_minus_effr", "last_fed_change", "cpi", "core", "real_fed")}
+        g["fed_and_inflation"]["last_24_months"] = fd.get("history", [])[-24:]
+        g["fed_and_inflation"]["columns"] = "month, fed upper bound %, effective fed funds %, 2y yield %, CPI YoY %, effective minus CPI"
+    tr = trend_and_base_rates()
+    if tr:
+        g["gold_trend_and_base_rates"] = tr
     lq = d.get("liquidation") or {}
     if lq.get("today"):
         g["forced_selling_monitor"] = {"today": lq["today"], "thresholds": lq.get("params"),
@@ -1715,6 +1819,11 @@ Rules:
   Real and nominal yields, breakeven inflation, the dollar index and GLD gamma levels are in the platform data: take those
   numbers from there, not from search results.
 - Connect the sections: say when they agree or contradict each other (e.g. speculators crowded long while ETFs see outflows).
+- Anchor your three probabilities on gold_trend_and_base_rates (the historical frequency of each outcome in similar
+  conditions) and move away from those base rates only for reasons you name. Read the trend (moving averages, distance
+  from the 52-week high, down-day streaks, realized volatility) as well as the fundamentals.
+- Use fed_and_inflation for policy: the Fed rate, the 2-year yield minus the effective rate as the market's early signal of
+  cuts or hikes, CPI and core CPI (YoY, last month, 3-month annualized for acceleration) and the real Fed rate.
 - When gold has fallen in recent sessions, judge whether the drop looks like forced selling to meet margin calls elsewhere
   (gold falling together with equities, VIX jumping, real yields not rising, the dollar bid) or a fundamental repricing
   (real yields or the dollar driving it). Use the forced_selling_monitor and its historical base rates, plus physical demand
@@ -1960,6 +2069,13 @@ def check_data(name, d):
             p += series_issues("VIX", m["vix"], 5, 150, max_gap=10)
         if m.get("nq"):
             p += series_issues("NQ", m["nq"], 1000, 100000, jump=0.15, max_gap=10)
+        f = m.get("fed") or {}
+        if f:
+            if not -1 <= (f.get("effr") or [0, 0])[1] <= 20:
+                p.append(f"Fed funds {f.get('effr')} out of range")
+            for k in ("cpi", "core"):
+                if f.get(k) and not -5 <= f[k]["yoy"] <= 25:
+                    p.append(f"{k} YoY {f[k]['yoy']} out of range")
     elif name == "gex":
         g = d.get("gex") or {}
         S = g.get("spot") or 0
