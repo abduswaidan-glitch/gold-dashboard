@@ -2164,6 +2164,15 @@ def ai_report(data, prev, new_major, releases):
         log("AI report: bias/scenarios missing or malformed; report kept without them")
     u = _usage_sum(spent)
     model = resp.get("model", AI_MODEL)
+    # من كتب التقرير فعلًا: كتلة fallback تحدد نقطة التحويل، وusage.iterations يذكر كل محاولة ونموذجها
+    for t in turns:
+        for b in t.get("content", []):
+            if b.get("type") == "fallback":
+                model = ((b.get("to") or {}).get("model")) or model
+                log(f"AI fallback: {(b.get('from') or {}).get('model')} -> {(b.get('to') or {}).get('model')}")
+        its = (t.get("usage") or {}).get("iterations") or []
+        if its:
+            log("AI served-by:", ", ".join(f"{i.get('type')}:{i.get('model', '?')}" for i in its))
     cost = _cost(model, u)
     langs = {k: rep[k] for k in AI_LANGS if isinstance(rep.get(k), dict)}  # it/es اختياريتان: الواجهة تعرض الإنجليزية إن غابتا
     latest = {"date": today, "generated_utc": now.replace(microsecond=0).isoformat(), "model": model,
