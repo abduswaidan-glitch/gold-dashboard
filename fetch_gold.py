@@ -2226,7 +2226,7 @@ def positioning(d):
     return out
 
 
-POS_NOTE_SYSTEM = """You write ONE sentence (max 35 words) reading COMEX gold futures positioning for a dashboard, in four languages.
+POS_NOTE_SYSTEM = """You write ONE short sentence (max 28 words in every language) reading COMEX gold futures positioning for a dashboard, in four languages.
 Data has three layers: (1) CME daily open interest with price (freshest, 1/5/15 sessions; cannot split spreads),
 (2) COT weekly 'who': changes in long/short/spread for managed_money (mm), swap dealers, producers (3 days old),
 (3) mm_cost: estimated average entry of the Managed Money net long vs today's price.
@@ -2234,9 +2234,13 @@ Reads: new_longs, new_shorts = fresh money; short_covering, long_liquidation = e
 In COT reads, oi_change_dir already removes spread positions, which add open interest without direction.
 Rules: lead with the freshest layer and say its date; say whether COT agrees and who moved; mention mm_cost only if it changes
 the meaning (e.g. recent buyers under water = loss-cutting). If roll.warn is true, say open-interest changes are distorted by the roll.
-Never invent causes or news, never call selling profit-taking unless mm_cost shows profit, no trade advice, no hype.
+Never write internal codes or field names (flat_oi, long_liquidation, oi_change_dir, mm_cost, roll.warn...): say them in plain words
+(e.g. "open interest barely changed", "longs exiting"). Never invent causes or news, never call selling profit-taking unless mm_cost shows profit, no trade advice, no hype.
 Arabic in Modern Standard Arabic, keep terms like Open Interest, COT, Managed Money, Long, Short, Spread in English.
 Return only JSON: {"ar": "...", "en": "...", "it": "...", "es": "..."}"""
+
+
+POS_NOTE_V = 2              # رفعه يعيد كتابة السطر عند تغيير التعليمات
 
 
 def positioning_note(pos, prev_note):
@@ -2244,7 +2248,7 @@ def positioning_note(pos, prev_note):
     key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     stamp = f"{(pos.get('oi_daily_last') or {}).get('date')}|{pos['oi_1w']['to']}"
     force = os.environ.get("AI_FORCE", "").strip().lower() in ("1", "true", "yes")
-    if prev_note and prev_note.get("stamp") == stamp and not force:
+    if prev_note and prev_note.get("stamp") == stamp and prev_note.get("v") == POS_NOTE_V and not force:
         return prev_note
     if not key:
         return prev_note
@@ -2259,7 +2263,7 @@ def positioning_note(pos, prev_note):
         raise RuntimeError("positioning note: missing languages")
     u = resp.get("usage") or {}
     log(f"positioning note ok ({stamp}): {u.get('input_tokens')} in / {u.get('output_tokens')} out tokens, est. ${_cost(WGC_MODEL, u):.4f}")
-    return {"stamp": stamp, "generated_utc": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(),
+    return {"stamp": stamp, "v": POS_NOTE_V, "generated_utc": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(),
             "model": resp.get("model", WGC_MODEL), **{k: got[k].strip() for k in AI_LANGS}}
 
 
