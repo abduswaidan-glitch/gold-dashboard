@@ -467,10 +467,13 @@ def fetch_oi_daily():
     have = {h[0] for h in hist}
     errors, added = [], 0
     day = dt.date.today()
-    for back in range(1, 8):
+    # السجل القصير يُكمَّل حتى ~25 جلسة (لقراءة 15 جلسة)، ثم يكفي آخر أسبوع؛ وحدّ للطلبات في التشغيل الواحد
+    depth, asked = (40 if len(hist) < 20 else 8), 0
+    for back in range(1, depth):
         d = day - dt.timedelta(days=back)
-        if d.weekday() > 4 or d.isoformat() in have:
+        if d.weekday() > 4 or d.isoformat() in have or asked >= 30:
             continue
+        asked += 1
         try:
             j = browser_get(CME_VOL_URL.format(d.strftime("%Y%m%d")), headers={"Accept": "application/json"}).json()
             t = j.get("totals") or {}
@@ -1856,11 +1859,14 @@ def ai_digest(d):
         g["fed_and_inflation"]["last_24_months"] = fd.get("history", [])[-24:]
         g["fed_and_inflation"]["columns"] = "month, fed upper bound %, effective fed funds %, 2y yield %, CPI YoY %, effective minus CPI"
     if d.get("positioning"):
-        g["futures_positioning"] = {k: v for k, v in d["positioning"].items() if k not in ("oi_series",)}
+        g["futures_positioning"] = {k: v for k, v in d["positioning"].items() if k not in ("oi_series", "oi_daily_series", "ai_note")}
         if "mm_cost" in g["futures_positioning"]:
             g["futures_positioning"]["mm_cost"] = {k: v for k, v in d["positioning"]["mm_cost"].items() if k != "series"}
         g["futures_positioning"]["note"] = ("oi read: new_longs/new_shorts = fresh money, short_covering/long_liquidation = "
-                                            "exits; mm_cost = estimated average entry of Managed Money net long (approximate); "
+                                            "exits; flat_oi = no meaningful change; oi_daily_reads = CME daily (freshest); oi_1w/oi_3w = COT weekly, "
+                                            "oi_change_dir excludes spread positions; who = COT weekly long/short/spread changes by group; "
+                                            "verdict = freshest read vs COT; roll.warn = open interest distorted by contract roll; "
+                                            "mm_cost = estimated average entry of Managed Money net long (approximate); "
                                             "concentration = % of open interest held by the largest 4/8 traders")
     tr = trend_and_base_rates()
     if tr:
@@ -1902,7 +1908,9 @@ Rules:
   from the 52-week high, down-day streaks, realized volatility) as well as the fundamentals.
 - Use futures_positioning to say who is moving price: whether open interest shows fresh shorts or longs or exits, whether
   the largest traders are concentrating on one side, and whether Managed Money is selling at a profit or a loss versus its
-  estimated average cost. Do not call a drop profit-taking unless this data supports it.
+  estimated average cost. Do not call a drop profit-taking unless this data supports it. Read it in layers: lead with the
+  CME daily read (oi_daily_reads, freshest), then use the COT weekly 'who' to say which group moved; if they disagree, say
+  so and give the date of each. Spread positions add open interest without direction (use oi_change_dir for COT).
 - Use fed_and_inflation for policy: the Fed rate, the 2-year yield minus the effective rate as the market's early signal of
   cuts or hikes, CPI and core CPI (YoY, last month, 3-month annualized for acceleration) and the real Fed rate.
 - When gold has fallen in recent sessions, judge whether the drop looks like forced selling to meet margin calls elsewhere
@@ -2113,6 +2121,30 @@ def _price_at(daily, d):
     return daily[i][1] if i >= 0 else None
 
 
+OI_FLAT_PCT = 0.2          # تغيّر Open Interest أقل من 0.2٪ لا يُعدّ دخول أموال ولا خروجها
+GC_MONTHS = (2, 4, 6, 8, 10, 12)
+
+
+def _oi_kind(dp, doi, oi):
+    if oi and abs(doi) / oi * 100 < OI_FLAT_PCT:
+        return "flat_oi"
+    return ("new_longs" if doi > 0 else "short_covering") if dp > 0 else ("new_shorts" if doi > 0 else "long_liquidation")
+
+
+def gc_roll(today=None):
+    """أول يوم إشعار (FND) لعقد GC النشط: آخر يوم عمل في الشهر السابق لشهر التسليم. قبله بثلاثة أسابيع يدوّر
+    المتداولون مراكزهم إلى العقد التالي فيتشوّه تغيّر Open Interest."""
+    today = today or dt.date.today()
+    for y in (today.year, today.year + 1):
+        for m in GC_MONTHS:
+            fnd = dt.date(y, m, 1) - dt.timedelta(days=1)
+            while fnd.weekday() > 4:
+                fnd -= dt.timedelta(days=1)
+            if fnd >= today:
+                days = (fnd - today).days
+                return {"contract": f"{y}-{m:02d}", "fnd": fnd.isoformat(), "days": days, "warn": days <= 21}
+
+
 def positioning(d):
     """قراءة Open Interest مع السعر، وتغيّر تركّز أكبر المتداولين، ومتوسط تكلفة صافي Long لدى Managed Money.
     التكلفة: كلما زاد صافي Long يُضاف الجزء الجديد بسعر الذهب يوم التقرير (متوسط مرجّح)، ولا تتغير عند التقليص،
@@ -2122,10 +2154,11 @@ def positioning(d):
     if len(nc) < 5 or not daily:
         return None
     def oi_read(a, b):
+        # مراكز Spread (شراء شهر وبيع آخر) ترفع Open Interest بلا اتجاه، فتُطرح قبل الحكم
         pa, pb = _price_at(daily, a[0]), _price_at(daily, b[0])
-        dp, doi = pb / pa - 1, b[4] - a[4]
-        kind = ("new_longs" if doi > 0 else "short_covering") if dp > 0 else ("new_shorts" if doi > 0 else "long_liquidation")
-        return {"from": a[0], "to": b[0], "price_pct": round(dp * 100, 2), "oi_change": doi, "oi": b[4], "read": kind}
+        dp, doi, dsp = pb / pa - 1, b[4] - a[4], b[3] - a[3]
+        return {"from": a[0], "to": b[0], "price_pct": round(dp * 100, 2), "oi_change": doi, "spread_change": dsp,
+                "oi_change_dir": doi - dsp, "oi": b[4], "read": _oi_kind(dp, doi - dsp, b[4])}
     out = {"oi_1w": oi_read(nc[-2], nc[-1]), "oi_3w": oi_read(nc[-4], nc[-1]),
            "oi_series": [[r[0], r[4], _price_at(daily, r[0])] for r in nc[-104:]]}
     cost, net0, ser = None, 0, []
@@ -2161,7 +2194,73 @@ def positioning(d):
         a, b = od[-2], od[-1]
         out["oi_daily_last"] = {"date": b[0], "oi": b[1], "change": b[1] - a[1], "volume": b[2],
                                 "price_pct": round((_price_at(daily, b[0]) / _price_at(daily, a[0]) - 1) * 100, 2)}
+        # الطبقة ١ (الآن): CME اليومي لآخر جلسة و5 و15 جلسة
+        reads = []
+        for n in (1, 5, 15):
+            if len(od) > n:
+                a = od[-1 - n]
+                dp = _price_at(daily, b[0]) / _price_at(daily, a[0]) - 1
+                reads.append({"sessions": n, "from": a[0], "to": b[0], "price_pct": round(dp * 100, 2), "oi_change": b[1] - a[1],
+                              "oi": b[1], "avg_volume": round(sum(x[2] for x in od[-n:]) / n), "read": _oi_kind(dp, b[1] - a[1], b[1])})
+        out["oi_daily_reads"] = reads
+        out["oi_daily_series"] = [[x[0], x[1], _price_at(daily, x[0])] for x in od[-60:]]
+    # الطبقة ٢ (التأكيد): من غيّر مراكزه في آخر أسبوع COT
+    cats = {"mm": mm, "swap": (d.get("cot_disagg") or {}).get("swap") or [], "prod": (d.get("cot_disagg") or {}).get("prod") or []}
+    who = {}
+    for k, r in cats.items():
+        if len(r) > 1:
+            a, b = r[-2], r[-1]
+            who[k] = {"long": b[1] - a[1], "short": b[2] - a[2], "spread": (b[3] - a[3]) if len(b) > 3 else 0,
+                      "net": (b[1] - b[2]) - (a[1] - a[2])}
+    if who:
+        out["who"] = {"from": nc[-2][0], "to": nc[-1][0], **who}
+    # الحكم: من أحدث طبقة، مع اتفاقها أو خلافها مع COT
+    dr = out.get("oi_daily_reads") or []
+    prim = next((x for x in dr if x["sessions"] == 5), dr[0] if dr else None)
+    if prim:
+        out["verdict"] = {"source": "cme", "sessions": prim["sessions"], "to": prim["to"], "read": prim["read"],
+                          "cot_read": out["oi_1w"]["read"], "cot_to": out["oi_1w"]["to"], "agree": prim["read"] == out["oi_1w"]["read"]}
+    else:
+        out["verdict"] = {"source": "cot", "to": out["oi_1w"]["to"], "read": out["oi_1w"]["read"]}
+    out["roll"] = gc_roll()
     return out
+
+
+POS_NOTE_SYSTEM = """You write ONE sentence (max 35 words) reading COMEX gold futures positioning for a dashboard, in four languages.
+Data has three layers: (1) CME daily open interest with price (freshest, 1/5/15 sessions; cannot split spreads),
+(2) COT weekly 'who': changes in long/short/spread for managed_money (mm), swap dealers, producers (3 days old),
+(3) mm_cost: estimated average entry of the Managed Money net long vs today's price.
+Reads: new_longs, new_shorts = fresh money; short_covering, long_liquidation = exits; flat_oi = no meaningful change.
+In COT reads, oi_change_dir already removes spread positions, which add open interest without direction.
+Rules: lead with the freshest layer and say its date; say whether COT agrees and who moved; mention mm_cost only if it changes
+the meaning (e.g. recent buyers under water = loss-cutting). If roll.warn is true, say open-interest changes are distorted by the roll.
+Never invent causes or news, never call selling profit-taking unless mm_cost shows profit, no trade advice, no hype.
+Arabic in Modern Standard Arabic, keep terms like Open Interest, COT, Managed Money, Long, Short, Spread in English.
+Return only JSON: {"ar": "...", "en": "...", "it": "...", "es": "..."}"""
+
+
+def positioning_note(pos, prev_note):
+    """سطر رأي Claude لهذا القسم: يُكتب فقط حين تصل بيانات يومية أو أسبوعية جديدة (Haiku، بلا بحث)."""
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    stamp = f"{(pos.get('oi_daily_last') or {}).get('date')}|{pos['oi_1w']['to']}"
+    force = os.environ.get("AI_FORCE", "").strip().lower() in ("1", "true", "yes")
+    if prev_note and prev_note.get("stamp") == stamp and not force:
+        return prev_note
+    if not key:
+        return prev_note
+    data = {k: v for k, v in pos.items() if k not in ("oi_series", "oi_daily_series", "concentration", "ai_note")}
+    if "mm_cost" in data:
+        data["mm_cost"] = {k: v for k, v in data["mm_cost"].items() if k != "series"}
+    resp = _claude({"model": WGC_MODEL, "max_tokens": 1500, "thinking": {"type": "disabled"}, "system": POS_NOTE_SYSTEM,
+                    "messages": [{"role": "user", "content": json.dumps(data, ensure_ascii=False, separators=(",", ":"))}]}, key)
+    txt = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
+    got = json.loads(txt[txt.find("{"):txt.rfind("}") + 1])
+    if not all(isinstance(got.get(k), str) and got[k].strip() for k in AI_LANGS):
+        raise RuntimeError("positioning note: missing languages")
+    u = resp.get("usage") or {}
+    log(f"positioning note ok ({stamp}): {u.get('input_tokens')} in / {u.get('output_tokens')} out tokens, est. ${_cost(WGC_MODEL, u):.4f}")
+    return {"stamp": stamp, "generated_utc": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(),
+            "model": resp.get("model", WGC_MODEL), **{k: got[k].strip() for k in AI_LANGS}}
 
 
 # ---------------------------------------------------------------- data checks before publishing
@@ -2421,6 +2520,14 @@ def main():
     try:
         pos = positioning(data)
         if pos:
+            prev_note = (prev.get("positioning") or {}).get("ai_note")
+            try:
+                note = positioning_note(pos, prev_note)
+            except Exception as e:
+                log("positioning note FAILED:", repr(e)[:200])
+                note = prev_note
+            if note:
+                pos["ai_note"] = note
             data["positioning"] = pos
     except Exception as e:
         log("positioning FAILED:", repr(e)[:200])
