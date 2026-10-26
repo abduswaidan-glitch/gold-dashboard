@@ -1757,9 +1757,11 @@ def classify_f13(out):
 AI_HIST = os.path.join("data", "ai_history.json")
 AI_MODEL = os.environ.get("AI_MODEL", "claude-fable-5-1")
 AI_RESEARCH_LOG = os.path.join("data", "ai_research_log.json")
-# مرحلة الاكتشاف: Fable يبحث وحده في 4 تقارير (واحد يوميًا بعد الإغلاق الأمريكي) ونسجّل كل بحث،
-# لنعرف ما يحتاجه كل قسم قبل نقل البحث إلى نموذج أرخص
-DISCOVERY_REPORTS = 4
+# مرحلة الاكتشاف: Fable يبحث وحده (تقرير يوميًا بعد الإغلاق الأمريكي) ونسجّل كل بحث، لنعرف ما يحتاجه كل قسم
+# قبل نقل البحث إلى نموذج أرخص. تنتهي بعد أول تقرير يطلقه COT جديد من DISCOVERY_COT_FROM فصاعدًا
+# (تقرير الجمعة)، أو عند DISCOVERY_END إن تأخر COT. يوم الجمعة لا تقرير مجدول: ننتظر COT.
+DISCOVERY_COT_FROM = "2026-10-30"
+DISCOVERY_END = "2026-11-03"
 DISCOVERY_HOUR_UTC = 21
 DISCOVERY_SEARCHES = 8
 AI_RETRY_HOURS = 6
@@ -2625,14 +2627,22 @@ def main():
         log("positioning FAILED:", repr(e)[:200])
     pending = state.get("ai_pending") or {}
     new_major = {**pending, **new_major}
-    disc = state.setdefault("ai_discovery", {"left": DISCOVERY_REPORTS, "last": None})
+    disc = state.setdefault("ai_discovery", {})
+    if "left" in disc:                                # الصيغة القديمة (عدد ثابت من التقارير)
+        disc["reports"] = 4 - disc.pop("left")
+        disc.pop("last", None)
     now_d = dt.datetime.now(dt.timezone.utc)
+    today_s = now_d.date().isoformat()
+    if not disc.get("done") and today_s > DISCOVERY_END:
+        disc["done"] = today_s
+        log("AI discovery: ended (deadline reached without a new COT report)")
+    active = not disc.get("done")
     last_ai = ((prev.get("ai") or {}).get("latest") or {}).get("date")
     forced = os.environ.get("AI_FORCE", "").strip().lower() in ("1", "true", "yes")
-    if disc.get("left", 0) > 0 and not new_major and (forced or (now_d.weekday() < 5 and now_d.hour >= DISCOVERY_HOUR_UTC
-                                                                  and last_ai != now_d.date().isoformat())):
-        new_major = {"discovery": now_d.date().isoformat()}
-    elif disc.get("left", 0) > 0 and new_major:
+    if active and not new_major and (forced or (now_d.weekday() < 4 and now_d.hour >= DISCOVERY_HOUR_UTC
+                                                and last_ai != today_s)):
+        new_major = {"discovery": today_s}
+    elif active and new_major:
         new_major = {**new_major, "discovery": now_d.date().isoformat()}   # كل تقرير في المرحلة يبحث بحرية ويُسجَّل
     fail = state.get("ai_fail") or {}
     wait_until = fail.get("retry_after")
@@ -2643,10 +2653,13 @@ def main():
             raise _AIWait()
         ai, wrote = ai_report(data, prev, new_major, releases)
         state.pop("ai_fail", None)
-        if wrote and disc.get("left", 0) > 0:
-            disc["left"] -= 1
-            disc["last"] = dt.date.today().isoformat()
-            log(f"AI discovery: {disc['left']} report(s) left")
+        if wrote and active:
+            disc["reports"] = disc.get("reports", 0) + 1
+            if ("cot" in new_major or "cot_legacy" in new_major) and today_s >= DISCOVERY_COT_FROM:
+                disc["done"] = today_s
+                log(f"AI discovery: ended after the COT report ({disc['reports']} reports logged)")
+            else:
+                log(f"AI discovery: {disc['reports']} report(s) logged; continues until the next COT report")
         ai = _no_cost(ai)
         if ai:
             data["ai"] = ai
