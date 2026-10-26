@@ -1755,7 +1755,13 @@ def classify_f13(out):
 
 # ---------------------------------------------------------------- AI daily report (Claude API)
 AI_HIST = os.path.join("data", "ai_history.json")
-AI_MODEL = os.environ.get("AI_MODEL", "claude-opus-5-5")
+AI_MODEL = os.environ.get("AI_MODEL", "claude-fable-5-1")
+AI_RESEARCH_LOG = os.path.join("data", "ai_research_log.json")
+# مرحلة الاكتشاف: Fable يبحث وحده في 4 تقارير (واحد يوميًا بعد الإغلاق الأمريكي) ونسجّل كل بحث،
+# لنعرف ما يحتاجه كل قسم قبل نقل البحث إلى نموذج أرخص
+DISCOVERY_REPORTS = 4
+DISCOVERY_HOUR_UTC = 21
+DISCOVERY_SEARCHES = 8
 AI_URL = "https://api.anthropic.com/v1/messages"
 AI_LANGS = ("ar", "en", "it", "es")
 PRICES_PER_MTOK = (("claude-fable", 10, 50), ("claude-mythos", 10, 50), ("claude-opus-5-5", 4, 20), ("claude-opus", 5, 25),
@@ -1898,7 +1904,7 @@ AI_SYSTEM = """You are the senior gold-market analyst of a public, free, educati
 Write today's daily report from the platform data you are given, plus today's news found with web search.
 Rules:
 - Every number about flows, positions, holdings and spreads must come from the platform data. Never invent numbers.
-- Use web search (up to 4 searches) only for today's gold-relevant events: Federal Reserve and rates, US dollar and yields,
+- Use web search (up to {max_searches} searches) only for today's gold-relevant events: Federal Reserve and rates, US dollar and yields,
   geopolitics, central-bank gold news, China and India demand, major ETF or bank news. Cite each event's source URL.
   Real and nominal yields, breakeven inflation, the dollar index and GLD gamma levels are in the platform data: take those
   numbers from there, not from search results.
@@ -1936,6 +1942,11 @@ Return ONLY one JSON object, no markdown fences, with exactly this shape:
  "it": {same keys, "tone": "positivo|negativo|neutrale|misto"},
  "es": {same keys, "tone": "positivo|negativo|neutral|mixto"}}
 The three scenarios in every language follow the order of outlook.scenarios; each direction appears exactly once.
+Also add a top-level "research_map" (English only, up to 10 items) describing what you searched for and why, so the
+platform can learn which outside information each section needs:
+ "research_map": [{"section": "macro|gex|countries|cb|banks|noncomm|signals|f13|comex|etf|physical|general",
+                   "need": "what information was missing from the platform data", "queries": ["..."],
+                   "sources": ["domain.com"], "found": "the key fact or number you used, or 'nothing useful'"}]
 summary: 4 to 6 short points. sections: 4 to 6 (central banks and countries, banks and COT positioning, ETFs and institutions,
 physical market and vaults, and anything else notable). events: 2 to 5. watch: 2 to 4 things to watch next."""
 
@@ -2033,32 +2044,38 @@ def ai_report(data, prev, new_major, releases):
     log("AI report triggered by:", ", ".join(new_major) if new_major else "manual request")
     digest_obj = ai_digest(data)
     digest_obj["new_reports_triggering_this_update"] = {k: {"data_date": v, "first_seen_utc": (releases.get(k) or {}).get(v)}
-                                                        for k, v in (new_major or {}).items()}
+                                                        for k, v in (new_major or {}).items() if k != "discovery"}
     digest = json.dumps(digest_obj, ensure_ascii=False, separators=(",", ":"))
     user = (f"Date (UTC): {today}.\nPlatform data (JSON; t = tonnes, contracts = COMEX GC 100-oz contracts):\n{digest}\n\n"
             "Search for today's key gold-related events, then return the JSON report.")
     messages = [{"role": "user", "content": user}]
-    sources, text, resp, spent = [], "", None, []
-    ws_new = [{"type": "web_search_20260209", "name": "web_search", "max_uses": 4}]
-    ws_old = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 4}]
+    sources, text, resp, spent, turns = [], "", None, [], []
+    discovery = "discovery" in (new_major or {})
+    n_search = DISCOVERY_SEARCHES if discovery else 4
+    ws_new = [{"type": "web_search_20260209", "name": "web_search", "max_uses": n_search}]
+    ws_old = [{"type": "web_search_20250305", "name": "web_search", "max_uses": n_search}]
+    system = AI_SYSTEM.replace("{max_searches}", str(n_search))
     # fallbacks "default": إن رفض النموذج الطلب يُعاد تشغيله على نموذج بديل من Anthropic تلقائيًا (ويُعرض اسمه الحقيقي)
     for tools, fallback in ((ws_new, True), (ws_old, True), (ws_new, False), (None, False)):
         try:
-            payload = {"model": AI_MODEL, "max_tokens": 32000, "system": AI_SYSTEM, "messages": list(messages),
-                       "output_config": {"effort": "high"}}      # Opus 5.5 يبدأ افتراضيًا بـ medium
+            # Fable: التفكير دائمًا مفعّل ويُحسب من max_tokens، فنعطيه مساحة أكبر؛ العمق يُضبط بـ effort فقط
+            payload = {"model": AI_MODEL, "max_tokens": 64000, "system": system, "messages": list(messages),
+                       "output_config": {"effort": "high"}}
             if tools:
                 payload["tools"] = tools
             if fallback:
                 payload["fallbacks"] = "default"
             beta = "server-side-fallback-2026-07-01" if fallback else None
-            resp = _claude(payload, key, beta, timeout=900)
+            resp = _claude(payload, key, beta, timeout=1200)
             spent.append(resp.get("usage") or {})
+            turns = [resp]
             for _ in range(3):                       # البحث الطويل قد يتوقف مؤقتًا (pause_turn) فنكمله
                 if resp.get("stop_reason") != "pause_turn":
                     break
                 payload["messages"] = payload["messages"] + [{"role": "assistant", "content": resp["content"]}]
-                resp = _claude(payload, key, beta, timeout=900)
+                resp = _claude(payload, key, beta, timeout=1200)
                 spent.append(resp.get("usage") or {})
+                turns.append(resp)
             break
         except ClaudeHTTPError as e:
             if not 400 <= e.status < 500 or e.status == 429:
@@ -2069,14 +2086,19 @@ def ai_report(data, prev, new_major, releases):
         raise RuntimeError("Claude API: all attempts failed")
     if resp.get("stop_reason") == "refusal":
         raise RuntimeError(f"Claude API: request declined ({(resp.get('stop_details') or {}).get('category')})")
+    queries = []
+    for t in turns:                                  # كل الاستدعاءات، لا الأخير فقط: البحث قد يقع قبل pause_turn
+        for b in t.get("content", []):
+            if b.get("type") == "server_tool_use" and b.get("name") == "web_search":
+                queries.append((b.get("input") or {}).get("query", ""))
+            elif b.get("type") == "web_search_tool_result" and isinstance(b.get("content"), list):
+                for it in b["content"]:
+                    u = it.get("url", "")
+                    if u.startswith("https://") and u not in [x["url"] for x in sources]:
+                        sources.append({"url": u, "title": (it.get("title") or "")[:140]})
     for b in resp.get("content", []):
         if b.get("type") == "text":
             text += b.get("text", "")
-        elif b.get("type") == "web_search_tool_result" and isinstance(b.get("content"), list):
-            for it in b["content"]:
-                u = it.get("url", "")
-                if u.startswith("https://") and u not in [x["url"] for x in sources]:
-                    sources.append({"url": u, "title": (it.get("title") or "")[:140]})
     i, j = text.find("{"), text.rfind("}")
     try:
         rep = json.loads(text[i:j + 1])
@@ -2103,6 +2125,10 @@ def ai_report(data, prev, new_major, releases):
     hist = [h for h in hist if h.get("generated_utc") != latest["generated_utc"]] + [latest]
     hist = hist[-30:]
     save(AI_HIST, hist)
+    rlog = load(AI_RESEARCH_LOG, [])
+    rlog.append({"generated_utc": latest["generated_utc"], "model": model, "trigger": list((new_major or {}).keys()) or ["manual"],
+                 "queries": queries, "results": sources[:40], "research_map": rep.get("research_map") or []})
+    save(AI_RESEARCH_LOG, rlog[-30:])
     log(f"AI report ok: {today}, model {latest['model']}, {u['calls']} calls, {u['input_tokens']} in / {u['output_tokens']} out tokens, "
         f"{u['web_search_requests']} searches, est. ${cost:.3f}")
     latest["trigger"] = list((new_major or {}).keys()) or ["manual"]
@@ -2537,8 +2563,21 @@ def main():
         log("positioning FAILED:", repr(e)[:200])
     pending = state.get("ai_pending") or {}
     new_major = {**pending, **new_major}
+    disc = state.setdefault("ai_discovery", {"left": DISCOVERY_REPORTS, "last": None})
+    now_d = dt.datetime.now(dt.timezone.utc)
+    last_ai = ((prev.get("ai") or {}).get("latest") or {}).get("date")
+    forced = os.environ.get("AI_FORCE", "").strip().lower() in ("1", "true", "yes")
+    if disc.get("left", 0) > 0 and not new_major and (forced or (now_d.weekday() < 5 and now_d.hour >= DISCOVERY_HOUR_UTC
+                                                                  and last_ai != now_d.date().isoformat())):
+        new_major = {"discovery": now_d.date().isoformat()}
+    elif disc.get("left", 0) > 0 and new_major:
+        new_major = {**new_major, "discovery": now_d.date().isoformat()}   # كل تقرير في المرحلة يبحث بحرية ويُسجَّل
     try:
         ai, wrote = ai_report(data, prev, new_major, releases)
+        if wrote and disc.get("left", 0) > 0:
+            disc["left"] -= 1
+            disc["last"] = dt.date.today().isoformat()
+            log(f"AI discovery: {disc['left']} report(s) left")
         ai = _no_cost(ai)
         if ai:
             data["ai"] = ai
