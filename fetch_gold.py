@@ -1762,6 +1762,11 @@ AI_RESEARCH_LOG = os.path.join("data", "ai_research_log.json")
 DISCOVERY_REPORTS = 4
 DISCOVERY_HOUR_UTC = 21
 DISCOVERY_SEARCHES = 8
+AI_RETRY_HOURS = 6
+
+
+class _AIWait(Exception):
+    pass
 AI_URL = "https://api.anthropic.com/v1/messages"
 AI_LANGS = ("ar", "en", "it", "es")
 PRICES_PER_MTOK = (("claude-fable", 10, 50), ("claude-mythos", 10, 50), ("claude-opus-5-5", 4, 20), ("claude-opus", 5, 25),
@@ -1967,6 +1972,54 @@ def _claude(payload, key, beta=None, timeout=300):
     return r.json()
 
 
+def _claude_stream(payload, key, beta=None, idle=300):
+    """نفس _claude لكن بالبث (SSE): التقارير الطويلة لا تصطدم بمهلة كلية، والمهلة هنا بين دفعة وأخرى فقط.
+    يعيد بناء الرسالة كاملة كما يعيدها الطلب العادي، فتُمرَّر كتلها كما هي في استكمال pause_turn."""
+    headers = {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+    if beta:
+        headers["anthropic-beta"] = beta
+    with requests.post(AI_URL, json={**payload, "stream": True}, timeout=(30, idle), headers=headers, stream=True) as r:
+        if r.status_code >= 400:
+            raise ClaudeHTTPError(r.status_code, r.text)
+        msg, blocks, partial = None, {}, {}
+        for line in r.iter_lines(decode_unicode=True):
+            if not line or not line.startswith("data:"):
+                continue
+            d = json.loads(line[5:].strip())
+            t = d.get("type")
+            if t == "message_start":
+                msg = d["message"]
+            elif t == "content_block_start":
+                blocks[d["index"]] = d["content_block"]
+                partial[d["index"]] = ""
+            elif t == "content_block_delta":
+                b, dl = blocks[d["index"]], d["delta"]
+                kind = dl.get("type")
+                if kind == "text_delta":
+                    b["text"] = (b.get("text") or "") + dl.get("text", "")
+                elif kind == "input_json_delta":
+                    partial[d["index"]] += dl.get("partial_json", "")
+                elif kind == "thinking_delta":
+                    b["thinking"] = (b.get("thinking") or "") + dl.get("thinking", "")
+                elif kind == "signature_delta":
+                    b["signature"] = dl.get("signature", "")
+                elif kind == "citations_delta":
+                    b["citations"] = (b.get("citations") or []) + [dl.get("citation")]
+            elif t == "content_block_stop":
+                if partial.get(d["index"]):
+                    blocks[d["index"]]["input"] = json.loads(partial[d["index"]])
+            elif t == "message_delta":
+                msg.update(d.get("delta") or {})
+                msg["usage"] = {**(msg.get("usage") or {}), **(d.get("usage") or {})}
+            elif t == "error":
+                err = d.get("error") or {}
+                raise ClaudeHTTPError(529 if err.get("type") == "overloaded_error" else 500, json.dumps(d)[:300])
+    if not msg:
+        raise ClaudeHTTPError(500, "stream ended without a message")
+    msg["content"] = [blocks[i] for i in sorted(blocks)]
+    return msg
+
+
 def _usage_sum(parts):
     """مجموع الاستهلاك عبر كل استدعاءات الطلب الواحد: حين يتوقف البحث مؤقتًا (pause_turn) نكمله باستدعاء جديد
     يُعاد فيه إرسال السياق كله، وكل استدعاء يُحاسَب وحده."""
@@ -2066,14 +2119,14 @@ def ai_report(data, prev, new_major, releases):
             if fallback:
                 payload["fallbacks"] = "default"
             beta = "server-side-fallback-2026-07-01" if fallback else None
-            resp = _claude(payload, key, beta, timeout=1200)
+            resp = _claude_stream(payload, key, beta)
             spent.append(resp.get("usage") or {})
             turns = [resp]
             for _ in range(3):                       # البحث الطويل قد يتوقف مؤقتًا (pause_turn) فنكمله
                 if resp.get("stop_reason") != "pause_turn":
                     break
                 payload["messages"] = payload["messages"] + [{"role": "assistant", "content": resp["content"]}]
-                resp = _claude(payload, key, beta, timeout=1200)
+                resp = _claude_stream(payload, key, beta)
                 spent.append(resp.get("usage") or {})
                 turns.append(resp)
             break
@@ -2572,8 +2625,15 @@ def main():
         new_major = {"discovery": now_d.date().isoformat()}
     elif disc.get("left", 0) > 0 and new_major:
         new_major = {**new_major, "discovery": now_d.date().isoformat()}   # كل تقرير في المرحلة يبحث بحرية ويُسجَّل
+    fail = state.get("ai_fail") or {}
+    wait_until = fail.get("retry_after")
     try:
+        if new_major and wait_until and now_d.isoformat() < wait_until:
+            # بعد فشل طلب مكلف لا نعيده كل نصف ساعة: ننتظر AI_RETRY_HOURS ثم نحاول مرة أخرى
+            log(f"AI report: last attempt failed; next try after {wait_until}")
+            raise _AIWait()
         ai, wrote = ai_report(data, prev, new_major, releases)
+        state.pop("ai_fail", None)
         if wrote and disc.get("left", 0) > 0:
             disc["left"] -= 1
             disc["last"] = dt.date.today().isoformat()
@@ -2583,9 +2643,15 @@ def main():
             data["ai"] = ai
         state["ai_pending"] = {}
         status["sources"]["ai"] = {"ok": True, "checked": now, "wrote": wrote, "off": not bool(ai)}
+    except _AIWait:
+        state["ai_pending"] = new_major
+        if prev.get("ai"):
+            data["ai"] = _no_cost(prev["ai"])
     except Exception as e:
         log("ai FAILED:", repr(e)[:300])
-        state["ai_pending"] = new_major                             # نعيد المحاولة في التشغيل التالي
+        state["ai_pending"] = new_major                             # نعيد المحاولة بعد مهلة، لا في كل تشغيل
+        state["ai_fail"] = {"at": now_d.isoformat(), "error": repr(e)[:200],
+                            "retry_after": (now_d + dt.timedelta(hours=AI_RETRY_HOURS)).isoformat()}
         status["sources"]["ai"] = {"ok": False, "checked": now, "error": str(e)[:300]}
         if prev.get("ai"):
             data["ai"] = _no_cost(prev["ai"])
