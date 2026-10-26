@@ -83,7 +83,7 @@ button{font:inherit;color:inherit}
 .kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-top:-1px;padding-top:16px;padding-bottom:4px}
 .kpi{background:var(--surface);border:1px solid var(--rule);border-radius:var(--radius);padding:12px 14px;box-shadow:var(--shadow);min-width:0;
   border-top:3px solid var(--gold)}
-.kpi span{display:block;font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpi span{display:block;font-size:12.5px;color:var(--muted);line-height:1.35}
 .kpi b{display:block;font-size:21px;font-weight:700;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .kpi small{font-size:12.5px}
 .kpi b em{font-style:normal}
@@ -199,11 +199,21 @@ main{padding:22px 0 40px}
 .tablebox{overflow-x:auto;border:1px solid var(--rule);background:var(--surface);margin-bottom:12px;border-radius:var(--radius);box-shadow:var(--shadow)}
 table{border-collapse:collapse;width:100%;min-width:620px;font-size:14px}
 th,td{padding:9px 12px;text-align:start;border-bottom:1px solid var(--rule);white-space:nowrap}
-th{font-weight:600;color:var(--muted);font-size:12.5px;background:var(--surface-2)}
+th{font-weight:600;color:var(--muted);font-size:12.5px;background:var(--surface-2);white-space:normal}
 tbody tr:hover{background:var(--surface-2)}
 td.n,th.n{text-align:end}
 tr:last-child td{border-bottom:0}
 .rank{color:var(--muted);width:2.5em}
+.swipe{font-size:12px;color:var(--muted);margin:-2px 0 6px}
+@media (max-width:600px){
+  table{min-width:0;font-size:13px}
+  th,td{padding:7px 8px}
+  th{white-space:normal;min-width:4.5em}
+  .tablebox.wide th:first-child,.tablebox.wide td:first-child{position:sticky;inset-inline-start:0;z-index:1;background:var(--surface);box-shadow:inset -1px 0 0 var(--rule)}
+  [dir=rtl] .tablebox.wide th:first-child,[dir=rtl] .tablebox.wide td:first-child{box-shadow:inset 1px 0 0 var(--rule)}
+  .tablebox.wide thead th:first-child{background:var(--surface-2)}
+  .tablebox.wide td:first-child{white-space:normal;min-width:7.5em;max-width:42vw;overflow-wrap:anywhere}
+}
 .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:18px}
 .ranked{background:var(--surface);border:1px solid var(--rule);border-radius:var(--radius);padding:12px 16px;box-shadow:var(--shadow)}
 .ranked h3{font-size:15px;margin:0 0 6px;font-weight:600}
@@ -313,7 +323,7 @@ tr:last-child td{border-bottom:0}
 .pv-ai{margin:10px 0 0;padding-top:10px;border-top:1px solid var(--rule);font-size:15px;line-height:1.7}.pv-ai .ai-model{margin-inline-end:6px}
 .pv-read{margin:0 0 10px;font-size:14.5px;line-height:1.7}
 .rd{font-weight:700}table.pos-t{min-width:0}table.pos-t td,table.pos-t th{padding:8px 10px}table.pos-t td:first-child{white-space:normal}
-@media (max-width:600px){.hm{display:none}table.pos-t{font-size:13px}table.pos-t td,table.pos-t th{padding:7px 8px}}
+@media (max-width:600px){.hm{display:none}table.pos-t td{white-space:normal}table.pos-t{font-size:13px}table.pos-t td,table.pos-t th{padding:7px 8px}}
 .rd{font-weight:700}.rd.pos{color:var(--buy)}.rd.neg{color:var(--sell)}.rd.mix{color:var(--gold)}.rd.neu{color:var(--blue)}
 td .sub{font-size:12px;margin-top:2px}tr.sep th{padding-top:14px}
 details.more{margin:4px 0 14px}details.more>summary{cursor:pointer;color:var(--muted);font-size:14px;padding:6px 0}
@@ -818,7 +828,7 @@ R.countries = () => {
   if (state.mode[id] === 'stock'){
     const rows = entries.map(([code, s]) => ({code, l: last(s), c: change(s, PERIODS[p].days)})).sort((a, b) => b.l[1] - a.l[1]);
     const total = rows.reduce((a, r) => a + r.l[1], 0), shown = state.all ? rows : rows.slice(0, 25);
-    h += `<div class="tablebox"><table><thead><tr><th class="rank">#</th><th>${L('الدولة', 'Country', 'Paese', 'País')}</th><th class="n">${L('الحيازة', 'Holdings', 'Riserve', 'Tenencias')}</th><th class="n">${L('بالكيلوغرام', 'In kilograms', 'In chilogrammi', 'En kilogramos')}</th>
+    h += `<div class="tablebox"><table data-hm="0,3,6"><thead><tr><th class="rank">#</th><th>${L('الدولة', 'Country', 'Paese', 'País')}</th><th class="n">${L('الحيازة', 'Holdings', 'Riserve', 'Tenencias')}</th><th class="n">${L('بالكيلوغرام', 'In kilograms', 'In chilogrammi', 'En kilogramos')}</th>
       <th class="n">${L('الحصة', 'Share', 'Quota', 'Proporción')}</th><th class="n">${L('التغير خلال', 'Change over', 'Variazione su', 'Variación en')} ${pLabel(p)}</th><th>${L('آخر قراءة', 'Latest report', 'Ultimo report', 'Último informe')}</th></tr></thead><tbody>
       ${shown.map((r, i) => `<tr><td class="rank">${i + 1}</td><td><button class="linkish" data-act="country-go" data-v="${r.code}">${cName(r.code)}</button></td>
         <td class="n">${TN(r.l[1])}</td><td class="n">${KG(r.l[1])}</td><td class="n">${bd(nf1.format(r.l[1] / total * 100) + '%')}</td>
@@ -1205,7 +1215,7 @@ function backtestHTML(c){
   const base = `<tr class="base"><td>${L('كل الأسابيع (للمقارنة)', 'All weeks (baseline)', 'Tutte le settimane (base)', 'Todas las semanas (referencia)')}</td><td class="n">${B.cnt[0]}</td><td>${L('نسبة الصعود', 'Share up', 'Quota di rialzi', 'Proporción de subidas')}</td>${H.map((h, k) => `<td class="n">${pc(B.up[k], B.cnt[k])}</td>`).join('')}${H.map((h, k) => `<td class="n">${avg(B.ret[k], B.cnt[k])}</td>`).join('')}</tr>`;
   const lastSig = [...S.hi.dates.map(d => [d, 'hi']), ...S.lo.dates.map(d => [d, 'lo'])].sort().slice(-6).reverse();
   return `<h3 class="rv-title">${L('الاختبار التاريخي: ماذا فعل الذهب بعد كل إشارة؟', 'Historical test: what did gold do after each signal?', 'Test storico: cosa ha fatto l’oro dopo ogni segnale?', 'Prueba histórica: ¿qué hizo el oro tras cada señal?')}</h3>
-    <div class="tablebox"><table><thead><tr><th>${L('الإشارة', 'Signal', 'Segnale', 'Señal')}</th><th class="n">${L('عدد المرات', 'Times', 'Occorrenze', 'Veces')}</th><th>${L('الاتجاه المتوقع', 'Expected move', 'Movimento atteso', 'Movimiento esperado')}</th>
+    <div class="tablebox"><table data-hm="4,7"><thead><tr><th>${L('الإشارة', 'Signal', 'Segnale', 'Señal')}</th><th class="n">${L('عدد المرات', 'Times', 'Occorrenze', 'Veces')}</th><th>${L('الاتجاه المتوقع', 'Expected move', 'Movimento atteso', 'Movimiento esperado')}</th>
       ${H.map(h => `<th class="n">${L(`نجاح بعد ${h} أسابيع`, `Hit rate, ${h}w`, `Tasso di successo, ${h} sett.`, `Tasa de acierto, ${h} sem.`)}</th>`).join('')}${H.map(h => `<th class="n">${L(`متوسط العائد ${h} أسابيع`, `Avg return, ${h}w`, `Rendimento medio, ${h} sett.`, `Rentabilidad media, ${h} sem.`)}</th>`).join('')}</tr></thead>
       <tbody>${row(L('دخول منطقة 90 فما فوق', 'Entered 90 or above', 'Entrato a 90 o oltre', 'Entró en 90 o más'), S.hi, want.hi)}${row(L('دخول منطقة 10 فما دون', 'Entered 10 or below', 'Entrato a 10 o meno', 'Entró en 10 o menos'), S.lo, want.lo)}${base}</tbody></table></div>
     <p class="explain">${L(
@@ -1310,7 +1320,7 @@ R.f13 = () => {
     return {cik, m, v: s[1], st: s[2], h: s[3] || {}, prev};
   }).filter(x => x.v != null && (x.v > 0 || x.st === 'closed')).sort((a, b) => b.v - a.v);
   if (majors.length) h += `<h3 class="rv-title">${L('البنوك والمؤسسات المعروفة في هذا الربع', 'Well-known banks and institutions this quarter', 'Banche e istituzioni note in questo trimestre', 'Bancos e instituciones conocidos este trimestre')}</h3>
-    <div class="tablebox"><table><thead><tr><th>${L('المؤسسة', 'Institution', 'Istituzione', 'Institución')}</th><th class="n">${L('الحيازة', 'Holdings', 'Riserve', 'Tenencias')}</th><th class="n">${L('التغير', 'Change', 'Variazione', 'Variación')}</th><th>${L('الحالة', 'Status', 'Stato', 'Estado')}</th><th class="n">GLD</th><th class="n">IAU</th></tr></thead><tbody>
+    <div class="tablebox"><table data-hm="4,5"><thead><tr><th>${L('المؤسسة', 'Institution', 'Istituzione', 'Institución')}</th><th class="n">${L('الحيازة', 'Holdings', 'Riserve', 'Tenencias')}</th><th class="n">${L('التغير', 'Change', 'Variazione', 'Variación')}</th><th>${L('الحالة', 'Status', 'Stato', 'Estado')}</th><th class="n">GLD</th><th class="n">IAU</th></tr></thead><tbody>
     ${majors.map(x => { const d = x.prev == null ? null : x.v - x.prev;
       return `<tr><td>${mgrBtn(x.cik, x.m.n)}</td><td class="n">${TN(x.v)}</td><td class="n ${d == null ? 'flat' : cls(d)}">${d == null ? '—' : sTN(d)}</td><td>${badge(x.st)}</td>
         <td class="n">${x.h.GLD ? bd(nf0.format(x.h.GLD)) : '—'}</td><td class="n">${x.h.IAU ? bd(nf0.format(x.h.IAU)) : '—'}</td></tr>`; }).join('')}
@@ -1417,7 +1427,7 @@ R.etf = () => {
       {label: L('نسبة التغير', 'Change %', 'Variazione %', 'Variación %'), v: q.pct == null ? '—' : sPCT(q.pct), sub: q.d3 == null ? '' : `${L('آخر 3 أيام', 'Last 3 days', 'Ultimi 3 giorni', 'Últimos 3 días')}: ${sKG(q.d3)}`},
     ]}));
   const all = keys.reduce((a, k) => a + last(funds[k])[1], 0);
-  h += `<div class="tablebox"><table><thead><tr><th>${L('الصندوق', 'Fund', 'Fondo', 'Fondo')}</th><th class="n">${L('الحيازة', 'Holdings', 'Riserve', 'Tenencias')}</th><th class="n">${L('آخر يوم', 'Last day', 'Ultimo giorno', 'Último día')}</th><th class="n">${L('التغير خلال', 'Change over', 'Variazione su', 'Variación en')} ${pLabel(p)}</th><th class="n">${L('الحصة', 'Share', 'Quota', 'Proporción')}</th><th>${L('آخر قراءة', 'Latest', 'Ultimo dato', 'Último dato')}</th></tr></thead><tbody>
+  h += `<div class="tablebox"><table data-hm="4,5"><thead><tr><th>${L('الصندوق', 'Fund', 'Fondo', 'Fondo')}</th><th class="n">${L('الحيازة', 'Holdings', 'Riserve', 'Tenencias')}</th><th class="n">${L('آخر يوم', 'Last day', 'Ultimo giorno', 'Último día')}</th><th class="n">${L('التغير خلال', 'Change over', 'Variazione su', 'Variación en')} ${pLabel(p)}</th><th class="n">${L('الحصة', 'Share', 'Quota', 'Proporción')}</th><th>${L('آخر قراءة', 'Latest', 'Ultimo dato', 'Último dato')}</th></tr></thead><tbody>
     ${keys.map(k => { const s2 = funds[k], l = last(s2), d1 = s2.length > 1 ? l[1] - s2[s2.length - 2][1] : null, c = change(s2, PERIODS[p].days);
       return `<tr><td><b>${k}</b> <span style="color:var(--muted)">${ETF_INFO[k]}</span></td><td class="n">${TN(l[1])}</td><td class="n ${d1 == null ? 'flat' : cls(d1)}">${d1 == null ? '—' : sKG(d1)}</td>
       <td class="n ${c ? cls(c.d) : 'na'}">${c ? `${sTN(c.d)} ${sPCT(c.pct)}` : L('يُبنى السجل', 'Building history', 'Storico in costruzione', 'Historial en construcción')}</td><td class="n">${bd(nf1.format(l[1] / all * 100) + '%')}</td><td>${fDay.format(toDate(l[0]))}</td></tr>`; }).join('')}
@@ -1718,7 +1728,7 @@ R.gex = () => {
   }
   const hist = (g.history || []).slice().reverse();
   if (hist.length) h += `<h3 class="rv-title">${L('سجل المستويات اليومي', 'Daily level history', 'Storico giornaliero dei livelli', 'Historial diario de niveles')}</h3>
-    <div class="tablebox"><table><thead><tr><th>${L('التاريخ', 'Date', 'Data', 'Fecha')}</th><th class="n">${L('السعر ≈ GC', 'Price ≈ GC', 'Prezzo ≈ GC', 'Precio ≈ GC')}</th><th class="n">Zero Gamma</th><th class="n">${L('Zero Gamma قريب', 'Near zero gamma', 'Zero gamma vicino', 'Zero gamma cercano')}</th><th class="n">Put Wall</th><th class="n">Call Wall</th><th class="n">Net GEX</th><th>${L('الربع', 'Quadrant', 'Quadrante', 'Cuadrante')}</th></tr></thead><tbody>
+    <div class="tablebox"><table data-hm="3,7"><thead><tr><th>${L('التاريخ', 'Date', 'Data', 'Fecha')}</th><th class="n">${L('السعر ≈ GC', 'Price ≈ GC', 'Prezzo ≈ GC', 'Precio ≈ GC')}</th><th class="n">Zero Gamma</th><th class="n">${L('Zero Gamma قريب', 'Near zero gamma', 'Zero gamma vicino', 'Zero gamma cercano')}</th><th class="n">Put Wall</th><th class="n">Call Wall</th><th class="n">Net GEX</th><th>${L('الربع', 'Quadrant', 'Quadrante', 'Cuadrante')}</th></tr></thead><tbody>
     ${hist.map(x => { const rr = x.gc_ratio || r, f = v => v == null ? '—' : bd(nf0.format(v * (rr || 1))), qq = QUAD()[gexQuad({...x, near_total_m: x.total_m})];
       return `<tr><td>${fDay.format(toDate(x.d))}</td><td class="n">${f(x.spot)}</td><td class="n">${f(x.zero_all)}</td><td class="n">${f(x.zero_near)}</td><td class="n">${f(x.put_wall)}</td><td class="n">${f(x.call_wall)}</td><td class="n ${cls(x.total_m)}">${mUSD(x.total_m)}</td><td><span class="badge" style="background:color-mix(in srgb,var(--muted) 18%,transparent)">${qq[0]}</span></td></tr>`; }).join('')}</tbody></table></div>`;
   return h;
@@ -1741,7 +1751,7 @@ function trackHTML(){
     <div class="fig"><h3>${L('الانحياز أصاب', 'Bias right', 'Bias corretto', 'Sesgo acertado')}</h3><div class="v">${bd(nf0.format(s.hit) + '%')}</div><div class="sub">${L('التخمين ≈ 33٪', 'Guessing ≈ 33%', 'A caso ≈ 33%', 'Al azar ≈ 33 %')}</div></div>
     <div class="fig"><h3>${L('متوسط Brier', 'Average Brier', 'Brier medio', 'Brier medio')}</h3><div class="v ${s.brier < s.brier_naive ? 'up' : 'down'}">${bd(nf2.format(s.brier))}</div><div class="sub">${L('التخمين', 'Guessing', 'A caso', 'Al azar')}: ${bd(nf2.format(s.brier_naive))}</div></div>
     <div class="fig"><h3>${L('احتمال النتيجة الفعلية', 'Probability given to the outcome', 'Probabilità data all’esito', 'Probabilidad dada al resultado')}</h3><div class="v">${bd(nf0.format(s.p_outcome) + '%')}</div><div class="sub">${L('التخمين ≈ 33٪', 'Guessing ≈ 33%', 'A caso ≈ 33%', 'Al azar ≈ 33 %')}</div></div></div>`;
-  h += `<div class="tablebox"><table><thead><tr><th>${L('التاريخ', 'Date', 'Data', 'Fecha')}</th><th>${L('الانحياز', 'Bias', 'Bias', 'Sesgo')}</th><th>${bd(`${D.up[0]} / ${D.flat[0]} / ${D.down[0]}`)}</th><th class="n">${L('سعر البداية', 'Start price', 'Prezzo iniziale', 'Precio inicial')}</th><th class="n">${L('بعد 14 يومًا', 'After 14 days', 'Dopo 14 giorni', 'Tras 14 días')}</th><th>${L('النتيجة', 'Outcome', 'Esito', 'Resultado')}</th><th class="n">Brier</th></tr></thead><tbody>
+  h += `<div class="tablebox"><table data-hm="3"><thead><tr><th>${L('التاريخ', 'Date', 'Data', 'Fecha')}</th><th>${L('الانحياز', 'Bias', 'Bias', 'Sesgo')}</th><th>${bd(`${D.up[0]} / ${D.flat[0]} / ${D.down[0]}`)}</th><th class="n">${L('سعر البداية', 'Start price', 'Prezzo iniziale', 'Precio inicial')}</th><th class="n">${L('بعد 14 يومًا', 'After 14 days', 'Dopo 14 giorni', 'Tras 14 días')}</th><th>${L('النتيجة', 'Outcome', 'Esito', 'Resultado')}</th><th class="n">Brier</th></tr></thead><tbody>
     ${rows.map(e => { const p = Object.fromEntries(e.dirs.map((d, i) => [d, e.p[i]])), r = e.result;
       const due = new Date(toDate(e.base.date).getTime() + t.days * 864e5);
       return `<tr><td>${fDay.format(toDate(e.date))}</td><td><span class="bias ${B[e.bias][0]} sm">${B[e.bias][1]}</span></td><td>${bd(`${p.up}% / ${p.flat}% / ${p.down}%`)}</td><td class="n">${USD(e.base.price)}</td>
@@ -1778,7 +1788,7 @@ function liqHTML(){
       <div class="fig"><h3>${L('الذهب أعلى بعد 10 جلسات', 'Gold higher after 10 sessions', 'Oro più alto dopo 10 sedute', 'Oro más alto tras 10 sesiones')}</h3><div class="v">${bd(nf0.format(s.up10) + '%')}</div><div class="sub">${L('الوسيط', 'Median', 'Mediana', 'Mediana')}: ${sPCT(s.med10)}</div></div>
       <div class="fig"><h3>${L('الذهب أعلى بعد 20 جلسة', 'Gold higher after 20 sessions', 'Oro più alto dopo 20 sedute', 'Oro más alto tras 20 sesiones')}</h3><div class="v">${bd(nf0.format(s.up20) + '%')}</div><div class="sub">${L('الوسيط', 'Median', 'Mediana', 'Mediana')}: ${sPCT(s.med20)}</div></div>
       <div class="fig"><h3>${L('استعاد مستواه قبل البيع خلال 20 جلسة', 'Back to its pre-selloff level within 20 sessions', 'Tornato al livello pre-vendite entro 20 sedute', 'Recuperó su nivel previo en 20 sesiones')}</h3><div class="v">${bd(nf0.format(s.recovered20) + '%')}</div><div class="sub">${L('من الحالات', 'of episodes', 'degli episodi', 'de los episodios')}</div></div></div>`;
-    h += `<div class="tablebox"><table><thead><tr><th>${L('التاريخ', 'Date', 'Data', 'Fecha')}</th><th class="n">${L('الذهب 3 جلسات', 'Gold 3 sessions', 'Oro 3 sedute', 'Oro 3 sesiones')}</th><th class="n">NQ</th><th class="n">VIX</th><th class="n">${L('بعد 10 جلسات', 'After 10', 'Dopo 10', 'Tras 10')}</th><th class="n">${L('بعد 20 جلسة', 'After 20', 'Dopo 20', 'Tras 20')}</th><th class="n">${L('استعاد خلال', 'Recovered in', 'Recupero in', 'Recuperó en')}</th></tr></thead><tbody>
+    h += `<div class="tablebox"><table data-hm="3"><thead><tr><th>${L('التاريخ', 'Date', 'Data', 'Fecha')}</th><th class="n">${L('الذهب 3 جلسات', 'Gold 3 sessions', 'Oro 3 sedute', 'Oro 3 sesiones')}</th><th class="n">NQ</th><th class="n">VIX</th><th class="n">${L('بعد 10 جلسات', 'After 10', 'Dopo 10', 'Tras 10')}</th><th class="n">${L('بعد 20 جلسة', 'After 20', 'Dopo 20', 'Tras 20')}</th><th class="n">${L('استعاد خلال', 'Recovered in', 'Recupero in', 'Recuperó en')}</th></tr></thead><tbody>
       ${q.episodes.slice().reverse().map(e => `<tr><td>${fDay.format(toDate(e.date))}</td><td class="n down">${sPCT(e.gold3d)}</td><td class="n down">${sPCT(e.nq3d)}</td><td class="n">${bd(nf1.format(e.vix))}</td>
         <td class="n ${cls(e.fwd10)}">${pc(e.fwd10)}</td><td class="n ${cls(e.fwd20)}">${pc(e.fwd20)}</td><td class="n">${e.recovered_in == null ? (e.fwd20 == null ? '…' : '—') : bd(nf0.format(e.recovered_in)) + ' ' + L('جلسة', 'sessions', 'sedute', 'sesiones')}</td></tr>`).join('')}</tbody></table></div>`;
   }
@@ -1807,7 +1817,7 @@ function kindTable(M, pi){
   if (!rows.length) return '';
   const K = KIND();
   return `<h3 class="rv-title">${L('صافي الشراء حسب نوع المؤسسة', 'Net buying by type of institution', 'Acquisti netti per tipo di istituzione', 'Compras netas por tipo de institución')}</h3>
-    <div class="tablebox"><table><thead><tr><th>${L('النوع', 'Type', 'Tipo', 'Tipo')}</th><th class="n">${L('عدد المؤسسات', 'Institutions', 'Istituzioni', 'Instituciones')}</th><th class="n">${L('الحيازة', 'Holdings', 'Riserve', 'Tenencias')}</th><th class="n">${L('صافي التغير', 'Net change', 'Variazione netta', 'Variación neta')}</th></tr></thead><tbody>
+    <div class="tablebox"><table data-hm="1"><thead><tr><th>${L('النوع', 'Type', 'Tipo', 'Tipo')}</th><th class="n">${L('عدد المؤسسات', 'Institutions', 'Istituzioni', 'Instituciones')}</th><th class="n">${L('الحيازة', 'Holdings', 'Riserve', 'Tenencias')}</th><th class="n">${L('صافي التغير', 'Net change', 'Variazione netta', 'Variación neta')}</th></tr></thead><tbody>
     ${rows.map(([k, a]) => `<tr><td><span class="kind" style="--k:${K[k][1]}">${K[k][0]}</span></td><td class="n">${bd(nf0.format(a.n))}</td><td class="n">${TN(a.hold)}</td><td class="n ${cls(a.net)}">${sTN(a.net)}</td></tr>`).join('')}</tbody></table></div>
     <p class="explain">${L(`بين أكبر ${nf0.format(Object.keys(M).length)} مؤسسة يتابعها هذا القسم. نوع كل مؤسسة يصنّفه Claude من اسمها ومعرفته العامة، وهو تصنيف تقريبي قد يخطئ في الشركات الصغيرة أو متعددة الأنشطة.`,
       `Among the ${nf0.format(Object.keys(M).length)} largest institutions this section tracks. Each institution’s type is classified by Claude from its name and general knowledge; it is approximate and can be wrong for small or multi-business firms.`,
@@ -2089,7 +2099,25 @@ function renderTabs(){
 function render(){
   renderTabs();
   document.getElementById('view').innerHTML = DATA ? R[state.tab]() : '';
+  markWide();
 }
+/* الجداول الأعرض من الشاشة: عمود أول ثابت وتنبيه بالسحب، كي لا تبدو فارغة على الجوال */
+function markWide(){
+  // أعمدة ثانوية تُخفى على الجوال: <table data-hm="3,7"> (أرقام الأعمدة من 0)
+  document.querySelectorAll('#view table[data-hm]:not([data-hmd])').forEach(t => {
+    const ix = t.dataset.hm.split(',').map(Number);
+    t.querySelectorAll('tr').forEach(r => ix.forEach(i => r.children[i] && r.children[i].classList.add('hm')));
+    t.dataset.hmd = '1';
+  });
+  document.querySelectorAll('#view .tablebox').forEach(tb => {
+    const wide = tb.scrollWidth > tb.clientWidth + 2, hint = tb.previousElementSibling && tb.previousElementSibling.classList.contains('swipe');
+    tb.classList.toggle('wide', wide);
+    if (wide && !hint) tb.insertAdjacentHTML('beforebegin', `<div class="swipe">${isAr() ? '⇠' : '⇢'} ${L('اسحب الجدول لرؤية بقية الأعمدة', 'Swipe the table to see the other columns', 'Scorri la tabella per vedere le altre colonne', 'Desliza la tabla para ver las demás columnas')}</div>`);
+    if (!wide && hint) tb.previousElementSibling.remove();
+  });
+}
+let wideT; addEventListener('resize', () => { clearTimeout(wideT); wideT = setTimeout(markWide, 200); });
+document.addEventListener('toggle', () => markWide(), true);
 
 function applyLang(){
   document.documentElement.lang = state.lang;
