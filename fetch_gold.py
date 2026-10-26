@@ -1948,10 +1948,32 @@ def _claude(payload, key, beta=None, timeout=300):
     return r.json()
 
 
+def _usage_sum(parts):
+    """مجموع الاستهلاك عبر كل استدعاءات الطلب الواحد: حين يتوقف البحث مؤقتًا (pause_turn) نكمله باستدعاء جديد
+    يُعاد فيه إرسال السياق كله، وكل استدعاء يُحاسَب وحده."""
+    t = {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
+         "web_search_requests": 0, "calls": len(parts)}
+    for u in parts:
+        for k in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"):
+            t[k] += u.get(k) or 0
+        t["web_search_requests"] += (u.get("server_tool_use") or {}).get("web_search_requests", 0) or 0
+    return t
+
+
+def _no_cost(ai):
+    """يحذف بيانات الكلفة/التوكنز من التقرير قبل نشره (التقارير القديمة كانت تحفظها)."""
+    if not ai:
+        return ai
+    ai = {k: v for k, v in ai.items() if k != "cost_30d"}
+    ai["latest"] = {k: v for k, v in (ai.get("latest") or {}).items() if k != "usage"}
+    ai["history"] = [{k: v for k, v in h.items() if k != "usage"} for h in ai.get("history") or []]
+    return ai
+
 def _cost(model, u):
     pin, pout = next(((i, o) for pre, i, o in PRICES_PER_MTOK if str(model).startswith(pre)), (10, 50))
-    return (u.get("input_tokens", 0) * pin + u.get("output_tokens", 0) * pout) / 1e6 \
-        + ((u.get("server_tool_use") or {}).get("web_search_requests", 0)) * 0.01
+    searches = u.get("web_search_requests", (u.get("server_tool_use") or {}).get("web_search_requests", 0)) or 0
+    return (u.get("input_tokens", 0) * pin + (u.get("cache_creation_input_tokens") or 0) * pin * 1.25
+            + (u.get("cache_read_input_tokens") or 0) * pin * 0.1 + u.get("output_tokens", 0) * pout) / 1e6 + searches * 0.01
 
 
 def _outlook(rep):
@@ -2008,7 +2030,7 @@ def ai_report(data, prev, new_major, releases):
     user = (f"Date (UTC): {today}.\nPlatform data (JSON; t = tonnes, contracts = COMEX GC 100-oz contracts):\n{digest}\n\n"
             "Search for today's key gold-related events, then return the JSON report.")
     messages = [{"role": "user", "content": user}]
-    sources, text, resp = [], "", None
+    sources, text, resp, spent = [], "", None, []
     ws_new = [{"type": "web_search_20260209", "name": "web_search", "max_uses": 4}]
     ws_old = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 4}]
     # fallbacks "default": إن رفض النموذج الطلب يُعاد تشغيله على نموذج بديل من Anthropic تلقائيًا (ويُعرض اسمه الحقيقي)
@@ -2022,11 +2044,13 @@ def ai_report(data, prev, new_major, releases):
                 payload["fallbacks"] = "default"
             beta = "server-side-fallback-2026-07-01" if fallback else None
             resp = _claude(payload, key, beta, timeout=900)
+            spent.append(resp.get("usage") or {})
             for _ in range(3):                       # البحث الطويل قد يتوقف مؤقتًا (pause_turn) فنكمله
                 if resp.get("stop_reason") != "pause_turn":
                     break
                 payload["messages"] = payload["messages"] + [{"role": "assistant", "content": resp["content"]}]
                 resp = _claude(payload, key, beta, timeout=900)
+                spent.append(resp.get("usage") or {})
             break
         except ClaudeHTTPError as e:
             if not 400 <= e.status < 500 or e.status == 429:
@@ -2055,14 +2079,12 @@ def ai_report(data, prev, new_major, releases):
     outlook = _outlook(rep)
     if not outlook:
         log("AI report: bias/scenarios missing or malformed; report kept without them")
-    u = resp.get("usage") or {}
+    u = _usage_sum(spent)
     model = resp.get("model", AI_MODEL)
     cost = _cost(model, u)
     langs = {k: rep[k] for k in AI_LANGS if isinstance(rep.get(k), dict)}  # it/es اختياريتان: الواجهة تعرض الإنجليزية إن غابتا
     latest = {"date": today, "generated_utc": now.replace(microsecond=0).isoformat(), "model": model,
-              **langs, "outlook": outlook, "sources": sources[:10],
-              "usage": {"input_tokens": u.get("input_tokens"), "output_tokens": u.get("output_tokens"),
-                        "searches": (u.get("server_tool_use") or {}).get("web_search_requests", 0), "est_cost_usd": round(cost, 4)}}
+              **langs, "outlook": outlook, "sources": sources[:10]}  # الكلفة تُكتب في سجل Actions فقط، لا في الملفات المنشورة
     last_price = load(PRICES_OUT, {}).get("last") or {}
     if outlook and outlook.get("dirs") and last_price.get("price"):
         olog = load(OUTLOOK_LOG, [])
@@ -2073,12 +2095,13 @@ def ai_report(data, prev, new_major, releases):
     hist = [h for h in hist if h.get("generated_utc") != latest["generated_utc"]] + [latest]
     hist = hist[-30:]
     save(AI_HIST, hist)
-    log(f"AI report ok: {today}, model {latest['model']}, {u.get('input_tokens')} in / {u.get('output_tokens')} out tokens, "
-        f"{latest['usage']['searches']} searches, est. ${cost:.3f}")
+    log(f"AI report ok: {today}, model {latest['model']}, {u['calls']} calls, {u['input_tokens']} in / {u['output_tokens']} out tokens, "
+        f"{u['web_search_requests']} searches, est. ${cost:.3f}")
     latest["trigger"] = list((new_major or {}).keys()) or ["manual"]
     hist[-1]["trigger"] = latest["trigger"]
     save(AI_HIST, hist)
-    return {"latest": latest, "history": [{"date": h["date"], **{k: h[k] for k in AI_LANGS if k in h}, "outlook": h.get("outlook"),
+    return {"latest": latest,
+            "history": [{"date": h["date"], **{k: h[k] for k in AI_LANGS if k in h}, "outlook": h.get("outlook"),
                                            "sources": h.get("sources", []),
                                            "model": h.get("model"), "generated_utc": h.get("generated_utc"),
                                            "trigger": h.get("trigger", [])} for h in hist[-14:]]}, True
@@ -2405,6 +2428,7 @@ def main():
     new_major = {**pending, **new_major}
     try:
         ai, wrote = ai_report(data, prev, new_major, releases)
+        ai = _no_cost(ai)
         if ai:
             data["ai"] = ai
         state["ai_pending"] = {}
@@ -2414,7 +2438,7 @@ def main():
         state["ai_pending"] = new_major                             # نعيد المحاولة في التشغيل التالي
         status["sources"]["ai"] = {"ok": False, "checked": now, "error": str(e)[:300]}
         if prev.get("ai"):
-            data["ai"] = prev["ai"]
+            data["ai"] = _no_cost(prev["ai"])
     try:
         track = score_outlooks()
         if track:
