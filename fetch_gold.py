@@ -1960,6 +1960,15 @@ def _usage_sum(parts):
     return t
 
 
+def _no_cost(ai):
+    """يحذف بيانات الكلفة/التوكنز من التقرير قبل نشره (التقارير القديمة كانت تحفظها)."""
+    if not ai:
+        return ai
+    ai = {k: v for k, v in ai.items() if k != "cost_30d"}
+    ai["latest"] = {k: v for k, v in (ai.get("latest") or {}).items() if k != "usage"}
+    ai["history"] = [{k: v for k, v in h.items() if k != "usage"} for h in ai.get("history") or []]
+    return ai
+
 def _cost(model, u):
     pin, pout = next(((i, o) for pre, i, o in PRICES_PER_MTOK if str(model).startswith(pre)), (10, 50))
     searches = u.get("web_search_requests", (u.get("server_tool_use") or {}).get("web_search_requests", 0)) or 0
@@ -2075,32 +2084,25 @@ def ai_report(data, prev, new_major, releases):
     cost = _cost(model, u)
     langs = {k: rep[k] for k in AI_LANGS if isinstance(rep.get(k), dict)}  # it/es اختياريتان: الواجهة تعرض الإنجليزية إن غابتا
     latest = {"date": today, "generated_utc": now.replace(microsecond=0).isoformat(), "model": model,
-              **langs, "outlook": outlook, "sources": sources[:10],
-              "usage": {"input_tokens": u["input_tokens"], "output_tokens": u["output_tokens"],
-                        "cache_read_input_tokens": u["cache_read_input_tokens"], "calls": u["calls"],
-                        "searches": u["web_search_requests"], "est_cost_usd": round(cost, 4)}}
+              **langs, "outlook": outlook, "sources": sources[:10]}  # الكلفة تُكتب في سجل Actions فقط، لا في الملفات المنشورة
     last_price = load(PRICES_OUT, {}).get("last") or {}
     if outlook and outlook.get("dirs") and last_price.get("price"):
         olog = load(OUTLOOK_LOG, [])
         olog.append({"id": latest["generated_utc"], "date": today, "model": model, "bias": outlook["bias"], "p": outlook["p"],
-                     "dirs": outlook["dirs"], "base": {"date": str(last_price.get("time") or today)[:10], "price": last_price["price"]},
-                     "cost_usd": round(cost, 4)})
+                     "dirs": outlook["dirs"], "base": {"date": str(last_price.get("time") or today)[:10], "price": last_price["price"]}})
         save(OUTLOOK_LOG, olog[-300:])
     hist = load(AI_HIST, [])
     hist = [h for h in hist if h.get("generated_utc") != latest["generated_utc"]] + [latest]
     hist = hist[-30:]
     save(AI_HIST, hist)
     log(f"AI report ok: {today}, model {latest['model']}, {u['calls']} calls, {u['input_tokens']} in / {u['output_tokens']} out tokens, "
-        f"{latest['usage']['searches']} searches, est. ${cost:.3f}")
+        f"{u['web_search_requests']} searches, est. ${cost:.3f}")
     latest["trigger"] = list((new_major or {}).keys()) or ["manual"]
     hist[-1]["trigger"] = latest["trigger"]
     save(AI_HIST, hist)
-    month_ago = (now - dt.timedelta(days=30)).isoformat()
-    recent = [h for h in hist if (h.get("generated_utc") or "") >= month_ago and (h.get("usage") or {}).get("calls")]
-    cost_30d = {"usd": round(sum((h.get("usage") or {}).get("est_cost_usd") or 0 for h in recent), 2), "reports": len(recent)}
-    return {"latest": latest, "cost_30d": cost_30d,
+    return {"latest": latest,
             "history": [{"date": h["date"], **{k: h[k] for k in AI_LANGS if k in h}, "outlook": h.get("outlook"),
-                                           "sources": h.get("sources", []), "usage": h.get("usage"),
+                                           "sources": h.get("sources", []),
                                            "model": h.get("model"), "generated_utc": h.get("generated_utc"),
                                            "trigger": h.get("trigger", [])} for h in hist[-14:]]}, True
 
@@ -2426,6 +2428,7 @@ def main():
     new_major = {**pending, **new_major}
     try:
         ai, wrote = ai_report(data, prev, new_major, releases)
+        ai = _no_cost(ai)
         if ai:
             data["ai"] = ai
         state["ai_pending"] = {}
@@ -2435,7 +2438,7 @@ def main():
         state["ai_pending"] = new_major                             # نعيد المحاولة في التشغيل التالي
         status["sources"]["ai"] = {"ok": False, "checked": now, "error": str(e)[:300]}
         if prev.get("ai"):
-            data["ai"] = prev["ai"]
+            data["ai"] = _no_cost(prev["ai"])
     try:
         track = score_outlooks()
         if track:
