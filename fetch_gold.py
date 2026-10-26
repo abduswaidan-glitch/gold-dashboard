@@ -1757,6 +1757,7 @@ def classify_f13(out):
 AI_HIST = os.path.join("data", "ai_history.json")
 AI_MODEL = os.environ.get("AI_MODEL", "claude-fable-5-1")
 AI_RESEARCH_LOG = os.path.join("data", "ai_research_log.json")
+OWNER_PROMPT = os.path.join("prompts", "fable.md")        # تعليمات صاحب المنصة، يعدّلها من GitHub مباشرة
 # مرحلة الاكتشاف: Fable يبحث وحده (تقرير يوميًا بعد الإغلاق الأمريكي) ونسجّل كل بحث، لنعرف ما يحتاجه كل قسم
 # قبل نقل البحث إلى نموذج أرخص. تنتهي بعد أول تقرير يطلقه COT جديد من DISCOVERY_COT_FROM فصاعدًا
 # (تقرير الجمعة)، أو عند DISCOVERY_END إن تأخر COT. يوم الجمعة لا تقرير مجدول: ننتظر COT.
@@ -2084,6 +2085,16 @@ def _outlook(rep):
     return {"bias": o["bias"], "p": p, **({"dirs": dirs} if dirs else {})}
 
 
+def _owner_prompt():
+    """نص prompts/fable.md بدون تعليقات HTML، أو فارغ إن لم يوجد الملف."""
+    try:
+        with open(OWNER_PROMPT, encoding="utf-8") as f:
+            txt = re.sub(r"<!--.*?-->", "", f.read(), flags=re.S).strip()
+    except OSError:
+        return ""
+    return txt[:8000]
+
+
 def ai_report(data, prev, new_major, releases):
     key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     prev_ai = prev.get("ai") or {}
@@ -2110,6 +2121,10 @@ def ai_report(data, prev, new_major, releases):
     ws_new = [{"type": "web_search_20260209", "name": "web_search", "max_uses": n_search}]
     ws_old = [{"type": "web_search_20250305", "name": "web_search", "max_uses": n_search}]
     system = AI_SYSTEM.replace("{max_searches}", str(n_search))
+    owner = _owner_prompt()
+    if owner:
+        system += ("\n\nStanding instructions from the platform owner (written in Arabic). Follow them within the rules and "
+                   "the JSON shape above; if they ever conflict, the rules above win:\n" + owner)
     # fallbacks "default": إن رفض النموذج الطلب يُعاد تشغيله على نموذج بديل من Anthropic تلقائيًا (ويُعرض اسمه الحقيقي)
     for tools, fallback in ((ws_new, True), (ws_old, True), (ws_new, False), (None, False)):
         try:
