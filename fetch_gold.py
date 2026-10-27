@@ -1793,6 +1793,133 @@ def _flow(series, n):
     return _t(series[-1][1] - series[-1 - n][1])
 
 
+# ---------------------------------------------------------------- hidden correlation pack (for the AI only)
+CORR_EXTRA = (("oil", "CL=F"), ("silver", "SI=F"), ("platinum", "PL=F"))
+CORR_EXPECT = {"real_yield": -1, "dollar": -1, "oil": 1, "silver": 1, "platinum": 1, "nq": 0, "vix": 0}
+
+
+def _pair_rets(g, f, kind):
+    """تغيرات يومية للذهب (٪) وللعامل على التواريخ المشتركة فقط. kind: pct للأسعار، diff للعوائد وVIX."""
+    ds = sorted(set(g) & set(f))
+    out = []
+    for a, b in zip(ds, ds[1:]):
+        if g[a] and f[a]:
+            x = (g[b] / g[a] - 1) * 100
+            y = (f[b] / f[a] - 1) * 100 if kind == "pct" else f[b] - f[a]
+            out.append((b, x, y))
+    return out
+
+
+def _corr(xs, ys):
+    n = len(xs)
+    if n < 10:
+        return None
+    mx, my = sum(xs) / n, sum(ys) / n
+    sxy = sum((a - mx) * (b - my) for a, b in zip(xs, ys))
+    sxx = sum((a - mx) ** 2 for a in xs)
+    syy = sum((b - my) ** 2 for b in ys)
+    return round(sxy / math.sqrt(sxx * syy), 2) if sxx and syy else None
+
+
+def _corr_state(c, sign, n=60):
+    if c is None:
+        return None
+    cr = 1.96 / math.sqrt(n)
+    if sign == 0:
+        return "moves_with_gold" if c >= cr else "moves_against_gold" if c <= -cr else "no_clear_link"
+    return "normal" if c * sign >= cr else "inverted" if c * sign <= -cr else "weak"
+
+
+def correlation_pack(d):
+    """ارتباطات الذهب المخفية: تُحسب لحظة كتابة التقرير وتُرسل إلى النموذج فقط، ولا تُحفظ في أي ملف منشور.
+    ١) الذهب مع محرّكاته (20/60/250 جلسة) وحالة العلاقة، ٢) القيمة العادلة: كم تفسّر العوائد الحقيقية والدولار
+    من حركة الذهب، والباقي علاوة غير مفسَّرة، ٣) اتساع المعادن: فضة + بلاتين بأوزان حسب التذبذب، ٤) نظام المخاطر."""
+    gold = dict(load(PRICES_OUT, {}).get("daily") or [])
+    m = d.get("macro") or {}
+    fac = {"real_yield": (dict(m.get("real10") or []), "diff"), "dollar": (dict(m.get("dxy") or []), "pct"),
+           "nq": (dict(m.get("nq") or []), "pct"), "vix": (dict(m.get("vix") or []), "diff")}
+    start = dt.date.today() - dt.timedelta(days=640)
+    for key, sym in CORR_EXTRA:
+        try:
+            fac[key] = (yahoo_daily(sym, start), "pct")
+        except Exception as e:
+            log(f"correlation: {sym} failed: {str(e)[:80]}")
+    if len(gold) < 300:
+        return None
+    out = {"note": ("PRIVATE context for your reasoning only. Do not name these measures, the metals index or the model, "
+                    "and do not quote these correlation or regression numbers in the report; use only the conclusions, "
+                    "in plain words (e.g. 'gold is moving on its own, not with the dollar or real yields'). "
+                    "Correlations use daily changes on shared trading days; |r| below 0.44 (20 days) or 0.25 (60 days) "
+                    "can be chance. Correlation is not causation."),
+           "drivers": {}}
+    for k, (f, kind) in fac.items():
+        r = _pair_rets(gold, f, kind)
+        if len(r) < 30:
+            continue
+        xs, ys = [a[1] for a in r], [a[2] for a in r]
+        c = {f"r{n}": _corr(xs[-n:], ys[-n:]) for n in (20, 60, 250) if len(xs) >= n}
+        c["state_60d"] = _corr_state(c.get("r60"), CORR_EXPECT[k])
+        c["normal_sign"] = {-1: "negative", 1: "positive", 0: "none (risk regime)"}[CORR_EXPECT[k]]
+        c["as_of"] = r[-1][0]
+        out["drivers"][k] = c
+    # ٢) القيمة العادلة: انحدار متحرك (120 جلسة) لعوائد الذهب على تغير العائد الحقيقي وتغير الدولار،
+    # بمعاملات اليوم السابق فقط، ثم مجموع آخر 20 جلسة: الفعلي مقابل المفسَّر
+    ry, dxy = fac["real_yield"][0], fac["dollar"][0]
+    ds = sorted(set(gold) & set(ry) & set(dxy))
+    rows = [((gold[b] / gold[a] - 1) * 100, ry[b] - ry[a], (dxy[b] / dxy[a] - 1) * 100) for a, b in zip(ds, ds[1:])]
+    rdates = ds[1:]
+    W, S = 120, 20
+    if len(rows) > W + S:
+        def betas(win):
+            n = len(win)
+            my, m1, m2 = (sum(r[i] for r in win) / n for i in range(3))
+            v1 = sum((r[1] - m1) ** 2 for r in win) / n
+            v2 = sum((r[2] - m2) ** 2 for r in win) / n
+            c12 = sum((r[1] - m1) * (r[2] - m2) for r in win) / n
+            cy1 = sum((r[0] - my) * (r[1] - m1) for r in win) / n
+            cy2 = sum((r[0] - my) * (r[2] - m2) for r in win) / n
+            vy = sum((r[0] - my) ** 2 for r in win) / n
+            den = v1 * v2 - c12 ** 2
+            if not den or not vy:
+                return None
+            b1, b2 = (cy1 * v2 - cy2 * c12) / den, (cy2 * v1 - cy1 * c12) / den
+            return b1, b2, (b1 * cy1 + b2 * cy2) / vy
+        act = expl = 0.0
+        for i in range(len(rows) - S, len(rows)):
+            bt = betas(rows[i - W:i])
+            if bt:
+                act += rows[i][0]
+                expl += bt[0] * rows[i][1] + bt[1] * rows[i][2]
+        last = betas(rows[-W:])
+        if last:
+            out["fair_value_20d"] = {"window": f"{rdates[-S]} to {rdates[-1]}", "gold_actual_pct": round(act, 2), "explained_by_real_yield_and_dollar_pct": round(expl, 2),
+                                     "unexplained_pct": round(act - expl, 2), "model_r2": round(last[2], 2),
+                                     "gold_pct_per_1pp_real_yield": round(last[0], 1), "gold_pct_per_1pct_dollar": round(last[1], 2),
+                                     "reading": ("positive unexplained = gold stronger than yields and the dollar justify "
+                                                 "(official buying, haven, Asian demand); negative = weaker (positioning "
+                                                 "liquidation, forced selling); low r2 = yields and the dollar are not driving gold now")}
+    # ٣) اتساع المعادن: فضة + بلاتين، وزن كل منهما عكس تذبذبه في آخر 60 جلسة
+    if "silver" in fac and "platinum" in fac:
+        ag, pt = fac["silver"][0], fac["platinum"][0]
+        ds = sorted(set(gold) & set(ag) & set(pt))
+        rr = [((gold[b] / gold[a] - 1) * 100, (ag[b] / ag[a] - 1) * 100, (pt[b] / pt[a] - 1) * 100) for a, b in zip(ds, ds[1:])]
+        mdates = ds[1:]
+        if len(rr) > 80:
+            sd = lambda xs: statistics.pstdev(xs) or None
+            s_ag, s_pt = sd([r[1] for r in rr[-60:]]), sd([r[2] for r in rr[-60:]])
+            if s_ag and s_pt:
+                w_ag, w_pt = (1 / s_ag) / (1 / s_ag + 1 / s_pt), (1 / s_pt) / (1 / s_ag + 1 / s_pt)
+                met = [w_ag * r[1] + w_pt * r[2] for r in rr]
+                g = [r[0] for r in rr]
+                out["metals_breadth"] = {"window_20d": f"{mdates[-20]} to {mdates[-1]}", "weights": {"silver": round(w_ag, 2), "platinum": round(w_pt, 2)},
+                                         "gold_20d_pct": round(sum(g[-20:]), 2), "metals_20d_pct": round(sum(met[-20:]), 2),
+                                         "gold_minus_metals_20d_pct": round(sum(g[-20:]) - sum(met[-20:]), 2),
+                                         "corr_60d": _corr(g[-60:], met[-60:]),
+                                         "reading": ("gold up while metals lag = gold-specific demand (central banks, haven); "
+                                                     "all up together = broad speculative metals move")}
+    return out
+
+
 def ai_digest(d):
     """ملخص مضغوط لكل أقسام المنصة يُرسل إلى Claude (أرقام فقط، دون بيانات شخصية)."""
     g = {}
@@ -1885,6 +2012,12 @@ def ai_digest(d):
     tr = trend_and_base_rates()
     if tr:
         g["gold_trend_and_base_rates"] = tr
+    try:
+        cp = correlation_pack(d)
+        if cp:
+            g["hidden_correlations"] = cp
+    except Exception as e:
+        log("correlation pack FAILED:", repr(e)[:200])
     lq = d.get("liquidation") or {}
     if lq.get("today"):
         g["forced_selling_monitor"] = {"today": lq["today"], "thresholds": lq.get("params"),
@@ -1931,6 +2064,9 @@ Rules:
   (gold falling together with equities, VIX jumping, real yields not rising, the dollar bid) or a fundamental repricing
   (real yields or the dollar driving it). Use the forced_selling_monitor and its historical base rates, plus physical demand
   (Shanghai premium, EFP, ETF flows, central banks), and state how confident you are. A base rate is not a forecast.
+- hidden_correlations is private context: use its conclusions (which drivers are moving gold now, whether a usual link
+  is broken, how much of the move yields and the dollar explain, whether other metals confirm), but never name these
+  measures or quote their numbers in the report.
 - Be factual. This is not investment advice: no buy/sell recommendations, no price targets.
 - After weighing every section and today's events, give your own analytical bias for gold over the next 14 calendar days
   and exactly three scenarios, one per direction, with estimated probabilities in whole percent that sum to 100, most likely
