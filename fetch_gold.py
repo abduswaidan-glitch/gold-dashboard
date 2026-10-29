@@ -1920,6 +1920,180 @@ def correlation_pack(d):
     return out
 
 
+# ---------------------------------------------------------------- hidden nowcasts of lagging reports (for the AI only)
+def _ols(rows):
+    """انحدار خطي صغير: rows = [(y, x1, x2, ...)] -> [a, b1, b2, ...] (حل المعادلات الطبيعية بالحذف)."""
+    k = len(rows[0])
+    X = [[1.0] + list(r[1:]) for r in rows]
+    y = [r[0] for r in rows]
+    A = [[sum(X[n][i] * X[n][j] for n in range(len(X))) for j in range(k)] + [sum(X[n][i] * y[n] for n in range(len(X)))]
+         for i in range(k)]
+    for i in range(k):
+        piv = max(range(i, k), key=lambda r: abs(A[r][i]))
+        A[i], A[piv] = A[piv], A[i]
+        if abs(A[i][i]) < 1e-12:
+            return None
+        for r in range(k):
+            if r != i:
+                f = A[r][i] / A[i][i]
+                A[r] = [a - f * b for a, b in zip(A[r], A[i])]
+    return [A[i][k] / A[i][i] for i in range(k)]
+
+
+def _p_below_zero(f, sd):
+    return 0.5 * (1 + math.erf((0 - f) / (sd * math.sqrt(2)))) if sd else None
+
+
+def nowcast_real_yield(d):
+    """العائد الحقيقي (FRED DFII10) يصدر متأخرًا 1-2 يوم عمل؛ العائد الاسمي لعشر سنوات (^TNX) لحظي ويتحرك معه
+    بارتباط ~0.9، فنقدّر قيمة اليوم من تغيّر الاسمي منذ آخر قيمة رسمية."""
+    ry = dict((d.get("macro") or {}).get("real10") or [])
+    if len(ry) < 300:
+        return None
+    tnx = yahoo_daily("%5ETNX", dt.date.today() - dt.timedelta(days=800))
+    ds = sorted(set(ry) & set(tnx))
+    ch = [(ry[b] - ry[a], tnx[b] - tnx[a]) for a, b in zip(ds, ds[1:])]
+    if len(ch) < 300:
+        return None
+    fit = _ols(ch[-500:])
+    if not fit:
+        return None
+    a, b = fit
+    hits = n = 0
+    errs = []
+    for i in range(len(ch) - 250, len(ch)):             # دقة خارج العيّنة: نموذج يُدرَّب على ما قبل كل يوم فقط
+        fw = _ols(ch[max(0, i - 500):i])
+        if not fw:
+            continue
+        f = fw[0] + fw[1] * ch[i][1]
+        errs.append(ch[i][0] - f)
+        if ch[i][0]:
+            n += 1
+            hits += (f > 0) == (ch[i][0] > 0)
+    last_off = max(ry)
+    later = sorted(x for x in tnx if x > last_off)
+    if not later:
+        return {"official": {"value": ry[last_off], "as_of": last_off}, "nowcast": None,
+                "note": "no newer nominal-yield data than the official real yield"}
+    base_t = tnx.get(last_off) or tnx[max(x for x in tnx if x <= last_off)]
+    days = len(later)
+    est = ry[last_off] + days * a + b * (tnx[later[-1]] - base_t)
+    sd = statistics.pstdev(errs) if errs else None
+    return {"official": {"value": ry[last_off], "as_of": last_off},
+            "nowcast": {"value": round(est, 3), "as_of": later[-1], "sessions_ahead": days,
+                        "change_since_official_bp": round((est - ry[last_off]) * 100, 1),
+                        "error_1sd_bp": round(sd * 100 * math.sqrt(days), 1) if sd else None},
+            "method": "real-yield change estimated from the live 10-year nominal yield (^TNX)",
+            "track_record_250d": {"direction_hit_rate": round(hits / n, 2) if n else None,
+                                  "daily_error_1sd_bp": round(sd * 100, 1) if sd else None}}
+
+
+def nowcast_cot(d):
+    """تقدير تقرير COT القادم قبل صدوره: تغيّر صافي Long لدى Managed Money من ثلاثاء إلى ثلاثاء يُقدَّر من
+    حركة السعر وتغيّر Open Interest. التدريب على 3 سنوات من الأسابيع، والتطبيق على CME اليومي منذ آخر ثلاثاء."""
+    daily = load(PRICES_OUT, {}).get("daily") or []
+    mm = (d.get("cot_disagg") or {}).get("mm") or []
+    oi_w = {r[0]: r[4] for r in d.get("noncomm") or []}
+    od = d.get("oi_daily") or []
+    if len(mm) < 300 or not daily:
+        return None
+    px = lambda x: _price_at(daily, x)
+    rows = []
+    for a, b in zip(mm, mm[1:]):
+        if a[0] in oi_w and b[0] in oi_w and px(a[0]) and px(b[0]):
+            rows.append(((b[1] - b[2]) - (a[1] - a[2]), (px(b[0]) / px(a[0]) - 1) * 100, oi_w[b[0]] - oi_w[a[0]]))
+    W = 156
+    if len(rows) < W + 60:
+        return None
+    hits = n = 0
+    errs = []
+    for i in range(len(rows) - 104, len(rows)):          # آخر سنتين، خارج العيّنة
+        fw = _ols(rows[i - W:i])
+        if not fw:
+            continue
+        f = fw[0] + fw[1] * rows[i][1] + fw[2] * rows[i][2]
+        errs.append(rows[i][0] - f)
+        n += 1
+        hits += (f > 0) == (rows[i][0] > 0)
+    fit = _ols(rows[-W:])
+    sd = statistics.pstdev(errs) if errs else None
+    t0 = mm[-1][0]
+    t1 = (dt.date.fromisoformat(t0) + dt.timedelta(days=7)).isoformat()
+    later = [r for r in od if t0 < r[0] <= t1]
+    base = next((r for r in od if r[0] == t0), None)
+    last_px_day = max((r[0] for r in daily if t0 < r[0] <= t1), default=None)
+    if not fit or not last_px_day:
+        return {"last_cot_week_ending": t0, "nowcast": None, "note": "no price data since the last COT week yet"}
+    dp = (px(last_px_day) / px(t0) - 1) * 100
+    doi = (later[-1][1] - base[1]) if (later and base) else None
+    if doi is None:                                       # بدون OI يومي: نموذج السعر وحده
+        fit = _ols([(r[0], r[1]) for r in rows[-W:]])
+        f = fit[0] + fit[1] * dp
+    else:
+        f = fit[0] + fit[1] * dp + fit[2] * doi
+    net0 = mm[-1][1] - mm[-1][2]
+    p_down = _p_below_zero(f, sd)
+    return {"last_cot_week_ending": t0, "next_cot_week_ending": t1, "managed_money_net_last": net0,
+            "inputs": {"price_change_pct": round(dp, 2), "price_through": last_px_day,
+                       "cme_oi_change": doi, "oi_through": later[-1][0] if later else None},
+            "nowcast": {"net_change_contracts": int(round(f)), "net_estimate": int(round(net0 + f)),
+                        "error_1sd_contracts": int(round(sd)) if sd else None,
+                        "p_net_long_reduced": round(p_down, 2) if p_down is not None else None,
+                        "covers_full_week": bool(last_px_day >= t1)},
+            "method": "Managed Money weekly net change regressed on gold price change and open-interest change (3 years)",
+            "track_record_104w": {"direction_hit_rate": round(hits / n, 2) if n else None,
+                                  "error_1sd_contracts": int(round(sd)) if sd else None}}
+
+
+def nowcast_central_banks(d):
+    """بيانات IMF تتأخر 2-3 أشهر ولا تُستنتج من الأسعار (اختبرناها: ارتباط 0.15)، فنعطي المعدل التاريخي للأشهر
+    الناقصة، ونطلب من النموذج البحث عن المعلنين الأوائل."""
+    cb = d.get("central_banks") or {}
+    s = cb.get("series") or []
+    if len(s) < 24:
+        return None
+    ch = [(b[1] - a[1]) / 1000 for a, b in zip(s, s[1:])]
+    last = s[-1][0][:7]
+    y, m = map(int, last.split("-"))
+    today = dt.date.today()
+    missing = []
+    while (y, m) < (today.year, today.month):
+        m += 1
+        if m > 12:
+            y, m = y + 1, 1
+        missing.append(f"{y}-{m:02d}")
+    pos = sum(1 for c in ch if c > 0) / len(ch)
+    return {"last_official_month": last, "months_not_yet_reported": missing,
+            "base_rate_since": s[0][0][:7],
+            "base_rate": {"share_of_months_net_buying": round(pos, 2), "mean_t_per_month": round(statistics.mean(ch), 1),
+                          "sd_t": round(statistics.pstdev(ch), 1), "last_12_months_t": round(sum(ch[-12:]), 1)},
+            "how_to_fill": ("search the early reporters for the missing months: People's Bank of China monthly reserve data "
+                            "(around the 7th), National Bank of Poland, Central Bank of Turkey (weekly), Reserve Bank of India "
+                            "(weekly statistical supplement), Czech National Bank, and the World Gold Council's monthly "
+                            "central-bank statistics; compare what you find with the base rate")}
+
+
+def nowcast_pack(d):
+    """التقديرات المبكرة للتقارير المتأخرة: تُحسب لحظة كتابة التقرير وتُرسل إلى النموذج فقط، ولا تُحفظ في أي ملف.
+    دقة كل تقدير تُعاد حسابها في كل تقرير على أحدث البيانات (خارج العيّنة)، فتتصحح الثقة بها تلقائيًا."""
+    out = {"note": ("PRIVATE estimates of reports that are not out yet. Treat them as estimates with the stated error, "
+                    "never as official numbers; when the official figure exists, it wins. Do not name this model or quote "
+                    "its estimates, probabilities or accuracy in the report; say it in plain words (e.g. 'early signs point "
+                    "to more Managed Money selling in Friday's COT report'). Facts you find by search can be cited normally.")}
+    for key, fn in (("real_yield", nowcast_real_yield), ("cot_managed_money", nowcast_cot),
+                    ("central_banks", nowcast_central_banks)):
+        try:
+            r = fn(d)
+            if r:
+                out[key] = r
+        except Exception as e:
+            log(f"nowcast {key} FAILED:", repr(e)[:160])
+    cpi = ((d.get("macro") or {}).get("fed") or {}).get("cpi")
+    out["cpi"] = {"last_official": cpi, "how_to_fill": ("search the Federal Reserve Bank of Cleveland 'Inflation Nowcasting' "
+                                                         "estimate for the current and next month's CPI and core CPI")}
+    return out
+
+
 def ai_digest(d):
     """ملخص مضغوط لكل أقسام المنصة يُرسل إلى Claude (أرقام فقط، دون بيانات شخصية)."""
     g = {}
@@ -2018,6 +2192,10 @@ def ai_digest(d):
             g["hidden_correlations"] = cp
     except Exception as e:
         log("correlation pack FAILED:", repr(e)[:200])
+    try:
+        g["hidden_nowcasts"] = nowcast_pack(d)
+    except Exception as e:
+        log("nowcast pack FAILED:", repr(e)[:200])
     lq = d.get("liquidation") or {}
     if lq.get("today"):
         g["forced_selling_monitor"] = {"today": lq["today"], "thresholds": lq.get("params"),
@@ -2064,6 +2242,10 @@ Rules:
   (gold falling together with equities, VIX jumping, real yields not rising, the dollar bid) or a fundamental repricing
   (real yields or the dollar driving it). Use the forced_selling_monitor and its historical base rates, plus physical demand
   (Shanghai premium, EFP, ETF flows, central banks), and state how confident you are. A base rate is not a forecast.
+- hidden_nowcasts is private context: early estimates of lagging reports (the real yield before FRED publishes it, the
+  next COT report, central-bank months the IMF has not reported, CPI). Use them to judge what is probably happening now,
+  weighted by their stated error and track record; fill the central-bank and CPI gaps by searching the sources they name.
+  Never present an estimate as an official figure, and never name these models or quote their numbers.
 - hidden_correlations is private context: use its conclusions (which drivers are moving gold now, whether a usual link
   is broken, how much of the move yields and the dollar explain, whether other metals confirm), but never name these
   measures or quote their numbers in the report.
