@@ -2073,6 +2073,79 @@ def nowcast_central_banks(d):
                             "central-bank statistics; compare what you find with the base rate")}
 
 
+OZ_PER_TONNE = 32150.7
+
+
+def nowcast_wgc_etf(d):
+    """تقرير WGC الشهري لتدفقات صناديق الذهب العالمية يصدر بعد نهاية الشهر بأيام. الصناديق الأمريكية اليومية
+    (GLD + GLDM) تتبعه بارتباط ~0.9 (اختبرناه على 12 شهرًا)، فنقدّر الشهر الذي لم يصدر بعد من تدفقها حتى الآن."""
+    w = [x for x in d.get("wgc_etf") or [] if x.get("data_month")]
+    gld, gldm = (d.get("etf") or {}).get("GLD") or [], (d.get("etf2") or {}).get("GLDM") or []
+    daily = load(PRICES_OUT, {}).get("daily") or []
+    if len(w) < 8 or not gld or not gldm or not daily:
+        return None
+
+    def last_upto(ser, month):
+        v = [r for r in ser if r[0][:7] <= month]
+        return v[-1] if v else None
+
+    def prev_month(m):
+        y, mo = map(int, m.split("-"))
+        return f"{y - 1}-12" if mo == 1 else f"{y}-{mo - 1:02d}"
+
+    def us_flow(m):
+        a, b = last_upto(gld, prev_month(m)), last_upto(gld, m)
+        c, e = last_upto(gldm, prev_month(m)), last_upto(gldm, m)
+        px = [r[1] for r in daily if r[0][:7] == m]
+        if not (a and b and c and e and px) or b[0][:7] != m:
+            return None, None, None
+        t = ((b[1] + e[1]) - (a[1] + c[1])) / 1000
+        return t, t * statistics.mean(px) * OZ_PER_TONNE / 1e9, max(b[0], e[0])
+
+    pts = {"global": [], "north_america": []}
+    for x in w:
+        u = us_flow(x["data_month"])
+        if u[0] is None:
+            continue
+        if x.get("global_flow_usd_bn") is not None:
+            pts["global"].append((x["global_flow_usd_bn"], u[1]))
+        na_ = ((x.get("regions") or {}).get("north_america") or {}).get("flow_usd_bn")
+        if na_ is not None:
+            pts["north_america"].append((na_, u[1]))
+    fits = {}
+    for k, rows in pts.items():
+        if len(rows) >= 8:
+            f = _ols(rows)
+            if f:
+                err = statistics.pstdev([y - (f[0] + f[1] * x) for y, x in rows])
+                hits = sum((y > 0) == (f[0] + f[1] * x > 0) for y, x in rows)
+                fits[k] = (f, err, hits, len(rows))
+    if "global" not in fits:
+        return None
+    last_m = max(x["data_month"] for x in w)
+    today_m = dt.date.today().isoformat()[:7]
+    est, m = [], last_m
+    while m < today_m:
+        y, mo = map(int, m.split("-"))
+        m = f"{y + 1}-01" if mo == 12 else f"{y}-{mo + 1:02d}"
+        u = us_flow(m)
+        if u[0] is None:
+            continue
+        row = {"month": m, "us_funds_through": u[2], "month_complete": m < today_m,
+               "us_gld_gldm_flow_t": round(u[0], 1), "us_gld_gldm_flow_usd_bn": round(u[1], 1)}
+        for k, (f, err, hits, n) in fits.items():
+            v = f[0] + f[1] * u[1]
+            row[f"{k}_flow_usd_bn_estimate"] = round(v, 1)
+            row[f"{k}_error_1sd_usd_bn"] = round(err, 1)
+            row[f"{k}_p_outflow"] = round(_p_below_zero(v, err), 2) if err else None
+        est.append(row)
+    return {"last_wgc_month": last_m, "estimates": est,
+            "method": "WGC monthly flow regressed on same-month US GLD+GLDM flow in US$",
+            "track_record": {k: {"months": n, "direction_agreement": f"{hits}/{n}", "error_1sd_usd_bn": round(err, 1)}
+                             for k, (f, err, hits, n) in fits.items()},
+            "caveat": "short sample (about a year); a month in progress is only partly covered"}
+
+
 def nowcast_pack(d):
     """التقديرات المبكرة للتقارير المتأخرة: تُحسب لحظة كتابة التقرير وتُرسل إلى النموذج فقط، ولا تُحفظ في أي ملف.
     دقة كل تقدير تُعاد حسابها في كل تقرير على أحدث البيانات (خارج العيّنة)، فتتصحح الثقة بها تلقائيًا."""
@@ -2081,7 +2154,7 @@ def nowcast_pack(d):
                     "its estimates, probabilities or accuracy in the report; say it in plain words (e.g. 'early signs point "
                     "to more Managed Money selling in Friday's COT report'). Facts you find by search can be cited normally.")}
     for key, fn in (("real_yield", nowcast_real_yield), ("cot_managed_money", nowcast_cot),
-                    ("central_banks", nowcast_central_banks)):
+                    ("central_banks", nowcast_central_banks), ("wgc_global_etf_flows", nowcast_wgc_etf)):
         try:
             r = fn(d)
             if r:
@@ -2243,7 +2316,7 @@ Rules:
   (real yields or the dollar driving it). Use the forced_selling_monitor and its historical base rates, plus physical demand
   (Shanghai premium, EFP, ETF flows, central banks), and state how confident you are. A base rate is not a forecast.
 - hidden_nowcasts is private context: early estimates of lagging reports (the real yield before FRED publishes it, the
-  next COT report, central-bank months the IMF has not reported, CPI). Use them to judge what is probably happening now,
+  next COT report, central-bank months the IMF has not reported, the next WGC global ETF flow figure, CPI). Use them to judge what is probably happening now,
   weighted by their stated error and track record; fill the central-bank and CPI gaps by searching the sources they name.
   Never present an estimate as an official figure, and never name these models or quote their numbers.
 - hidden_correlations is private context: use its conclusions (which drivers are moving gold now, whether a usual link
