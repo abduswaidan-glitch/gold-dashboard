@@ -2315,6 +2315,10 @@ Rules:
   (gold falling together with equities, VIX jumping, real yields not rising, the dollar bid) or a fundamental repricing
   (real yields or the dollar driving it). Use the forced_selling_monitor and its historical base rates, plus physical demand
   (Shanghai premium, EFP, ETF flows, central banks), and state how confident you are. A base rate is not a forecast.
+- research_memory lists what changed in the platform data since the previous report, what that report already found by
+  search, and when the next releases are due. Do not re-search known facts unless a newer release is due or you have a
+  concrete reason to doubt them, and never search for numbers the platform data already gives (gold price, yields, the
+  dollar, ETF holdings, COT, open interest). Spend your searches on what is new.
 - hidden_nowcasts is private context: early estimates of lagging reports (the real yield before FRED publishes it, the
   next COT report, central-bank months the IMF has not reported, the next WGC global ETF flow figure, CPI). Use them to judge what is probably happening now,
   weighted by their stated error and track record; fill the central-bank and CPI gaps by searching the sources they name.
@@ -2438,8 +2442,10 @@ def _no_cost(ai):
 def _cost(model, u):
     pin, pout = next(((i, o) for pre, i, o in PRICES_PER_MTOK if str(model).startswith(pre)), (10, 50))
     searches = u.get("web_search_requests", (u.get("server_tool_use") or {}).get("web_search_requests", 0)) or 0
+    m = str(model)
+    read = 0.025 if m.startswith(("claude-fable-5-1", "claude-mythos-5-1")) else 0.05 if m.startswith("claude-opus-5-5") else 0.1
     return (u.get("input_tokens", 0) * pin + (u.get("cache_creation_input_tokens") or 0) * pin * 1.25
-            + (u.get("cache_read_input_tokens") or 0) * pin * 0.1 + u.get("output_tokens", 0) * pout) / 1e6 + searches * 0.01
+            + (u.get("cache_read_input_tokens") or 0) * pin * read + u.get("output_tokens", 0) * pout) / 1e6 + searches * 0.01
 
 
 def _outlook(rep):
@@ -2486,6 +2492,37 @@ def _owner_prompt():
     return txt[:8000]
 
 
+def research_memory(prev_ai, releases, now):
+    """ما يعرفه النموذج من التقرير السابق، حتى لا يصرف البحث على إعادة اكتشافه: ما جدّ في بيانات المنصة منذ آخر
+    تقرير، وما وجده بالبحث آخر مرة، ومواعيد الإصدارات القادمة. توجيه لا منع: يبقى له أن يبحث إن كان لديه سبب."""
+    last = (prev_ai or {}).get("latest") or {}
+    since = last.get("generated_utc")
+    if not since:
+        return None
+    new_data = sorted({k for k, rel in (releases or {}).items() for d, seen in (rel or {}).items() if seen and seen > since})
+    rlog = load(AI_RESEARCH_LOG, [])
+    found = []
+    if rlog and rlog[-1].get("generated_utc") == since:
+        found = [{k: m.get(k) for k in ("section", "need", "found", "sources")} for m in rlog[-1].get("research_map") or []]
+    events = [{"title": e.get("title"), "source": e.get("source")} for e in (last.get("en") or {}).get("events") or []]
+    nm = (now.replace(day=1) + dt.timedelta(days=32)).replace(day=1)
+    fri = now.date() + dt.timedelta(days=(4 - now.weekday()) % 7)
+    return {"previous_report_utc": since,
+            "platform_data_new_since_then": new_data,
+            "found_by_search_last_time": found,
+            "events_in_last_report": events,
+            "next_releases": {
+                "COT": f"Friday {fri.isoformat()}, 15:30 New York time",
+                "PBoC monthly reserves": f"around {nm.date().replace(day=7).isoformat()}",
+                "WGC monthly ETF flows": f"around {nm.date().replace(day=5).isoformat()} to {nm.date().replace(day=8).isoformat()}",
+                "US CPI": "mid-month (check the BLS schedule only if it matters today)",
+                "IMF central-bank data": "monthly, two to three months behind"},
+            "rule": ("These facts were already found or are already in the platform data. Do not spend searches finding them "
+                     "again unless a newer release is due, the release date has passed, or you have a concrete reason to doubt "
+                     "them; you may still cite them with their date and source. Spend searches on what is new since the "
+                     "previous report.")}
+
+
 def ai_report(data, prev, new_major, releases):
     key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     prev_ai = prev.get("ai") or {}
@@ -2502,6 +2539,12 @@ def ai_report(data, prev, new_major, releases):
     digest_obj = ai_digest(data)
     digest_obj["new_reports_triggering_this_update"] = {k: {"data_date": v, "first_seen_utc": (releases.get(k) or {}).get(v)}
                                                         for k, v in (new_major or {}).items() if k != "discovery"}
+    try:
+        mem = research_memory(prev_ai, releases, now)
+        if mem:
+            digest_obj["research_memory"] = mem
+    except Exception as e:
+        log("research memory FAILED:", repr(e)[:160])
     digest = json.dumps(digest_obj, ensure_ascii=False, separators=(",", ":"))
     user = (f"Date (UTC): {today}.\nPlatform data (JSON; t = tonnes, contracts = COMEX GC 100-oz contracts):\n{digest}\n\n"
             "Search for today's key gold-related events, then return the JSON report.")
@@ -2517,11 +2560,20 @@ def ai_report(data, prev, new_major, releases):
         system += ("\n\nStanding instructions from the platform owner (written in Arabic). Follow them within the rules and "
                    "the JSON shape above; if they ever conflict, the rules above win:\n" + owner)
     # fallbacks "default": إن رفض النموذج الطلب يُعاد تشغيله على نموذج بديل من Anthropic تلقائيًا (ويُعرض اسمه الحقيقي)
-    for tools, fallback in ((ws_new, True), (ws_old, True), (ws_new, False), (None, False)):
+    use_cache = True
+    attempts = [(ws_new, True), (ws_old, True), (ws_new, False), (None, False)]
+    while attempts:
+        tools, fallback = attempts[0]
         try:
             # Fable: التفكير دائمًا مفعّل ويُحسب من max_tokens، فنعطيه مساحة أكبر؛ العمق يُضبط بـ effort فقط
-            payload = {"model": AI_MODEL, "max_tokens": 64000, "system": system, "messages": list(messages),
-                       "output_config": {"effort": "high"}}
+            # التخزين المؤقت (5 دقائق): كل دورة داخلية يعيد فيها النموذج قراءة السياق تُحسب قراءةً من الذاكرة
+            # بجزء صغير من السعر بدل السعر الكامل؛ المحتوى الذي يراه النموذج لا يتغير
+            payload = {"model": AI_MODEL, "max_tokens": 64000, "messages": list(messages), "output_config": {"effort": "high"}}
+            if use_cache:
+                payload["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+                payload["cache_control"] = {"type": "ephemeral"}
+            else:
+                payload["system"] = system
             if tools:
                 payload["tools"] = tools
             if fallback:
@@ -2541,8 +2593,13 @@ def ai_report(data, prev, new_major, releases):
         except ClaudeHTTPError as e:
             if not 400 <= e.status < 500 or e.status == 429:
                 raise                                # خطأ خادم أو ضغط: نعيد المحاولة في التشغيل التالي بدل تكرار طلب مكلف
-            log("AI request rejected" + (" (with web search)" if tools else "") + (" (with fallbacks)" if fallback else "") + ":", str(e)[:200])
             resp = None
+            if use_cache and "cach" in str(e).lower():
+                use_cache = False                    # التخزين المؤقت مرفوض: نعيد نفس المحاولة بدونه
+                log("AI request: caching rejected, retrying without it:", str(e)[:160])
+                continue
+            log("AI request rejected" + (" (with web search)" if tools else "") + (" (with fallbacks)" if fallback else "") + ":", str(e)[:200])
+            attempts.pop(0)
     if not resp:
         raise RuntimeError("Claude API: all attempts failed")
     if resp.get("stop_reason") == "refusal":
@@ -2600,6 +2657,7 @@ def ai_report(data, prev, new_major, releases):
                  "queries": queries, "results": sources[:40], "research_map": rep.get("research_map") or []})
     save(AI_RESEARCH_LOG, rlog[-30:])
     log(f"AI report ok: {today}, model {latest['model']}, {u['calls']} calls, {u['input_tokens']} in / {u['output_tokens']} out tokens, "
+        f"cache {u['cache_creation_input_tokens']} written / {u['cache_read_input_tokens']} read{'' if use_cache else ' (caching off)'}, "
         f"{u['web_search_requests']} searches, est. ${cost:.3f}")
     latest["trigger"] = list((new_major or {}).keys()) or ["manual"]
     hist[-1]["trigger"] = latest["trigger"]
