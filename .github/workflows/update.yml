@@ -2,7 +2,7 @@ name: تحديث بيانات الذهب
 
 on:
   schedule:
-    - cron: "7,37 * * * *"    # كل نصف ساعة: GitHub يؤخر أو يُسقط بعض التشغيلات المجدولة، فموعدان في الساعة يقلّلان الفجوات
+    - cron: "7,37 * * * *"    # GitHub يشغّل منها 4-7 فقط يوميًا، وكل تشغيل يبقى حيًا ~5.5 ساعات ويحدّث كل 30 دقيقة (run_loop.sh)
   workflow_dispatch:          # زر التشغيل اليدوي من تبويب Actions
     inputs:
       ai_force:
@@ -11,6 +11,18 @@ on:
         default: "false"
       full_refresh:
         description: "افحص كل المصادر الآن حتى لو لم يحن موعدها (true / false)"
+        required: false
+        default: "false"
+      loop_minutes:
+        description: "أبقِ التشغيل حيًا هذه الدقائق بعد التحديث (325 = يستمر آليًا، 0 = تحديث واحد)"
+        required: false
+        default: "325"
+      dry_run:
+        description: "اختبار: لا تحفظ شيئًا ولا تكتب تقريرًا ذكيًا (true / false)"
+        required: false
+        default: "false"
+      ignore_weekend:
+        description: "اختبار: شغّل حتى في عطلة نهاية الأسبوع (true / false)"
         required: false
         default: "false"
 
@@ -25,7 +37,7 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v4
 
@@ -36,21 +48,18 @@ jobs:
       - name: تثبيت المكتبات
         run: pip install requests xlrd openpyxl pdfplumber curl_cffi
 
-      - name: جلب البيانات
+      - name: جلب البيانات وحفظها (تشغيل حي)
         env:
           SEC_CONTACT: ${{ secrets.SEC_CONTACT }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ github.event.inputs.dry_run != 'true' && secrets.ANTHROPIC_API_KEY || '' }}
           AI_FORCE: ${{ github.event.inputs.ai_force }}
           FULL_REFRESH: ${{ github.event.inputs.full_refresh }}
-        run: python fetch_gold.py
-
-      - name: حفظ البيانات في المستودع
-        run: |
-          git config user.name "gold-data-bot"
-          git config user.email "gold-data-bot@users.noreply.github.com"
-          git add -A
-          git diff --cached --quiet || git commit -m "تحديث بيانات الذهب $(date -u +%F)"
-          git push
+          LOOP_MINUTES: ${{ github.event_name == 'schedule' && '325' || github.event.inputs.loop_minutes || '325' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          IGNORE_WEEKEND: ${{ github.event.inputs.ignore_weekend || 'false' }}
+          EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: cp run_loop.sh "$RUNNER_TEMP/loop.sh" && bash "$RUNNER_TEMP/loop.sh"   # نسخة: السكربت يسحب الكود أثناء عمله
 
       - name: إبقاء التحديث التلقائي مفعّلًا
         env:

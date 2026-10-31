@@ -394,6 +394,25 @@ tr.base td{background:var(--surface-2);color:var(--muted)}
 .kpis{grid-template-columns:repeat(6,minmax(0,1fr))}
 @media (max-width:1100px){.kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (max-width:700px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.kpis .kpi:last-child{grid-column:auto}}
+/* weekend: the platform pauses Saturday-Sunday (Vienna); a glass panel says so, the page stays one tap away */
+.wk{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;padding:24px 16px calc(24px + env(safe-area-inset-bottom,0px));
+  background:color-mix(in srgb,var(--bg) 45%,transparent);-webkit-backdrop-filter:blur(10px) saturate(1.1);backdrop-filter:blur(10px) saturate(1.1)}
+.wk[hidden]{display:none}
+.wk-card{width:min(440px,100%);text-align:center;padding:30px 24px 26px;border-radius:22px;border:1px solid color-mix(in srgb,var(--ink) 16%,transparent);
+  background:color-mix(in srgb,var(--surface) 55%,transparent);box-shadow:0 18px 50px rgba(0,0,0,.35)}
+.wk-emoji{position:relative;display:inline-block;font-size:76px;line-height:1;margin-bottom:12px}
+.wk-emoji span{position:absolute;inset-inline-end:-10px;bottom:-4px;font-size:36px}
+.wk-card h2{margin:0 0 8px;font-size:22px;line-height:1.45}
+.wk-card p{margin:0;color:var(--muted);font-size:16px;line-height:1.7}
+.wk-card small{display:block;margin-top:12px;color:var(--muted);font-size:12.5px}
+.wk-lang{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;margin-top:16px}
+.wk-lang button{border:1px solid var(--rule);background:transparent;color:var(--ink);border-radius:99px;padding:4px 11px;font:inherit;font-size:12.5px;cursor:pointer}
+.wk-lang button[aria-pressed="true"]{background:var(--gold-soft);border-color:var(--gold);color:var(--gold-hi)}
+.wk-open{margin-top:auto;min-width:min(320px,100%);padding:14px 26px;border-radius:99px;border:0;cursor:pointer;font:inherit;font-size:16px;font-weight:700;
+  background:var(--gold);color:var(--gold-ink);box-shadow:0 6px 20px rgba(0,0,0,.3)}
+.wk-open:focus-visible,.wk-lang button:focus-visible{outline:3px solid var(--gold-hi);outline-offset:3px}
+.wk-top{margin-top:auto}
+@media (min-width:700px){.wk-card{padding:38px 34px 30px}.wk-card h2{font-size:25px}.wk-emoji{font-size:92px}}
 </style>
 </head>
 <body>
@@ -409,6 +428,7 @@ tr.base td{background:var(--surface-2);color:var(--muted)}
 <footer class="wrap" id="foot"></footer>
 <button class="fab" id="fab" type="button"></button>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<div class="wk" id="weekend" role="dialog" aria-modal="true" aria-labelledby="wk-title" hidden></div>
 <script>
 'use strict';
 /* ================= language ================= */
@@ -2119,6 +2139,40 @@ function markWide(){
 let wideT; addEventListener('resize', () => { clearTimeout(wideT); wideT = setTimeout(markWide, 200); });
 document.addEventListener('toggle', () => markWide(), true);
 
+/* weekend panel: Saturday and Sunday by Vienna time; ?weekend=1 previews it, "Open the page" hides it for this visit */
+const isWeekend = () => {
+  const q = new URLSearchParams(location.search).get('weekend');
+  if (q === '1') return true;
+  if (q === '0') return false;
+  const d = new Intl.DateTimeFormat('en-US', {weekday: 'short', timeZone: 'Europe/Vienna'}).format(new Date());
+  return d === 'Sat' || d === 'Sun';
+};
+let weekendOpen = false;
+try { weekendOpen = sessionStorage.getItem('gold-weekend-open') === '1'; } catch (e) {}
+function renderWeekend(){
+  const w = document.getElementById('weekend');
+  if (!isWeekend() || weekendOpen){ w.hidden = true; document.body.style.overflow = ''; return; }
+  w.innerHTML = `<div class="wk-top"></div><div class="wk-card">
+      <div class="wk-emoji" aria-hidden="true">🏖️<span>😎</span></div>
+      <h2 id="wk-title">${L('المنصة مغلقة يومي السبت والأحد', 'The platform is closed on Saturday and Sunday', 'La piattaforma è chiusa il sabato e la domenica', 'La plataforma está cerrada los sábados y domingos')}</h2>
+      <p>${L('استرخِ واستمتع بحياتك', 'Relax and enjoy your life', 'Rilassati e goditi la vita', 'Relájate y disfruta de la vida')}</p>
+      <small>${L('الأسواق مغلقة، والبيانات المعروضة حتى إغلاق الجمعة. نعود صباح الإثنين.', 'Markets are closed; the data shown runs to Friday’s close. Back on Monday morning.', 'I mercati sono chiusi; i dati mostrati arrivano alla chiusura di venerdì. Torniamo lunedì mattina.', 'Los mercados están cerrados; los datos mostrados llegan al cierre del viernes. Volvemos el lunes por la mañana.')}</small>
+      <div class="wk-lang" role="group" aria-label="Language / اللغة">${[['ar', 'العربية'], ['en', 'English'], ['it', 'Italiano'], ['es', 'Español']].map(([k, t]) =>
+        `<button type="button" data-act="lang" data-v="${k}" lang="${k}" aria-pressed="${state.lang === k}">${t}</button>`).join('')}</div>
+    </div>
+    <button class="wk-open" type="button" data-act="weekend-open">${L('فتح الصفحة', 'Open the page', 'Apri la pagina', 'Abrir la página')}</button>`;
+  w.hidden = false;
+  document.body.style.overflow = 'hidden';
+  w.querySelector('.wk-open').focus({preventScroll: true});
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !document.getElementById('weekend').hidden){
+    weekendOpen = true;
+    try { sessionStorage.setItem('gold-weekend-open', '1'); } catch (err) {}
+    renderWeekend();
+  }
+});
+
 function applyLang(){
   document.documentElement.lang = state.lang;
   document.documentElement.dir = isAr() ? 'rtl' : 'ltr';
@@ -2128,6 +2182,7 @@ function applyLang(){
   renderFab();
   renderMast();
   render();
+  renderWeekend();
 }
 
 const rerender = () => { const y = window.scrollY; render(); window.scrollTo(0, y); };
@@ -2140,6 +2195,12 @@ document.addEventListener('click', e => {
     state.theme = state.theme === 'light' ? 'dark' : 'light';
     try { localStorage.setItem('gold-theme', state.theme); } catch (err) {}
     applyTheme(); renderTop();
+    return;
+  }
+  if (act === 'weekend-open'){
+    weekendOpen = true;
+    try { sessionStorage.setItem('gold-weekend-open', '1'); } catch (e) {}
+    renderWeekend();
     return;
   }
   if (act === 'lang'){

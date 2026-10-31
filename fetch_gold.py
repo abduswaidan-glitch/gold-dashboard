@@ -23,6 +23,7 @@ import os
 import re
 import statistics
 import xml.etree.ElementTree as ET
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -1766,6 +1767,10 @@ DISCOVERY_END = "2026-11-03"
 DISCOVERY_HOUR_UTC = 21
 DISCOVERY_SEARCHES = 8
 AI_RETRY_HOURS = 6
+# التقرير اليومي: أيام العمل الساعة 13:30 بتوقيت فيينا، حين تكون بيانات الأمس كلها قد وصلت (OI، ETF، COMEX...)
+# وقبل افتتاح نيويورك بساعتين. التقارير الكبرى (COT وغيرها) لا تطلق تقريرًا فوريًا: تُجمع وتظهر في التقرير التالي.
+VIENNA = ZoneInfo("Europe/Vienna")
+DAILY_REPORT_AT = (13, 30)
 
 
 class _AIWait(Exception):
@@ -2538,7 +2543,7 @@ def ai_report(data, prev, new_major, releases):
     log("AI report triggered by:", ", ".join(new_major) if new_major else "manual request")
     digest_obj = ai_digest(data)
     digest_obj["new_reports_triggering_this_update"] = {k: {"data_date": v, "first_seen_utc": (releases.get(k) or {}).get(v)}
-                                                        for k, v in (new_major or {}).items() if k != "discovery"}
+                                                        for k, v in (new_major or {}).items() if k not in ("discovery", "daily")}
     try:
         mem = research_memory(prev_ai, releases, now)
         if mem:
@@ -3108,9 +3113,19 @@ def main():
         new_major = {"discovery": today_s}
     elif active and new_major:
         new_major = {**new_major, "discovery": now_d.date().isoformat()}   # كل تقرير في المرحلة يبحث بحرية ويُسجَّل
+    vn = now_d.astimezone(VIENNA)
+    last_utc = ((prev.get("ai") or {}).get("latest") or {}).get("generated_utc")
+    last_vn = dt.datetime.fromisoformat(last_utc).astimezone(VIENNA).date() if last_utc else None
+    due_daily = vn.weekday() < 5 and (vn.hour, vn.minute) >= DAILY_REPORT_AT and last_vn != vn.date()
+    if due_daily and not active:
+        new_major = {**new_major, "daily": vn.date().isoformat()}
     fail = state.get("ai_fail") or {}
     wait_until = fail.get("retry_after")
     try:
+        if not active and not forced and not due_daily:
+            if new_major:
+                log("AI report: held for the next daily report (13:30 Vienna):", ", ".join(new_major))
+            raise _AIWait()
         if new_major and wait_until and now_d.isoformat() < wait_until:
             # بعد فشل طلب مكلف لا نعيده كل نصف ساعة: ننتظر AI_RETRY_HOURS ثم نحاول مرة أخرى
             log(f"AI report: last attempt failed; next try after {wait_until}")
