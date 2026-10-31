@@ -2427,6 +2427,15 @@ def ai_digest(d):
         g["hidden_nowcasts"] = nowcast_pack(d)
     except Exception as e:
         log("nowcast pack FAILED:", repr(e)[:200])
+    df = d.get("direction_filter") or {}
+    if df.get("bands"):
+        g["statistical_direction_filter"] = {
+            **{k: df.get(k) for k in ("asof", "close", "day_ret", "z", "ma200", "ma50", "mom120", "regime", "signal",
+                                      "sigma_pct", "sigma_usd", "bands", "levels", "gex", "invalidation")},
+            "history": df.get("stats"), "live_scoring": {k: v for k, v in (df.get("track") or {}).items() if k != "rows"},
+            "note": ("tested on gold since 2008: only signal=long_edge (down session while above MA200, next session up ~57%) "
+                     "held in every era; signal=none means no statistical edge; bands = next-close range from 20-session "
+                     "volatility with historical coverage; the GEX regime is not historically tested yet")}
     lq = d.get("liquidation") or {}
     if lq.get("today"):
         g["forced_selling_monitor"] = {"today": lq["today"], "thresholds": lq.get("params"),
@@ -2486,6 +2495,9 @@ Rules:
 - hidden_correlations is private context: use its conclusions (which drivers are moving gold now, whether a usual link
   is broken, how much of the move yields and the dollar explain, whether other metals confirm), but never name these
   measures or quote their numbers in the report.
+- statistical_direction_filter is shown publicly under your bias: a trend regime, a tested edge (or none), volatility bands
+  and a levels map. Explain in one or two sentences how today's news and data fit it. If your 14-day bias points the other
+  way from the regime, or you see an edge where it says none, say why. Its numbers may be quoted.
 - Be factual. This is not investment advice: no buy/sell recommendations, no price targets.
 - After weighing every section and today's events, give your own analytical bias for gold over the next 14 calendar days
   and exactly three scenarios, one per direction, with estimated probabilities in whole percent that sum to 100, most likely
@@ -3296,6 +3308,10 @@ def main():
             data["positioning"] = pos
     except Exception as e:
         log("positioning FAILED:", repr(e)[:200])
+    try:
+        data["direction_filter"] = direction_filter(data)
+    except Exception as e:
+        log("direction filter FAILED:", repr(e)[:200])
     pending = state.get("ai_pending") or {}
     new_major = {**pending, **new_major}
     disc = state.setdefault("ai_discovery", {})
@@ -3358,10 +3374,6 @@ def main():
         status["sources"]["ai"] = {"ok": False, "checked": now, "error": str(e)[:300]}
         if prev.get("ai"):
             data["ai"] = _no_cost(prev["ai"])
-    try:
-        data["direction_filter"] = direction_filter(data)
-    except Exception as e:
-        log("direction filter FAILED:", repr(e)[:200])
     try:
         track = score_outlooks()
         if track:
