@@ -2271,6 +2271,12 @@ def ai_digest(d):
     except Exception as e:
         log("correlation pack FAILED:", repr(e)[:200])
     try:
+        mirror = performance_mirror()
+        if mirror:
+            g["your_track_record"] = mirror
+    except Exception as e:
+        log("performance mirror FAILED:", repr(e)[:200])
+    try:
         g["hidden_nowcasts"] = nowcast_pack(d)
     except Exception as e:
         log("nowcast pack FAILED:", repr(e)[:200])
@@ -2324,6 +2330,8 @@ Rules:
   search, and when the next releases are due. Do not re-search known facts unless a newer release is due or you have a
   concrete reason to doubt them, and never search for numbers the platform data already gives (gold price, yields, the
   dollar, ETF holdings, COT, open interest). Spend your searches on what is new.
+- your_track_record (present once at least 10 of your forecasts have been scored) shows how your past probabilities
+  turned out. Correct systematic errors it reveals, but weigh its small, overlapping sample; never chase the last few results.
 - hidden_nowcasts is private context: early estimates of lagging reports (the real yield before FRED publishes it, the
   next COT report, central-bank months the IMF has not reported, the next WGC global ETF flow figure, CPI). Use them to judge what is probably happening now,
   weighted by their stated error and track record; fill the central-bank and CPI gaps by searching the sources they name.
@@ -2650,8 +2658,11 @@ def ai_report(data, prev, new_major, releases):
     last_price = load(PRICES_OUT, {}).get("last") or {}
     if outlook and outlook.get("dirs") and last_price.get("price"):
         olog = load(OUTLOOK_LOG, [])
+        br = (digest_obj.get("gold_trend_and_base_rates") or {}).get("base_rates_10_sessions") or {}
+        br = br.get("same_week_bucket_and_ma200_side") or next(iter(br.values()), None)
         olog.append({"id": latest["generated_utc"], "date": today, "model": model, "bias": outlook["bias"], "p": outlook["p"],
-                     "dirs": outlook["dirs"], "base": {"date": str(last_price.get("time") or today)[:10], "price": last_price["price"]}})
+                     "dirs": outlook["dirs"], "base": {"date": str(last_price.get("time") or today)[:10], "price": last_price["price"]},
+                     **({"base_rates": {k: br[k] for k in ("up", "flat", "down")}} if br else {})})
         save(OUTLOOK_LOG, olog[-300:])
     hist = load(AI_HIST, [])
     hist = [h for h in hist if h.get("generated_utc") != latest["generated_utc"]] + [latest]
@@ -2940,6 +2951,9 @@ def score_outlooks():
         e["result"] = {"date": daily[i][0], "price": close, "ret": round(ret * 100, 2), "outcome": out,
                        "bias_hit": {"bullish": "up", "bearish": "down", "neutral": "flat"}[e["bias"]] == out,
                        "p_outcome": round(probs.get(out, 0) * 100), "brier": round(brier, 3)}
+        if e.get("base_rates"):
+            tot = sum(e["base_rates"].values()) or 1
+            e["result"]["brier_base"] = round(sum((e["base_rates"][k] / tot - (k == out)) ** 2 for k in ("up", "flat", "down")), 3)
         changed = True
     if changed:
         save(OUTLOOK_LOG, log_)
@@ -2949,7 +2963,48 @@ def score_outlooks():
         summ.update(hit=round(sum(r["bias_hit"] for r in done) / len(done) * 100),
                     brier=round(sum(r["brier"] for r in done) / len(done), 3), brier_naive=0.667,
                     p_outcome=round(sum(r["p_outcome"] for r in done) / len(done)))
+    based = [r for r in done if "brier_base" in r]
+    if based:
+        b, bb = sum(r["brier"] for r in based) / len(based), sum(r["brier_base"] for r in based) / len(based)
+        summ.update(brier_base=round(bb, 3), skill=round((1 - b / bb) * 100, 1) if bb else None, n_base=len(based))
     return {"summary": summ, "days": OUTLOOK_DAYS, "band": OUTLOOK_BAND * 100, "rows": log_[-30:]}
+
+
+MIRROR_MIN = 10
+
+
+def performance_mirror():
+    """مرآة الأداء: ملخص سجل انحيازات النموذج نفسه بعد تقييمها، يُعطى له ليصحح معايرته. يعمل تلقائيًا من التقييم
+    العاشر؛ قبل ذلك العيّنة أصغر من أن تفيد وقد تضلّل."""
+    log_ = [e for e in load(OUTLOOK_LOG, []) if e.get("result")]
+    if len(log_) < MIRROR_MIN:
+        return None
+    n = len(log_)
+    res = [e["result"] for e in log_]
+    calib = {}
+    for k in ("up", "flat", "down"):
+        pred = [dict(zip(e["dirs"], e["p"])).get(k, 0) for e in log_]
+        calib[k] = {"avg_predicted_pct": round(sum(pred) / n), "realized_pct": round(sum(r["outcome"] == k for r in res) / n * 100)}
+    starts = sorted(dt.date.fromisoformat(e["base"]["date"]) for e in log_)
+    indep, last = 0, None
+    for d in starts:                                     # نوافذ 14 يومًا لا تتداخل: العيّنة المستقلة الفعلية
+        if last is None or (d - last).days >= OUTLOOK_DAYS:
+            indep, last = indep + 1, d
+    out = {"scored_reports": n, "independent_14d_windows": indep,
+           "bias_hit_rate_pct": round(sum(r["bias_hit"] for r in res) / n * 100),
+           "avg_brier": round(sum(r["brier"] for r in res) / n, 3),
+           "calibration": calib,
+           "last_10": [{"date": e["date"], "bias": e["bias"], "p": dict(zip(e["dirs"], e["p"])), "outcome": e["result"]["outcome"],
+                        "ret_pct": e["result"]["ret"]} for e in log_[-10:]],
+           "note": ("Your own scored forecasts (14 days, ±2% band). Use them to correct systematic errors, e.g. if you predict "
+                    "a direction more often than it happens, lower it. Overlapping windows make the sample smaller than it looks "
+                    "(see independent_14d_windows): do not over-react to a few results.")}
+    based = [r for r in res if "brier_base" in r]
+    if based:
+        b, bb = sum(r["brier"] for r in based) / len(based), sum(r["brier_base"] for r in based) / len(based)
+        out["vs_base_rates"] = {"avg_brier_base_rate_forecast": round(bb, 3), "skill_pct": round((1 - b / bb) * 100, 1) if bb else None,
+                                "n": len(based)}
+    return out
 
 
 # ---------------------------------------------------------------- main: release-aware scheduler
