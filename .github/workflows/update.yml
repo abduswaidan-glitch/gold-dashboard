@@ -14,9 +14,9 @@ on:
         required: false
         default: "false"
       loop_minutes:
-        description: "اختبار: أبقِ التشغيل حيًا هذه الدقائق (0 = تحديث واحد)"
+        description: "أبقِ التشغيل حيًا هذه الدقائق بعد التحديث (325 = يستمر آليًا، 0 = تحديث واحد)"
         required: false
-        default: "0"
+        default: "325"
       dry_run:
         description: "اختبار: لا تحفظ شيئًا ولا تكتب تقريرًا ذكيًا (true / false)"
         required: false
@@ -54,9 +54,11 @@ jobs:
           ANTHROPIC_API_KEY: ${{ github.event.inputs.dry_run != 'true' && secrets.ANTHROPIC_API_KEY || '' }}
           AI_FORCE: ${{ github.event.inputs.ai_force }}
           FULL_REFRESH: ${{ github.event.inputs.full_refresh }}
-          LOOP_MINUTES: ${{ github.event_name == 'schedule' && '325' || github.event.inputs.loop_minutes || '0' }}
+          LOOP_MINUTES: ${{ github.event_name == 'schedule' && '325' || github.event.inputs.loop_minutes || '325' }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
           IGNORE_WEEKEND: ${{ github.event.inputs.ignore_weekend || 'false' }}
+          EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
         run: cp run_loop.sh "$RUNNER_TEMP/loop.sh" && bash "$RUNNER_TEMP/loop.sh"   # نسخة: السكربت يسحب الكود أثناء عمله
 
       - name: إبقاء التحديث التلقائي مفعّلًا
