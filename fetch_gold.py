@@ -965,15 +965,18 @@ def fetch_physical():
 
 
 # ---------------------------------------------------------------- gold price (hourly)
-def yahoo_chart(symbol, rng, interval, period=None):
+def yahoo_chart(symbol, rng, interval, period=None, ohlc=False):
     errors = []
     span = f"period1={period[0]}&period2={period[1]}" if period else f"range={rng}"
     for host in ("query1", "query2"):
         url = f"https://{host}.finance.yahoo.com/v8/finance/chart/{symbol}?{span}&interval={interval}"
         try:
             res = browser_get(url, headers={"Accept": "application/json"}).json()["chart"]["result"][0]
-            q = res["indicators"]["quote"][0]["close"]
-            return res.get("meta", {}), [(t, float(c)) for t, c in zip(res["timestamp"], q) if c]
+            q = res["indicators"]["quote"][0]
+            if ohlc:
+                return res.get("meta", {}), [(t, float(o or c), float(h), float(lo), float(c)) for t, o, h, lo, c in
+                                             zip(res["timestamp"], q["open"], q["high"], q["low"], q["close"]) if c and h and lo]
+            return res.get("meta", {}), [(t, float(c)) for t, c in zip(res["timestamp"], q["close"]) if c]
         except Exception as e:
             errors.append(f"{host}: {str(e)[:80]}")
     raise RuntimeError(f"Yahoo {symbol} {interval}: " + " | ".join(errors))
@@ -996,8 +999,13 @@ def yahoo_daily(symbol, start):
 
 def fetch_prices():
     """سعر الذهب (عقود COMEX الأقرب GC=F): إغلاقات يومية منذ 2008، وأسعار الساعة لآخر 5 أيام."""
-    d = dict(load(PRICES_OUT, {}).get("daily") or [])
-    meta, recent = yahoo_chart("GC=F", "1mo", "1d")
+    stored = load(PRICES_OUT, {})
+    d = dict(stored.get("daily") or [])
+    meta, bars = yahoo_chart("GC=F", "1mo", "1d", ohlc=True)
+    recent = [(t, c) for t, _, _, _, c in bars]
+    # أعلى وأدنى كل جلسة (لخريطة المستويات في فلتر الاتجاه): آخر 60 جلسة
+    ohlc = {r[0]: r for r in stored.get("ohlc") or []}
+    ohlc.update((_day(t), [_day(t), round(o, 2), round(h, 2), round(lo, 2), round(c, 2)]) for t, o, h, lo, c in bars)
     # range=max يعيد نقطة شهرية واحدة لا إغلاقات يومية، فنعيد بناء السجل مرة واحدة بفترات صريحة
     if sum(1 for k in d if k >= START_DAY_PRICES) < 3000:
         full = {}
@@ -1026,7 +1034,8 @@ def fetch_prices():
             # الإغلاق السابق = إغلاق الجلسة التي قبل الجلسة الأخيرة (chartPreviousClose يخص بداية النطاق، لا أمس)
             "prev_close": round(recent[-2][1], 2) if len(recent) > 1 else None}
     out = {"symbol": "GC=F", "updated_utc": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(),
-           "last": last, "daily": sorted([k, v] for k, v in d.items()), "hourly": h[-150:]}
+           "last": last, "daily": sorted([k, v] for k, v in d.items()), "hourly": h[-150:],
+           "ohlc": [ohlc[k] for k in sorted(ohlc)][-60:]}
     problems = series_issues("gold price", out["daily"], 300, 20000, jump=0.08, max_gap=5, tail=60)
     if last["price"] and last["prev_close"] and abs(last["price"] / last["prev_close"] - 1) > 0.08:
         problems.append(f"gold price: {(last['price'] / last['prev_close'] - 1) * 100:+.1f}% vs previous close")
@@ -1230,6 +1239,144 @@ def liquidation_monitor(m):
     today = state(len(days) - 1)
     today["score"] = sum(today["met"].values())
     return {"today": today, "episodes": episodes[-25:], "summary": summ, "params": LIQ, "since": days[0]}
+
+
+# ---------------------------------------------------------------- direction filter: tested rules only
+# اختبار تاريخي (2008–2026، 45 عاملًا × 4 آفاق): لا عامل يتنبأ باتجاه الجلسة التالية بدقة تُذكر، إلا قاعدة واحدة ثابتة
+# عبر الحقب: يوم هابط والسعر فوق MA200 → الجلسة التالية صاعدة ~57٪. أما حجم الحركة فقابل للتنبؤ (تقلّب 20 جلسة).
+# لذلك يعطي الفلتر: النظام، والميزة الإحصائية إن وُجدت، ونطاقات σ، وخريطة المستويات، ومستوى الإبطال، ويُقيَّم يوميًا.
+FILTER_LOG = os.path.join("data", "filter_log.json")
+NEW_YORK = ZoneInfo("America/New_York")
+FILTER_BANDS = (1.0, 1.5, 2.0)
+FILTER_ERAS = (("2008-01-01", "2019-12-31"), ("2020-01-01", "2099-12-31"))
+
+
+def _session_done(day, now=None):
+    """جلسة GC بتاريخ معيّن تنتهي 17:00 بتوقيت نيويورك؛ قبلها يكون آخر سطر يومي سعرًا جاريًا لا إغلاقًا."""
+    now = now or dt.datetime.now(dt.timezone.utc)
+    return now >= dt.datetime.combine(dt.date.fromisoformat(day), dt.time(17, 0), NEW_YORK)
+
+
+def _pct(xs):
+    return round(sum(xs) / len(xs) * 100, 1) if xs else None
+
+
+def direction_filter(d, now=None):
+    P = load(PRICES_OUT, {})
+    rows = [r for r in P.get("daily") or [] if r[1]]
+    if rows and not _session_done(rows[-1][0], now):
+        rows = rows[:-1]
+    if len(rows) < 600:
+        raise RuntimeError("not enough price history")
+    days, px = [r[0] for r in rows], [r[1] for r in rows]
+    n = len(px)
+    lr = [0.0] + [math.log(px[i] / px[i - 1]) for i in range(1, n)]
+    cs = [0.0]
+    for v in px:
+        cs.append(cs[-1] + v)
+    ma = lambda i, w: (cs[i + 1] - cs[i + 1 - w]) / w if i + 1 >= w else None
+    vol = [None] * n
+    for i in range(20, n):
+        vol[i] = statistics.stdev(lr[i - 19:i + 1])
+    feat = lambda i: (lr[i] < 0, px[i] > ma(i, 200))
+    # إحصاءات تاريخية تُعاد حسابها كل يوم (لا أرقام مكتوبة باليد)
+    buckets, cover, base = {}, {k: [] for k in FILTER_BANDS}, []
+    eras = [{"from": a[:4], "n": 0, "up1": [], "up10": []} for a, _ in FILTER_ERAS]
+    for i in range(250, n - 1):
+        dn, above = feat(i)
+        nx = lr[i + 1]
+        b = buckets.setdefault(("down" if dn else "up") + "_" + ("above" if above else "below"), {"up1": [], "up5": []})
+        b["up1"].append(nx > 0)
+        if i + 5 < n:
+            b["up5"].append(px[i + 5] > px[i])
+        base.append(nx > 0)
+        for k in FILTER_BANDS:
+            cover[k].append(abs(nx) <= k * vol[i])
+        if dn and above:
+            for e, (a, z) in zip(eras, FILTER_ERAS):
+                if a <= days[i] <= z:
+                    e["up1"].append(nx > 0)
+                    if i + 10 < n:
+                        e["up10"].append(px[i + 10] > px[i])
+    stats = {k: {"n": len(v["up1"]), "up1": _pct(v["up1"]), "up5": _pct(v["up5"])} for k, v in buckets.items()}
+    eras = [{"from": e["from"], "n": len(e["up1"]), "up1": _pct(e["up1"]), "up10": _pct(e["up10"])} for e in eras]
+    i = n - 1
+    c, m200, m50, sig = px[i], ma(i, 200), ma(i, 50), vol[i]
+    mom120 = math.log(c / px[i - 120]) * 100
+    dn, above = feat(i)
+    regime = "up" if above and mom120 > 0 else "down" if not above and mom120 < 0 else "mixed"
+    signal = "long_edge" if dn and above else "none"
+    su = c * sig
+    bands = [{"k": k, "lo": round(c - k * su, 1), "hi": round(c + k * su, 1), "cover": _pct(cover[k])} for k in FILTER_BANDS]
+    levels = [{"id": "close", "v": round(c, 1)}, {"id": "ma200", "v": round(m200, 1)}, {"id": "ma50", "v": round(m50, 1)}]
+    for b in bands:
+        levels += [{"id": f"+{b['k']:g}s", "v": b["hi"]}, {"id": f"-{b['k']:g}s", "v": b["lo"]}]
+    bars = {r[0]: r for r in P.get("ohlc") or []}
+    if days[i] in bars:
+        levels += [{"id": "pdh", "v": bars[days[i]][2]}, {"id": "pdl", "v": bars[days[i]][3]}]
+    # الأسبوع السابق = آخر أسبوع اكتمل (إن كان آخر إغلاق جمعة فهو أسبوعه)
+    di = dt.date.fromisoformat(days[i])
+    wk_end = di if di.weekday() >= 4 else di - dt.timedelta(days=di.weekday() + 3)
+    wk = [r for k, r in bars.items() if wk_end - dt.timedelta(days=6) <= dt.date.fromisoformat(k) <= wk_end]
+    if len(wk) >= 3:
+        levels += [{"id": "pwh", "v": max(r[2] for r in wk)}, {"id": "pwl", "v": min(r[3] for r in wk)}]
+    g, gex = d.get("gex") or {}, None
+    if g.get("zero_all") and g.get("gc_ratio") and g.get("spot"):
+        r = g["gc_ratio"]
+        gex = {"regime": "positive" if g["spot"] >= g["zero_all"] else "negative", "asof": g.get("asof"),
+               "zero": round(g["zero_all"] * r, 1), "call_wall": round((g.get("call_wall") or 0) * r, 1) or None,
+               "put_wall": round((g.get("put_wall") or 0) * r, 1) or None}
+        levels += [{"id": "zero_gamma", "v": gex["zero"]}]
+        levels += [{"id": k, "v": gex[k]} for k in ("call_wall", "put_wall") if gex[k]]
+    if signal == "long_edge":
+        inval = {"kind": "long_void_below", "v": round(max(m200, c - 2 * su), 1)}
+    elif not above:
+        inval = {"kind": "regime_up_above", "v": round(m200, 1)}
+    else:
+        inval = {"kind": "wait_down_close", "v": round(m200, 1)}
+    cur = {"date": days[i], "close": round(c, 2), "signal": signal, "regime": regime, "above200": above,
+           "sigma": round(sig * 100, 3), "z": round(lr[i] / vol[i - 1], 2) if vol[i - 1] else None,
+           "gex": gex and gex["regime"], "zero": gex and gex["zero"]}
+    return {"asof": days[i], "close": round(c, 2), "day_ret": round(lr[i] * 100, 2), "z": cur["z"],
+            "ma200": round(m200, 1), "ma50": round(m50, 1), "mom120": round(mom120, 1), "above200": above,
+            "regime": regime, "signal": signal, "bucket": ("down" if dn else "up") + "_" + ("above" if above else "below"),
+            "sigma_pct": round(sig * 100, 2), "sigma_usd": round(su, 1), "bands": bands,
+            "levels": sorted(levels, key=lambda x: -x["v"]), "gex": gex, "invalidation": inval,
+            "stats": {"buckets": stats, "base_up1": _pct(base), "edge_eras": eras, "since": days[250]},
+            "track": score_filter(cur, days, px)}
+
+
+def score_filter(cur, days, px):
+    """يسجّل قراءة كل جلسة مكتملة ويقيّمها بعد الجلسة التالية: هل صدقت الميزة؟ وهل بقي الإغلاق داخل نطاقات σ؟"""
+    log_ = load(FILTER_LOG, [])
+    by = {e["date"]: e for e in log_}
+    by.setdefault(cur["date"], cur)
+    pos = {k: j for j, k in enumerate(days)}
+    for e in by.values():
+        j = pos.get(e["date"])
+        if j is None:
+            continue
+        if "r1" not in e and j + 1 < len(px):
+            e["r1"] = round(math.log(px[j + 1] / px[j]) * 100, 3)
+        if "up5" not in e and j + 5 < len(px):
+            e["up5"] = px[j + 5] > px[j]
+    log_ = [by[k] for k in sorted(by)][-500:]
+    save(FILTER_LOG, log_)
+    done = [e for e in log_ if "r1" in e]
+    edge = [e for e in done if e["signal"] == "long_edge"]
+    none = [e for e in done if e["signal"] != "long_edge"]
+    out = {"since": log_[0]["date"], "scored": len(done),
+           "edge_n": len(edge), "edge_up1": _pct([e["r1"] > 0 for e in edge]),
+           "edge_up5": _pct([e["up5"] for e in edge if "up5" in e]),
+           "none_up1": _pct([e["r1"] > 0 for e in none]),
+           "cover": {f"{k:g}": _pct([abs(e["r1"]) <= k * e["sigma"] for e in done]) for k in FILTER_BANDS}}
+    gx = {}
+    for e in done:
+        if e.get("gex"):
+            gx.setdefault(e["gex"], []).append(abs(e["r1"]) / e["sigma"])
+    out["gex_move_sigma"] = {k: {"n": len(v), "avg": round(sum(v) / len(v), 2)} for k, v in gx.items()}
+    out["rows"] = [{k: e.get(k) for k in ("date", "close", "signal", "regime", "sigma", "r1", "gex")} for e in log_[-15:]]
+    return out
 
 
 # ---------------------------------------------------------------- GEX on GLD (Cboe delayed options, free)
@@ -3211,6 +3358,10 @@ def main():
         status["sources"]["ai"] = {"ok": False, "checked": now, "error": str(e)[:300]}
         if prev.get("ai"):
             data["ai"] = _no_cost(prev["ai"])
+    try:
+        data["direction_filter"] = direction_filter(data)
+    except Exception as e:
+        log("direction filter FAILED:", repr(e)[:200])
     try:
         track = score_outlooks()
         if track:
