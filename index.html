@@ -334,6 +334,7 @@ h4.layer{margin:18px 0 8px;font-size:15.5px}h4.layer small{font-weight:400;font-
 .dir.up{background:color-mix(in srgb,var(--buy) 16%,transparent)} .dir.down{background:color-mix(in srgb,var(--sell) 16%,transparent)}
 .dir.flat{background:color-mix(in srgb,var(--blue) 16%,transparent);color:var(--blue)}
 .ai-card.track{margin-bottom:18px}
+.ai-card.dfilter{margin-bottom:18px}.df-badges{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 10px}.df-badges .bias{flex:0 1 auto;white-space:normal;max-width:100%}.df-line{font-size:13.5px;margin:6px 0;line-height:1.7}.ai-card.dfilter tr.df-cur td{background:var(--gold-soft);font-weight:700}
 .ai-card.liq{margin:0 0 18px}
 .ol-bias small{font-size:12.5px}
 .liq-list{list-style:none;padding:0;margin:0 0 14px;display:grid;gap:6px}
@@ -1754,6 +1755,60 @@ R.gex = () => {
   return h;
 };
 
+/* ---------- statistical direction filter (tested rules only) ---------- */
+function filterHTML(){
+  const f = DATA.direction_filter;
+  if (!f || !f.bands) return '';
+  const st = f.stats || {}, bk = st.buckets || {}, tr = f.track || {}, su = f.sigma_usd, P = v => bd('$' + nf1.format(v));
+  const RG = {up: ['pos', L('نظام صاعد', 'Uptrend regime', 'Regime rialzista', 'Régimen alcista')], down: ['neg', L('نظام هابط', 'Downtrend regime', 'Regime ribassista', 'Régimen bajista')], mixed: ['mix', L('نظام مختلط', 'Mixed regime', 'Regime misto', 'Régimen mixto')]};
+  const rg = RG[f.regime] || RG.mixed, e = bk.down_above || {};
+  const sigB = f.signal === 'long_edge'
+    ? ['pos', L(`ميزة Long: صعدت الجلسة التالية ${nf0.format(e.up1)}٪ تاريخيًا`, `Long edge: the next session rose ${nf0.format(e.up1)}% of the time`, `Vantaggio long: la seduta successiva è salita nel ${nf0.format(e.up1)}% dei casi`, `Ventaja long: la sesión siguiente subió el ${nf0.format(e.up1)} % de las veces`)]
+    : ['neu', L('لا ميزة إحصائية: الجهتان مفتوحتان', 'No statistical edge: both sides open', 'Nessun vantaggio statistico: entrambi i lati aperti', 'Sin ventaja estadística: ambos lados abiertos')];
+  const gx = f.gex, gxB = gx && (gx.regime === 'positive'
+    ? ['neu', L('Gamma موجبة: حركة مخمَّدة، الحواف للارتداد', 'Positive gamma: dampened moves, edges tend to hold', 'Gamma positiva: movimenti smorzati, i bordi tendono a tenere', 'Gamma positiva: movimientos amortiguados, los bordes suelen aguantar')]
+    : ['mix', L('Gamma سالبة: حركة مضخَّمة، الكسر قد يمتد', 'Negative gamma: amplified moves, breaks can run', 'Gamma negativa: movimenti amplificati, le rotture possono estendersi', 'Gamma negativa: movimientos amplificados, las rupturas pueden extenderse')]);
+  const NM = {close: L('إغلاق آخر جلسة', 'Last close', 'Ultima chiusura', 'Último cierre'), ma200: 'MA200', ma50: 'MA50',
+    pdh: L('أعلى الجلسة السابقة', 'Previous session high', 'Massimo della seduta precedente', 'Máximo de la sesión anterior'), pdl: L('أدنى الجلسة السابقة', 'Previous session low', 'Minimo della seduta precedente', 'Mínimo de la sesión anterior'),
+    pwh: L('أعلى الأسبوع السابق', 'Previous week high', 'Massimo della settimana precedente', 'Máximo de la semana anterior'), pwl: L('أدنى الأسبوع السابق', 'Previous week low', 'Minimo della settimana precedente', 'Mínimo de la semana anterior'),
+    zero_gamma: L('Zero Gamma (من GLD)', 'Zero gamma (from GLD)', 'Zero gamma (da GLD)', 'Zero gamma (de GLD)'), call_wall: L('Call Wall (من GLD)', 'Call wall (from GLD)', 'Call wall (da GLD)', 'Call wall (de GLD)'), put_wall: L('Put Wall (من GLD)', 'Put wall (from GLD)', 'Put wall (da GLD)', 'Put wall (de GLD)')};
+  const cov = {}; f.bands.forEach(b => { cov[`+${b.k}s`] = cov[`-${b.k}s`] = b.cover; });
+  const lvName = id => NM[id] || `${bd(id.replace('s', 'σ').replace('-', '−'))} <span class="muted">(${L('يحوي', 'holds', 'contiene', 'contiene')} ${bd(nf0.format(cov[id]) + '%')})</span>`;
+  const iv = f.invalidation || {}, IV = {
+    long_void_below: L(`تسقط ميزة Long إن تداول السعر دون ${P(iv.v)}`, `The long edge is void if price trades below ${P(iv.v)}`, `Il vantaggio long decade se il prezzo scende sotto ${P(iv.v)}`, `La ventaja long se anula si el precio cotiza por debajo de ${P(iv.v)}`),
+    regime_up_above: L(`لا ميزة Long قبل إغلاق فوق MA200 عند ${P(iv.v)}`, `No long edge until a close above MA200 at ${P(iv.v)}`, `Nessun vantaggio long prima di una chiusura sopra la MA200 a ${P(iv.v)}`, `Sin ventaja long hasta un cierre por encima de la MA200 en ${P(iv.v)}`),
+    wait_down_close: L(`النظام صاعد: تظهر الميزة بعد إغلاق هابط ما دام السعر فوق MA200 عند ${P(iv.v)}`, `Uptrend: the edge appears after a down close while price stays above MA200 at ${P(iv.v)}`, `Rialzo: il vantaggio compare dopo una chiusura in calo finché il prezzo resta sopra la MA200 a ${P(iv.v)}`, `Alcista: la ventaja aparece tras un cierre a la baja mientras el precio siga por encima de la MA200 en ${P(iv.v)}`)}[iv.kind] || '';
+  const BK = [['down_above', L('جلسة هابطة · فوق MA200', 'Down session · above MA200', 'Seduta in calo · sopra MA200', 'Sesión bajista · sobre MA200')], ['up_above', L('جلسة صاعدة · فوق MA200', 'Up session · above MA200', 'Seduta in rialzo · sopra MA200', 'Sesión alcista · sobre MA200')],
+    ['down_below', L('جلسة هابطة · تحت MA200', 'Down session · below MA200', 'Seduta in calo · sotto MA200', 'Sesión bajista · bajo MA200')], ['up_below', L('جلسة صاعدة · تحت MA200', 'Up session · below MA200', 'Seduta in rialzo · sotto MA200', 'Sesión alcista · bajo MA200')]];
+  const CM = L('، ', ', ', ', ', ', '), er = st.edge_eras || [], pc = v => v == null ? '—' : bd(nf0.format(v) + '%');
+  let h = `<section class="ai-card dfilter"><div class="ol-head"><h3>${L('فلتر الاتجاه الإحصائي', 'Statistical direction filter', 'Filtro statistico di direzione', 'Filtro estadístico de dirección')}</h3>
+    <small>${L(`للجلسة التالية بعد إغلاق ${fDay.format(toDate(f.asof))} · قواعد مختبرة منذ 2008 · ليس توقعًا`, `For the session after the ${fDay.format(toDate(f.asof))} close · rules tested since 2008 · not a forecast`, `Per la seduta dopo la chiusura del ${fDay.format(toDate(f.asof))} · regole testate dal 2008 · non è una previsione`, `Para la sesión tras el cierre del ${fDay.format(toDate(f.asof))} · reglas probadas desde 2008 · no es una previsión`)}</small></div>
+    <p class="explain">${L('اختبرنا 45 عاملًا (الاتجاه، والزخم، وCOT، والعوائد، والدولار، والصناديق، وغيرها) على بيانات الذهب منذ 2008: لا شيء منها يتنبأ باتجاه الجلسة التالية بدقة تُذكر، إلا قاعدة واحدة ثابتة عبر الحقب. أما حجم الحركة فيمكن تقديره جيدًا. لذلك يحدد هذا الفلتر الجهة المفضّلة وحدود الحركة المتوقعة؛ والدخول نفسه من الـ order flow عند أحد المستويات.',
+      'We tested 45 factors (trend, momentum, COT, yields, the dollar, ETFs and more) on gold data since 2008: none predicts the next session’s direction meaningfully, except one rule that held in every era. The size of the move, however, can be estimated well. So this filter sets the preferred side and the expected range; the entry itself comes from order flow at one of the levels.',
+      'Abbiamo testato 45 fattori (trend, momentum, COT, rendimenti, dollaro, ETF e altro) sui dati dell’oro dal 2008: nessuno prevede in modo utile la direzione della seduta successiva, tranne una regola rimasta valida in ogni periodo. L’ampiezza del movimento invece si stima bene. Questo filtro indica quindi il lato preferito e l’intervallo atteso; l’ingresso viene dall’order flow su uno dei livelli.',
+      'Probamos 45 factores (tendencia, momentum, COT, rentabilidades, dólar, ETF y más) con datos del oro desde 2008: ninguno predice de forma útil la dirección de la sesión siguiente, salvo una regla que se mantuvo en todas las épocas. El tamaño del movimiento, en cambio, se estima bien. Así que este filtro marca el lado preferido y el rango esperado; la entrada sale del order flow en uno de los niveles.')}</p>
+    <div class="df-badges"><span class="bias ${rg[0]} sm">${rg[1]}</span><span class="bias ${sigB[0]} sm">${sigB[1]}</span>${gxB ? `<span class="bias ${gxB[0]} sm">${gxB[1]}</span>` : ''}</div>
+    <p class="df-line">${L('الإغلاق', 'Close', 'Chiusura', 'Cierre')} ${P(f.close)} (${sPCT(f.day_ret)}${f.z != null ? `${CM}${bd(sg(f.z) + nf1.format(Math.abs(f.z)) + 'σ')}` : ''}) · MA200 ${P(f.ma200)} · Momentum 120 ${sPCT(f.mom120)} · ${L('تقلّب 20 جلسة', '20-session volatility', 'Volatilità a 20 sedute', 'Volatilidad de 20 sesiones')} ${bd(nf2.format(f.sigma_pct) + '%')} = 1σ ≈ ${P(su)}</p>
+    <p class="df-line"><b>${L('الإبطال', 'Invalidation', 'Invalidazione', 'Invalidación')}:</b> ${IV}</p>
+    <h3 class="rv-title">${L('خريطة المستويات', 'Levels map', 'Mappa dei livelli', 'Mapa de niveles')} <small class="muted">GC</small></h3>
+    <div class="tablebox"><table class="pos-t"><thead><tr><th>${L('المستوى', 'Level', 'Livello', 'Nivel')}</th><th class="n">${L('السعر', 'Price', 'Prezzo', 'Precio')}</th><th class="n">${L('البعد عن الإغلاق', 'From close', 'Dalla chiusura', 'Desde el cierre')}</th></tr></thead><tbody>
+    ${f.levels.map(x => { const dd = x.v - f.close;
+      return `<tr class="${x.id === 'close' ? 'df-cur' : ''}"><td>${lvName(x.id)}</td><td class="n">${P(x.v)}</td><td class="n ${x.id === 'close' ? '' : cls(dd)}">${x.id === 'close' ? '—' : bd(sg(dd) + '$' + nf0.format(Math.abs(dd)) + ' · ' + sg(dd) + nf1.format(Math.abs(dd / su)) + 'σ')}</td></tr>`; }).join('')}</tbody></table></div>
+    <h3 class="rv-title">${L('ماذا حدث تاريخيًا بعد كل حالة', 'What happened next, historically', 'Cosa è successo dopo, storicamente', 'Qué pasó después, históricamente')}</h3>
+    <div class="tablebox"><table class="pos-t"><thead><tr><th>${L('الحالة', 'Case', 'Caso', 'Caso')}</th><th class="n">${L('الجلسة التالية صاعدة', 'Next session up', 'Seduta successiva in rialzo', 'Sesión siguiente al alza')}</th><th class="n">${L('بعد 5 جلسات', 'After 5 sessions', 'Dopo 5 sedute', 'Tras 5 sesiones')}</th><th class="n">${L('العدد', 'Count', 'Numero', 'Número')}</th></tr></thead><tbody>
+    ${BK.filter(([k]) => bk[k]).map(([k, n]) => `<tr class="${k === f.bucket ? 'df-cur' : ''}"><td>${n}${k === f.bucket ? ` <span class="chip">${L('الآن', 'Now', 'Ora', 'Ahora')}</span>` : ''}</td><td class="n">${pc(bk[k].up1)}</td><td class="n">${pc(bk[k].up5)}</td><td class="n">${bd(nf0.format(bk[k].n))}</td></tr>`).join('')}
+    <tr><td class="muted">${L('كل الجلسات', 'All sessions', 'Tutte le sedute', 'Todas las sesiones')}</td><td class="n muted">${pc(st.base_up1)}</td><td></td><td></td></tr></tbody></table></div>
+    ${er.length > 1 ? `<p class="df-line">${L('ثبات القاعدة الوحيدة (جلسة هابطة فوق MA200)', 'Stability of the one rule (down session above MA200)', 'Stabilità dell’unica regola (seduta in calo sopra MA200)', 'Estabilidad de la única regla (sesión bajista sobre MA200)')}: ${er.map((x, i) => `${bd(x.from + (i === er.length - 1 ? '+' : '–' + (+er[i + 1].from - 1)))} → ${pc(x.up1)} ${L('في الجلسة التالية', 'next session', 'seduta successiva', 'sesión siguiente')}${CM}${pc(x.up10)} ${L('بعد 10 جلسات', 'after 10 sessions', 'dopo 10 sedute', 'tras 10 sesiones')} (${bd(nf0.format(x.n))})`).join(' · ')}</p>` : ''}
+    <p class="df-line muted">${L('نظام GEX لم يُختبر تاريخيًا بعد (السجل قصير)؛ يُسجَّل يوميًا ويُختبر حين يكفي.', 'The GEX regime is not historically tested yet (short record); it is logged daily and will be tested once there is enough.', 'Il regime GEX non è ancora testato storicamente (storico breve); viene registrato ogni giorno e sarà testato quando basterà.', 'El régimen GEX aún no está probado históricamente (historial corto); se registra a diario y se probará cuando haya suficiente.')}</p>
+    <h3 class="rv-title">${L('التقييم اليومي', 'Daily scoring', 'Valutazione giornaliera', 'Evaluación diaria')}</h3>`;
+  const c = tr.cover || {};
+  h += tr.scored ? `<p class="df-line">${L(`منذ ${fDay.format(toDate(tr.since))}: ${nf0.format(tr.scored)} جلسة مقيَّمة`, `Since ${fDay.format(toDate(tr.since))}: ${nf0.format(tr.scored)} sessions scored`, `Dal ${fDay.format(toDate(tr.since))}: ${nf0.format(tr.scored)} sedute valutate`, `Desde el ${fDay.format(toDate(tr.since))}: ${nf0.format(tr.scored)} sesiones evaluadas`)} ·
+      ${f.bands.map(b => `±${bd(nf1.format(b.k) + 'σ')}: ${pc(c[String(b.k)])} <span class="muted">(${L('المتوقع', 'expected', 'atteso', 'esperado')} ${pc(b.cover)})</span>`).join(' · ')}
+      ${tr.edge_n ? ` · ${L('ميزة Long أصابت', 'Long edge right', 'Vantaggio long corretto', 'Ventaja long acertada')} ${pc(tr.edge_up1)} (${bd(nf0.format(tr.edge_n))})` : ''}</p>`
+    : `<p class="empty">${L('يبدأ التقييم بعد إغلاق الجلسة التالية: هل بقي الإغلاق داخل النطاقات؟ وهل صدقت الميزة حين ظهرت؟', 'Scoring starts after the next session closes: did the close stay inside the bands, and was the edge right when it appeared?', 'La valutazione parte dopo la chiusura della prossima seduta: la chiusura è rimasta nelle bande, e il vantaggio era giusto quando è comparso?', 'La evaluación empieza tras el cierre de la próxima sesión: ¿quedó el cierre dentro de las bandas y acertó la ventaja cuando apareció?')}</p>`;
+  return h + '</section>';
+}
+
 /* ---------- bias track record ---------- */
 const DIRS = () => ({up: ['↑', L('صعود', 'Up', 'Rialzo', 'Subida'), 'up'], flat: ['→', L('عرضي', 'Flat', 'Laterale', 'Lateral'), 'flat'], down: ['↓', L('هبوط', 'Down', 'Ribasso', 'Bajada'), 'down']});
 function trackHTML(){
@@ -1894,7 +1949,7 @@ R.ai = () => {
       ${(r.trigger || []).filter((t, i, a) => a.indexOf(t) === i && TRIG[t]).map(t => `<span class="chip">${L('سبب التحديث', 'Trigger', 'Motivo dell’aggiornamento', 'Motivo de la actualización')}: ${TRIG[t]}</span>`).join('')}</div>
     <h2>${esc(rep.headline || '')}</h2>
     <h3 style="margin:0 0 4px;font-size:15px">${L('الملخص', 'Summary', 'Sintesi', 'Resumen')}</h3>
-    <ul class="ai-summary">${(rep.summary || []).map(s => `<li>${esc(s)}</li>`).join('')}</ul>${outlookHTML(r, rep)}</article>${trackHTML()}`;
+    <ul class="ai-summary">${(rep.summary || []).map(s => `<li>${esc(s)}</li>`).join('')}</ul>${outlookHTML(r, rep)}</article>${filterHTML()}${trackHTML()}`;
   h += `<h3 class="rv-title">${L('التقرير المفصّل', 'Detailed report', 'Report dettagliato', 'Informe detallado')}</h3>
     <div class="ai-grid">${(rep.sections || []).map(s => `<div class="ai-card"><h3>${esc(s.title)}</h3><p>${esc(s.body)}</p></div>`).join('')}</div>`;
   h += `<div class="ai-grid">
