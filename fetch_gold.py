@@ -1369,6 +1369,43 @@ def direction_filter(d, now=None):
             "track": score_filter(cur, days, px, bars)}
 
 
+TV_KEYS = {"zero_gamma": "ZG", "call_wall": "CW", "put_wall": "PW", "put_2": "P2", "put_3": "P3", "call_2": "C2",
+           "call_3": "C3", "+1s": "U1", "-1s": "D1", "+1.5s": "U15", "-1.5s": "D15", "+2s": "U2", "-2s": "D2",
+           "pdh": "PDH", "pdl": "PDL", "pwh": "PWH", "pwl": "PWL", "ma50": "MA50", "ma200": "MA200"}
+
+
+def _focus_zones(raw, df):
+    """مناطق Fable: يختار معرّفات من مستويات الفلتر فقط، والكود يحسب السعر، فلا يكتب النموذج أسعارًا من عنده."""
+    if not isinstance(raw, list) or not df or not df.get("levels"):
+        return None
+    lv = {x["id"]: x["v"] for x in df["levels"] if x.get("id") != "close"}
+    span = 1.5 * (df.get("sigma_usd") or 50)
+    zones = []
+    for z in raw[:4]:
+        if not isinstance(z, dict) or z.get("role") not in ("support", "resistance", "pivot"):
+            continue
+        ids = [i for i in (z.get("ids") or [])[:3] if i in lv]
+        if not ids:
+            continue
+        lo, hi = min(lv[i] for i in ids), max(lv[i] for i in ids)
+        if hi - lo > span:
+            continue
+        zones.append({"ids": ids, "lo": round(lo, 1), "hi": round(hi, 1), "role": z["role"], "why": str(z.get("why") or "")[:200]})
+    return {"asof": df.get("asof"), "zones": zones} if zones else None
+
+
+def tv_code(df, ai):
+    """سطر واحد يُلصق في مؤشر TradingView: الإصدار|التاريخ|النظام|الميزة|Gamma|المستويات|مناطق Fable.
+    مناطق Fable تُضاف فقط إن بُنيت على مستويات الجلسة نفسها."""
+    lv = ";".join(f"{TV_KEYS[x['id']]}={x['v']:.1f}" for x in df.get("levels") or [] if x.get("id") in TV_KEYS)
+    gx = {"positive": "pos", "negative": "neg"}.get((df.get("gex") or {}).get("regime"), "na")
+    focus = ((ai or {}).get("latest") or {}).get("focus") or {}
+    zones = focus.get("zones") if focus.get("asof") == df.get("asof") else []
+    zs = ",".join(f"{z['role'][0].upper()}:{z['lo']:.1f}-{z['hi']:.1f}" for z in zones or [])
+    edge = "long" if df.get("signal") == "long_edge" else "none"
+    return f"GFL1|{df.get('asof')}|{df.get('regime')}|{edge}|{gx}|{lv}|{zs}", (zones or [])
+
+
 def score_filter(cur, days, px, bars=None):
     """يسجّل قراءة كل جلسة مكتملة ويقيّمها بعد الجلسة التالية: هل صدقت الميزة؟ وهل بقي الإغلاق داخل نطاقات σ؟"""
     log_ = load(FILTER_LOG, [])
@@ -2650,6 +2687,10 @@ Rules:
 - statistical_direction_filter is shown publicly under your bias: a trend regime, a tested edge (or none), volatility bands
   and a levels map. Explain in one or two sentences how today's news and data fit it. If your 14-day bias points the other
   way from the regime, or you see an edge where it says none, say why. Its numbers may be quoted.
+- focus_zones: pick the 3 or 4 zones that matter most for the next session from statistical_direction_filter.levels.
+  Each zone is 1 to 3 of its level ids that sit close together (within about one sigma_usd). Use only ids from that
+  list and never write prices yourself. role: "support", "resistance" or "pivot". why: one short Arabic line grounded in
+  the data (e.g. which levels coincide and what the gamma regime implies there). These zones are drawn on the owner's chart.
 - Be factual. This is not investment advice: no buy/sell recommendations, no price targets.
 - After weighing every section and today's events, give your own analytical bias for gold over the next 14 calendar days
   and exactly three scenarios, one per direction, with estimated probabilities in whole percent that sum to 100, most likely
@@ -2663,7 +2704,8 @@ Return ONLY one JSON object, no markdown fences, with exactly this shape:
  "ar": {"headline": "...", "tone": "إيجابي|سلبي|محايد|متباين", "summary": ["...", "..."],
         "sections": [{"title": "...", "body": "..."}], "events": [{"title": "...", "impact": "...", "source": "https://..."}],
         "watch": ["..."], "risks": "...",
-        "outlook": {"bias_note": "one line on why", "scenarios": [{"title": "...", "why": "..."}, {...}, {...}]}}}
+        "outlook": {"bias_note": "one line on why", "scenarios": [{"title": "...", "why": "..."}, {...}, {...}]}},
+ "focus_zones": [{"ids": ["put_2", "-1.5s"], "role": "support|resistance|pivot", "why": "سطر قصير بالعربية"}]}
 The three scenarios follow the order of outlook.scenarios; each direction appears exactly once.
 Also add a top-level "research_map" (English only, up to 10 items) describing what you searched for and why, so the
 platform can learn which outside information each section needs:
@@ -2961,7 +3003,10 @@ def ai_report(data, prev, new_major, releases):
     cost = _cost(model, u)
     langs = {k: rep[k] for k in AI_LANGS if isinstance(rep.get(k), dict)}  # it/es اختياريتان: الواجهة تعرض الإنجليزية إن غابتا
     latest = {"date": today, "generated_utc": now.replace(microsecond=0).isoformat(), "model": model,
-              **langs, "outlook": outlook, "sources": sources[:10]}  # الكلفة تُكتب في سجل Actions فقط، لا في الملفات المنشورة
+              **langs, "outlook": outlook, "sources": sources[:10]}
+    fz = _focus_zones(rep.get("focus_zones"), digest_obj.get("statistical_direction_filter"))
+    if fz:
+        latest["focus"] = fz  # الكلفة تُكتب في سجل Actions فقط، لا في الملفات المنشورة
     last_price = load(PRICES_OUT, {}).get("last") or {}
     if outlook and outlook.get("dirs") and last_price.get("price"):
         olog = load(OUTLOOK_LOG, [])
@@ -3551,6 +3596,11 @@ def main():
         status["sources"]["ai"] = {"ok": False, "checked": now, "error": str(e)[:300]}
         if prev.get("ai"):
             data["ai"] = _no_cost(prev["ai"])
+    if data.get("direction_filter"):
+        try:
+            data["direction_filter"]["tv_code"], data["direction_filter"]["focus"] = tv_code(data["direction_filter"], data.get("ai"))
+        except Exception as e:
+            log("tv code FAILED:", repr(e)[:200])
     try:
         track = score_outlooks()
         if track:

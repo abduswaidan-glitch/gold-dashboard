@@ -1,0 +1,135 @@
+// Gold Flows Levels — يرسم مستويات منصة «تدفقات الذهب» على الشارت.
+// الاستعمال: انسخ سطر المستويات من المنصة (قسم «فلتر الاتجاه الإحصائي» ← «انسخ المستويات»)
+// ثم الصقه في خانة «Levels code» في إعدادات المؤشر. يعمل على GC1! وMGC1! مباشرة، وعلى XAUUSD
+// يُزاح كل مستوى تلقائيًا بالفرق الحي بين GC1! والسعر الفوري.
+//@version=6
+indicator("Gold Flows Levels", shorttitle = "GF Levels", overlay = true, max_lines_count = 100, max_labels_count = 100, max_boxes_count = 20)
+
+code      = input.text_area("", "Levels code", tooltip = "السطر المنسوخ من المنصة، يبدأ بـ GFL1")
+basisMode = input.string("Auto", "Price basis", options = ["Auto", "Off", "Manual"], tooltip = "Auto: على XAUUSD تُزاح المستويات بفرق GC1! − السعر الحالي. Off: بلا إزاحة. Manual: فرق تكتبه أنت.")
+manualOff = input.float(0.0, "Manual offset (GC − chart)", step = 0.1)
+showGex   = input.bool(true, "GEX: Zero Gamma, Walls, Strikes")
+showSig   = input.bool(true, "σ bands")
+showPrior = input.bool(true, "Previous day / week high-low")
+showMa    = input.bool(true, "MA50 / MA200")
+showZones = input.bool(true, "Fable zones")
+showTable = input.bool(true, "Status table")
+
+cGex   = input.color(color.new(#A970FF, 0), "GEX color")
+cSig   = input.color(color.new(#9AA4B2, 0), "σ color")
+cPrior = input.color(color.new(#E0B44C, 0), "Prior high/low color")
+cMa    = input.color(color.new(#4C9AFF, 0), "MA color")
+
+gcClose = request.security("COMEX:GC1!", timeframe.period, close, ignore_invalid_symbol = true)
+isSpot  = str.contains(syminfo.ticker, "XAU")
+float basis = basisMode == "Manual" ? manualOff : (basisMode == "Auto" and isSpot and not na(gcClose)) ? gcClose - close : 0.0
+
+grp(string k) =>
+    string g = "gex"
+    if str.startswith(k, "U") or str.startswith(k, "D")
+        g := "sig"
+    if k == "PDH" or k == "PDL" or k == "PWH" or k == "PWL"
+        g := "prior"
+    if str.startswith(k, "MA")
+        g := "ma"
+    g
+
+nameOf(string k) =>
+    switch k
+        "ZG"  => "Zero Gamma"
+        "CW"  => "Call Wall"
+        "PW"  => "Put Wall"
+        "P2"  => "Put #2"
+        "P3"  => "Put #3"
+        "C2"  => "Call #2"
+        "C3"  => "Call #3"
+        "U1"  => "+1σ"
+        "D1"  => "−1σ"
+        "U15" => "+1.5σ"
+        "D15" => "−1.5σ"
+        "U2"  => "+2σ"
+        "D2"  => "−2σ"
+        => k
+
+var array<line>  lns = array.new<line>()
+var array<label> lbs = array.new<label>()
+var array<box>   bxs = array.new<box>()
+var table tb = table.new(position.top_right, 2, 7, bgcolor = color.new(#0B1220, 15), border_color = color.new(#9AA4B2, 70), border_width = 1)
+
+if barstate.islast
+    for l in lns
+        line.delete(l)
+    for l in lbs
+        label.delete(l)
+    for b in bxs
+        box.delete(b)
+    array.clear(lns)
+    array.clear(lbs)
+    array.clear(bxs)
+    table.clear(tb, 0, 0, 1, 6)
+
+    parts = str.split(str.trim(code), "|")
+    bool ok = array.size(parts) >= 6 and array.get(parts, 0) == "GFL1"
+    if ok
+        // المستويات
+        for t in str.split(array.get(parts, 5), ";")
+            kv = str.split(t, "=")
+            if array.size(kv) == 2
+                string k = array.get(kv, 0)
+                float v = str.tonumber(array.get(kv, 1))
+                string g = grp(k)
+                bool show = g == "gex" ? showGex : g == "sig" ? showSig : g == "prior" ? showPrior : showMa
+                if show and not na(v)
+                    float y = v - basis
+                    color c = g == "gex" ? cGex : g == "sig" ? cSig : g == "prior" ? cPrior : cMa
+                    string sty = g == "sig" ? line.style_dotted : g == "ma" ? line.style_dashed : line.style_solid
+                    int w = k == "ZG" or k == "CW" or k == "PW" ? 2 : 1
+                    array.push(lns, line.new(bar_index - 1, y, bar_index, y, extend = extend.both, color = c, style = sty, width = w))
+                    array.push(lbs, label.new(bar_index + 3, y, nameOf(k) + "  " + str.tostring(y, "#.0"), style = label.style_label_left, color = color.new(color.black, 100), textcolor = c, size = size.small))
+        // مناطق Fable
+        if showZones and array.size(parts) >= 7 and str.length(array.get(parts, 6)) > 0
+            for z in str.split(array.get(parts, 6), ",")
+                rz = str.split(z, ":")
+                if array.size(rz) == 2
+                    rng = str.split(array.get(rz, 1), "-")
+                    if array.size(rng) == 2
+                        float lo = str.tonumber(array.get(rng, 0)) - basis
+                        float hi = str.tonumber(array.get(rng, 1)) - basis
+                        if not na(lo) and not na(hi)
+                            if hi - lo < 2
+                                lo -= 1
+                                hi += 1
+                            string role = array.get(rz, 0)
+                            color zc = role == "S" ? #26A69A : role == "R" ? #EF5350 : #FF9800
+                            string tag = "Fable " + (role == "S" ? "Support" : role == "R" ? "Resistance" : "Pivot")
+                            array.push(bxs, box.new(math.max(0, bar_index - 300), hi, bar_index + 25, lo, border_color = color.new(zc, 40), border_width = 1, extend = extend.right, bgcolor = color.new(zc, 82), text = tag, text_size = size.small, text_color = zc, text_halign = text.align_left))
+
+    if showTable
+        table.cell(tb, 0, 0, "Gold Flows", text_color = #F5CE6B, text_size = size.small)
+        if not ok
+            table.cell(tb, 1, 0, "الصق سطر المستويات", text_color = #EF5350, text_size = size.small)
+        else
+            string d = array.get(parts, 1)
+            dp = str.split(d, "-")
+            bool stale = false
+            if array.size(dp) == 3
+                int codeT  = timestamp("UTC", int(str.tonumber(array.get(dp, 0))), int(str.tonumber(array.get(dp, 1))), int(str.tonumber(array.get(dp, 2))), 0, 0)
+                int todayT = timestamp("UTC", year(timenow, "UTC"), month(timenow, "UTC"), dayofmonth(timenow, "UTC"), 0, 0)
+                int gap = math.round((todayT - codeT) / 86400000)
+                int dw = dayofweek(timenow, "UTC")
+                int allowed = dw == dayofweek.monday ? 3 : dw == dayofweek.sunday ? 2 : 1
+                stale := gap > allowed
+            string rg = array.get(parts, 2)
+            string ed = array.get(parts, 3)
+            string gm = array.get(parts, 4)
+            table.cell(tb, 1, 0, stale ? "قديمة: انسخ الجديدة" : "محدّثة", text_color = stale ? #EF5350 : #26A69A, text_size = size.small)
+            table.cell(tb, 0, 1, "التاريخ", text_color = color.gray, text_size = size.small)
+            table.cell(tb, 1, 1, d, text_color = color.white, text_size = size.small)
+            table.cell(tb, 0, 2, "النظام", text_color = color.gray, text_size = size.small)
+            table.cell(tb, 1, 2, rg == "up" ? "صاعد" : rg == "down" ? "هابط" : "مختلط", text_color = rg == "up" ? #26A69A : rg == "down" ? #EF5350 : #FF9800, text_size = size.small)
+            table.cell(tb, 0, 3, "الميزة", text_color = color.gray, text_size = size.small)
+            table.cell(tb, 1, 3, ed == "long" ? "ميزة Long" : "لا ميزة", text_color = color.white, text_size = size.small)
+            table.cell(tb, 0, 4, "Gamma", text_color = color.gray, text_size = size.small)
+            table.cell(tb, 1, 4, gm == "pos" ? "موجبة" : gm == "neg" ? "سالبة" : "—", text_color = color.white, text_size = size.small)
+            table.cell(tb, 0, 5, "الإزاحة", text_color = color.gray, text_size = size.small)
+            table.cell(tb, 1, 5, str.tostring(basis, "#.0"), text_color = color.white, text_size = size.small)
