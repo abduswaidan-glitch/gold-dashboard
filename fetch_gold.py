@@ -1249,6 +1249,11 @@ FILTER_LOG = os.path.join("data", "filter_log.json")
 NEW_YORK = ZoneInfo("America/New_York")
 FILTER_BANDS = (1.0, 1.5, 2.0)
 FILTER_ERAS = (("2008-01-01", "2019-12-31"), ("2020-01-01", "2099-12-31"))
+FILTER_SWING = (5, 10)                      # نطاقات السوينغ: أسبوع وأسبوعان
+LV_GROUPS = {"gex": ("zero_gamma", "call_wall", "put_wall", "put_2", "put_3", "call_2", "call_3"),
+             "sigma": ("+1s", "-1s", "+1.5s", "-1.5s", "+2s", "-2s"), "prior": ("pdh", "pdl", "pwh", "pwl"),
+             "ma": ("ma50", "ma200")}
+SCORECARD = os.path.join("data", "scorecard.json")
 
 
 def _session_done(day, now=None):
@@ -1282,8 +1287,16 @@ def direction_filter(d, now=None):
     # إحصاءات تاريخية تُعاد حسابها كل يوم (لا أرقام مكتوبة باليد)
     buckets, cover, base = {}, {k: [] for k in FILTER_BANDS}, []
     eras = [{"from": a[:4], "n": 0, "up1": [], "up10": []} for a, _ in FILTER_ERAS]
+    reg10, swing_cov = {}, {h: [] for h in FILTER_SWING}
+    regime_at = lambda i: ("up" if px[i] > ma(i, 200) and px[i] > px[i - 120] else
+                           "down" if px[i] < ma(i, 200) and px[i] < px[i - 120] else "mixed")
     for i in range(250, n - 1):
         dn, above = feat(i)
+        if i + 10 < n:
+            reg10.setdefault(regime_at(i), []).append(px[i + 10] > px[i])
+        for h in FILTER_SWING:
+            if i + h < n:
+                swing_cov[h].append(abs(math.log(px[i + h] / px[i])) <= vol[i] * math.sqrt(h))
         nx = lr[i + 1]
         b = buckets.setdefault(("down" if dn else "up") + "_" + ("above" if above else "below"), {"up1": [], "up5": []})
         b["up1"].append(nx > 0)
@@ -1327,7 +1340,13 @@ def direction_filter(d, now=None):
                "zero": round(g["zero_all"] * r, 1), "call_wall": round((g.get("call_wall") or 0) * r, 1) or None,
                "put_wall": round((g.get("put_wall") or 0) * r, 1) or None}
         levels += [{"id": "zero_gamma", "v": gex["zero"]}]
-        levels += [{"id": k, "v": gex[k]} for k in ("call_wall", "put_wall") if gex[k]]
+        levels += [{"id": k, "v": gex[k], "k": g.get(k)} for k in ("call_wall", "put_wall") if gex[k]]
+        # ثاني وثالث أكبر تركّز للـ Puts وللـ Calls (الجدار وحده يُخفي Strikes قريبة منه في الحجم)
+        walls = {g.get("put_wall"), g.get("call_wall")}
+        for side, col in (("put", 2), ("call", 1)):
+            top = sorted((x for x in g.get("strikes") or [] if x[0] not in walls and (x[col] < 0 if side == "put" else x[col] > 0)),
+                         key=lambda x: -abs(x[col]))[:2]
+            levels += [{"id": f"{side}_{j}", "v": round(x[0] * r, 1), "k": x[0], "m": x[col]} for j, x in enumerate(top, 2)]
     if signal == "long_edge":
         inval = {"kind": "long_void_below", "v": round(max(m200, c - 2 * su), 1)}
     elif not above:
@@ -1336,21 +1355,26 @@ def direction_filter(d, now=None):
         inval = {"kind": "wait_down_close", "v": round(m200, 1)}
     cur = {"date": days[i], "close": round(c, 2), "signal": signal, "regime": regime, "above200": above,
            "sigma": round(sig * 100, 3), "z": round(lr[i] / vol[i - 1], 2) if vol[i - 1] else None,
-           "gex": gex and gex["regime"], "zero": gex and gex["zero"]}
+           "gex": gex and gex["regime"], "zero": gex and gex["zero"],
+           "levels": [[x["id"], x["v"]] for x in levels if x["id"] != "close"]}
+    swing = [{"days": h, "usd": round(su * math.sqrt(h), 1), "lo": round(c - su * math.sqrt(h), 1),
+              "hi": round(c + su * math.sqrt(h), 1), "cover": _pct(swing_cov[h])} for h in FILTER_SWING]
     return {"asof": days[i], "close": round(c, 2), "day_ret": round(lr[i] * 100, 2), "z": cur["z"],
             "ma200": round(m200, 1), "ma50": round(m50, 1), "mom120": round(mom120, 1), "above200": above,
             "regime": regime, "signal": signal, "bucket": ("down" if dn else "up") + "_" + ("above" if above else "below"),
             "sigma_pct": round(sig * 100, 2), "sigma_usd": round(su, 1), "bands": bands,
             "levels": sorted(levels, key=lambda x: -x["v"]), "gex": gex, "invalidation": inval,
+            "swing": swing, "regime_up10": {k: {"n": len(v), "up10": _pct(v)} for k, v in reg10.items()},
             "stats": {"buckets": stats, "base_up1": _pct(base), "edge_eras": eras, "since": days[250]},
-            "track": score_filter(cur, days, px)}
+            "track": score_filter(cur, days, px, bars)}
 
 
-def score_filter(cur, days, px):
+def score_filter(cur, days, px, bars=None):
     """يسجّل قراءة كل جلسة مكتملة ويقيّمها بعد الجلسة التالية: هل صدقت الميزة؟ وهل بقي الإغلاق داخل نطاقات σ؟"""
     log_ = load(FILTER_LOG, [])
     by = {e["date"]: e for e in log_}
     by.setdefault(cur["date"], cur)
+    by[cur["date"]].setdefault("levels", cur["levels"])     # القراءة تُجمَّد عند أول تسجيل؛ نكمل المستويات فقط إن نقصت
     pos = {k: j for j, k in enumerate(days)}
     for e in by.values():
         j = pos.get(e["date"])
@@ -1360,6 +1384,16 @@ def score_filter(cur, days, px):
             e["r1"] = round(math.log(px[j + 1] / px[j]) * 100, 3)
         if "up5" not in e and j + 5 < len(px):
             e["up5"] = px[j + 5] > px[j]
+        # المستويات: هل لمسها سعر الجلسة التالية؟ وإن لمسها، هل صمدت (أغلق السعر على جهته الأصلية) أم كُسرت؟
+        if "lv" not in e and e.get("levels") and j + 1 < len(days) and (bars or {}).get(days[j + 1]):
+            b = bars[days[j + 1]]
+            hi, lo, c1 = b[2], b[3], px[j + 1]
+            res = []
+            for lid, v in e["levels"]:
+                up = v > e["close"]
+                t = hi >= v if up else lo <= v
+                res.append([lid, int(t), (int(c1 < v) if up else int(c1 > v)) if t else None])
+            e["lv"] = res
     log_ = [by[k] for k in sorted(by)][-500:]
     save(FILTER_LOG, log_)
     done = [e for e in log_ if "r1" in e]
@@ -1375,7 +1409,111 @@ def score_filter(cur, days, px):
         if e.get("gex"):
             gx.setdefault(e["gex"], []).append(abs(e["r1"]) / e["sigma"])
     out["gex_move_sigma"] = {k: {"n": len(v), "avg": round(sum(v) / len(v), 2)} for k, v in gx.items()}
+    lv = {g_: {"touched": 0, "held": 0} for g_ in LV_GROUPS}
+    by_id = {}
+    for e in log_:
+        for lid, t, h in e.get("lv") or []:
+            grp = next((k for k, ids in LV_GROUPS.items() if lid in ids), None)
+            x = by_id.setdefault(lid, {"touched": 0, "held": 0, "days": 0})
+            x["days"] += 1
+            if t:
+                x["touched"] += 1
+                x["held"] += h
+                if grp:
+                    lv[grp]["touched"] += 1
+                    lv[grp]["held"] += h
+    out["levels"] = {k: {"touched": v["touched"], "held": round(v["held"] / v["touched"] * 100, 1) if v["touched"] else None}
+                     for k, v in lv.items()}
+    out["levels_by_id"] = by_id
     out["rows"] = [{k: e.get(k) for k in ("date", "close", "signal", "regime", "sigma", "r1", "gex")} for e in log_[-15:]]
+    return out
+
+
+# ---------------------------------------------------------------- weekly scorecard (rules fixed in advance)
+# قواعد الحكم مكتوبة مسبقًا كي لا تُفسَّر الأرقام لاحقًا لصالح المنصة. يقرأ هذا الملف التقرير الأسبوعي على البريد.
+SC_RULES = {
+    "bands": {"min_n": 60, "tol_pts": 5},          # كل نطاق σ في حدود ±5 نقاط من نسبته التاريخية بعد 60 جلسة
+    "edge": {"min_n": 30, "pass_pct": 55},         # ميزة Long تصيب 55٪ أو أكثر بعد 30 إشارة
+    "fable": {"prelim_windows": 13, "min_windows": 26},   # مهارة Brier موجبة مقابل المعدل التاريخي، بنوافذ 14 يومًا مستقلة
+    "levels": {"min_touch": 20, "margin_pts": 10},  # مستويات GEX تصمد أكثر من المستويات العادية بـ 10 نقاط
+    "gex_regime": {"min_n": 20, "margin_sigma": 0.15},   # الحركة في Gamma سالبة أكبر منها في الموجبة
+}
+
+
+def _windows(dates, days=None):
+    """عدد النوافذ المستقلة (لا تتداخل) بين تواريخ التوقعات."""
+    days, n, last = days or OUTLOOK_DAYS, 0, None
+    for d in sorted(dt.date.fromisoformat(x) for x in dates):
+        if last is None or (d - last).days >= days:
+            n, last = n + 1, d
+    return n
+
+
+def scorecard(data, now=None):
+    now = now or dt.datetime.now(dt.timezone.utc)
+    df = data.get("direction_filter") or {}
+    tr = df.get("track") or {}
+    R, out = SC_RULES, {"generated_utc": now.replace(microsecond=0).isoformat(), "rules": SC_RULES}
+    # 1) نطاقات σ
+    n = tr.get("scored") or 0
+    exp = {f"{b['k']:g}": b["cover"] for b in df.get("bands") or []}
+    got = tr.get("cover") or {}
+    v = "not_yet" if n < R["bands"]["min_n"] else (
+        "pass" if all(got.get(k) is not None and abs(got[k] - exp[k]) <= R["bands"]["tol_pts"] for k in exp) else "fail")
+    out["bands"] = {"verdict": v, "n": n, "need": R["bands"]["min_n"], "actual": got, "expected": exp}
+    # 2) ميزة Long
+    n = tr.get("edge_n") or 0
+    v = "not_yet" if n < R["edge"]["min_n"] else ("pass" if (tr.get("edge_up1") or 0) >= R["edge"]["pass_pct"] else "fail")
+    out["edge"] = {"verdict": v, "n": n, "need": R["edge"]["min_n"], "hit_next": tr.get("edge_up1"), "hit_5": tr.get("edge_up5"),
+                   "no_edge_days_up": tr.get("none_up1"), "signal_now": df.get("signal"), "regime_now": df.get("regime")}
+    # 3) انحياز Fable
+    ot = data.get("outlook_track") or {}
+    s = ot.get("summary") or {}
+    scored = [e for e in ot.get("rows") or [] if e.get("result")]
+    w = _windows([e["base"]["date"] for e in scored if e.get("base")])
+    skill = s.get("skill")
+    beat_guess = s.get("brier") is not None and s["brier"] < s.get("brier_naive", 0.667)
+    if w < R["fable"]["prelim_windows"]:
+        v = "not_yet"
+    elif w < R["fable"]["min_windows"]:
+        v = "preliminary_positive" if (skill or 0) > 0 else "preliminary_negative"
+    else:
+        v = "pass" if (skill or 0) > 0 else "fail"
+    week_ago = (now - dt.timedelta(days=7)).date().isoformat()
+    out["fable"] = {"verdict": v, "scored": s.get("n", 0), "pending": s.get("pending", 0), "independent_windows": w,
+                    "need": R["fable"]["min_windows"], "hit_pct": s.get("hit"), "brier": s.get("brier"),
+                    "brier_guess": s.get("brier_naive", 0.667), "brier_base_rate": s.get("brier_base"), "skill_vs_base_pct": skill,
+                    "beats_guessing": beat_guess,
+                    "scored_this_week": [{"date": e["date"], "bias": e["bias"], "p": dict(zip(e["dirs"], e["p"])),
+                                          "outcome": e["result"]["outcome"], "ret": e["result"]["ret"], "brier": e["result"]["brier"]}
+                                         for e in scored if e["result"]["date"] >= week_ago]}
+    # 4) المستويات: GEX مقابل المستويات العادية (σ وأعلى/أدنى سابق)
+    lv = tr.get("levels") or {}
+    gx = lv.get("gex") or {}
+    ctrl_t = sum((lv.get(k) or {}).get("touched", 0) for k in ("sigma", "prior"))
+    ctrl_h = sum(((lv.get(k) or {}).get("held") or 0) * (lv.get(k) or {}).get("touched", 0) / 100 for k in ("sigma", "prior"))
+    ctrl = round(ctrl_h / ctrl_t * 100, 1) if ctrl_t else None
+    if (gx.get("touched") or 0) < R["levels"]["min_touch"] or ctrl_t < R["levels"]["min_touch"]:
+        v = "not_yet"
+    else:
+        v = "pass" if gx["held"] - ctrl >= R["levels"]["margin_pts"] else "fail"
+    out["levels"] = {"verdict": v, "need_touches": R["levels"]["min_touch"], "groups": lv, "control_held": ctrl,
+                     "control_touched": ctrl_t, "by_level": tr.get("levels_by_id")}
+    # 5) نظام GEX: هل الحركة في Gamma سالبة أكبر فعلًا؟
+    gm = tr.get("gex_move_sigma") or {}
+    neg, pos = gm.get("negative") or {}, gm.get("positive") or {}
+    if (neg.get("n") or 0) < R["gex_regime"]["min_n"] or (pos.get("n") or 0) < R["gex_regime"]["min_n"]:
+        v = "not_yet"
+    else:
+        v = "pass" if neg["avg"] - pos["avg"] >= R["gex_regime"]["margin_sigma"] else "fail"
+    out["gex_regime"] = {"verdict": v, "need_each": R["gex_regime"]["min_n"], "negative": neg, "positive": pos}
+    # 6) الأسبوع
+    out["week"] = [r for r in tr.get("rows") or [] if r["date"] >= week_ago]
+    out["now"] = {k: df.get(k) for k in ("asof", "close", "regime", "signal", "sigma_usd", "swing", "invalidation", "gex")}
+    ai = (data.get("ai") or {}).get("history") or []
+    if ai:
+        last = ai[-1]
+        out["now"]["fable_bias"] = {"date": last.get("date"), "outlook": last.get("outlook")}
     return out
 
 
@@ -3380,6 +3518,10 @@ def main():
             data["outlook_track"] = track
     except Exception as e:
         log("outlook scoring FAILED:", repr(e)[:200])
+    try:
+        save(SCORECARD, scorecard(data))
+    except Exception as e:
+        log("scorecard FAILED:", repr(e)[:200])
     # data.json لا يُكتب إلا إذا تغيّرت البيانات فعلًا، كي لا يتضخم سجل المستودع
     core = lambda x: json.dumps({k: v for k, v in x.items() if k not in ("generated_utc", "sources", "data_utc")},
                                 ensure_ascii=False, sort_keys=True)
