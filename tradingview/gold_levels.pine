@@ -1,18 +1,25 @@
 // Gold Flows Levels — يرسم مستويات منصة «تدفقات الذهب» على الشارت.
 // الاستعمال: انسخ سطر المستويات من المنصة (قسم «فلتر الاتجاه الإحصائي» ← «انسخ المستويات»)
-// ثم الصقه في خانة «Levels code» في إعدادات المؤشر. يعمل على GC1! وMGC1! مباشرة، وعلى XAUUSD
-// يُزاح كل مستوى تلقائيًا بالفرق الحي بين GC1! والسعر الفوري.
+// ثم الصقه في خانة «Levels code» في إعدادات المؤشر. يرسم مناطق التجمّع (كل منطقة تجمع مستويات متقاربة)،
+// والمستويات المنفردة اختيارية. يعمل على GC1! وMGC1! مباشرة، وعلى XAUUSD يُزاح كل شيء تلقائيًا بالفرق الحي
+// بين GC1! والسعر الفوري.
 //@version=6
 indicator("Gold Flows Levels", shorttitle = "GF Levels", overlay = true, max_lines_count = 100, max_labels_count = 100, max_boxes_count = 20)
 
-code      = input.text_area("", "Levels code", tooltip = "السطر المنسوخ من المنصة، يبدأ بـ GFL1")
+code      = input.text_area("", "Levels code", tooltip = "السطر المنسوخ من المنصة، يبدأ بـ GFL2")
 basisMode = input.string("Auto", "Price basis", options = ["Auto", "Off", "Manual"], tooltip = "Auto: على XAUUSD تُزاح المستويات بفرق GC1! − السعر الحالي. Off: بلا إزاحة. Manual: فرق تكتبه أنت.")
 manualOff = input.float(0.0, "Manual offset (GC − chart)", step = 0.1)
-showGex   = input.bool(true, "GEX: Zero Gamma, Walls, Strikes")
-showSig   = input.bool(true, "σ bands")
-showPrior = input.bool(true, "Previous day / week high-low")
-showMa    = input.bool(true, "MA50 / MA200")
-showZones = input.bool(true, "Fable zones")
+showZones = input.bool(true, "Confluence zones")
+onlyFable = input.bool(false, "Only Fable's zones (★)")
+zoneText  = input.bool(true, "Zone labels")
+showLines = input.bool(false, "Individual levels (lines)")
+showGex   = input.bool(true, "  · GEX: Zero Gamma, Walls, Strikes")
+showSig   = input.bool(false, "  · σ bands")
+showPrior = input.bool(true, "  · Previous day / week high-low")
+showMa    = input.bool(true, "  · MA50 / MA200")
+cSup      = input.color(color.new(#4C7DD9, 0), "Support zone color")
+cRes      = input.color(color.new(#D9534F, 0), "Resistance zone color")
+cPiv      = input.color(color.new(#FF9800, 0), "Pivot zone color")
 showTable = input.bool(true, "Status table")
 
 cGex   = input.color(color.new(#A970FF, 0), "GEX color")
@@ -49,6 +56,10 @@ nameOf(string k) =>
         "D15" => "−1.5σ"
         "U2"  => "+2σ"
         "D2"  => "−2σ"
+        "PDH" => "PDH"
+        "PDL" => "PDL"
+        "PWH" => "PWH"
+        "PWL" => "PWL"
         => k
 
 var array<line>  lns = array.new<line>()
@@ -69,10 +80,10 @@ if barstate.islast
     table.clear(tb, 0, 0, 1, 6)
 
     parts = str.split(str.trim(code), "|")
-    bool ok = array.size(parts) >= 6 and array.get(parts, 0) == "GFL1"
+    bool ok = array.size(parts) >= 6 and array.get(parts, 0) == "GFL2"
     if ok
-        // المستويات
-        for t in str.split(array.get(parts, 5), ";")
+        // المستويات المنفردة (اختيارية)
+        for t in (showLines ? str.split(array.get(parts, 5), ";") : array.new<string>())
             kv = str.split(t, "=")
             if array.size(kv) == 2
                 string k = array.get(kv, 0)
@@ -86,23 +97,24 @@ if barstate.islast
                     int w = k == "ZG" or k == "CW" or k == "PW" ? 2 : 1
                     array.push(lns, line.new(bar_index - 1, y, bar_index, y, extend = extend.both, color = c, style = sty, width = w))
                     array.push(lbs, label.new(bar_index + 3, y, nameOf(k) + "  " + str.tostring(y, "#.0"), style = label.style_label_left, color = color.new(color.black, 100), textcolor = c, size = size.small))
-        // مناطق Fable
+        // مناطق التجمّع: lo-hi:الوزن:الدور:Fable:الأعضاء
         if showZones and array.size(parts) >= 7 and str.length(array.get(parts, 6)) > 0
             for z in str.split(array.get(parts, 6), ",")
-                rz = str.split(z, ":")
-                if array.size(rz) == 2
-                    rng = str.split(array.get(rz, 1), "-")
-                    if array.size(rng) == 2
+                f = str.split(z, ":")
+                if array.size(f) == 5
+                    rng = str.split(array.get(f, 0), "-")
+                    bool fav = array.get(f, 3) == "1"
+                    if array.size(rng) == 2 and (fav or not onlyFable)
                         float lo = str.tonumber(array.get(rng, 0)) - basis
                         float hi = str.tonumber(array.get(rng, 1)) - basis
                         if not na(lo) and not na(hi)
-                            if hi - lo < 2
-                                lo -= 1
-                                hi += 1
-                            string role = array.get(rz, 0)
-                            color zc = role == "S" ? #26A69A : role == "R" ? #EF5350 : #FF9800
-                            string tag = "Fable " + (role == "S" ? "Support" : role == "R" ? "Resistance" : "Pivot")
-                            array.push(bxs, box.new(math.max(0, bar_index - 300), hi, bar_index + 25, lo, border_color = color.new(zc, 40), border_width = 1, extend = extend.right, bgcolor = color.new(zc, 82), text = tag, text_size = size.small, text_color = zc, text_halign = text.align_left))
+                            string role = array.get(f, 2)
+                            color zc = role == "S" ? cSup : role == "R" ? cRes : cPiv
+                            string names = ""
+                            for m in str.split(array.get(f, 4), "+")
+                                names += (str.length(names) > 0 ? " · " : "") + nameOf(m)
+                            string tag = zoneText ? (fav ? "★ " : "") + names + "  (" + array.get(f, 1) + ")" : ""
+                            array.push(bxs, box.new(math.max(0, bar_index - 300), hi, bar_index + 25, lo, border_color = color.new(zc, fav ? 0 : 50), border_width = fav ? 2 : 1, extend = extend.right, bgcolor = color.new(zc, fav ? 70 : 85), text = tag, text_size = size.small, text_color = color.new(zc, 0), text_halign = text.align_right))
 
     if showTable
         table.cell(tb, 0, 0, "Gold Flows", text_color = #F5CE6B, text_size = size.small)
