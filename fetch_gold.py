@@ -1364,6 +1364,7 @@ def direction_filter(d, now=None):
             "regime": regime, "signal": signal, "bucket": ("down" if dn else "up") + "_" + ("above" if above else "below"),
             "sigma_pct": round(sig * 100, 2), "sigma_usd": round(su, 1), "bands": bands,
             "levels": sorted(levels, key=lambda x: -x["v"]), "gex": gex, "invalidation": inval,
+            "zones": level_zones(levels, c, su),
             "swing": swing, "regime_up10": {k: {"n": len(v), "up10": _pct(v)} for k, v in reg10.items()},
             "stats": {"buckets": stats, "base_up1": _pct(base), "edge_eras": eras, "since": days[250]},
             "track": score_filter(cur, days, px, bars)}
@@ -1374,36 +1375,74 @@ TV_KEYS = {"zero_gamma": "ZG", "call_wall": "CW", "put_wall": "PW", "put_2": "P2
            "pdh": "PDH", "pdl": "PDL", "pwh": "PWH", "pwl": "PWL", "ma50": "MA50", "ma200": "MA200"}
 
 
+LV_WEIGHT = {"zero_gamma": 2, "call_wall": 2, "put_wall": 2, "pdh": 1.5, "pdl": 1.5, "pwh": 1.5, "pwl": 1.5,
+             "ma50": 1.5, "ma200": 1.5}                       # الباقي (Strikes الثانوية ونطاقات σ) = 1
+
+
+def level_zones(levels, close, su, max_zones=6):
+    """مناطق التجمّع: نافذة عرضها 0.6σ تجمع أكبر وزن من المستويات المتقاربة، ثم تُحذف مستوياتها ونكرر.
+    منطقة من نطاقات σ وحدها لا تُعدّ تجمّعًا، ومستوى منفرد لا يكون منطقة إلا إن كان Zero Gamma أو Wall."""
+    pts = sorted((x["v"], x["id"]) for x in levels if x["id"] != "close")
+    sig = set(LV_GROUPS["sigma"])
+    W, pad, used, out = 0.6 * su, 0.08 * su, set(), []
+    while len(out) < max_zones:
+        best = None
+        for i, (p0, _) in enumerate(pts):
+            if i in used:
+                continue
+            mem = []
+            for j in range(i, len(pts)):
+                if j in used or pts[j][0] - p0 > W:
+                    break
+                mem.append(j)
+            ids = [pts[j][1] for j in mem]
+            if all(k in sig for k in ids):
+                continue
+            score = sum(LV_WEIGHT.get(k, 1) for k in ids)
+            if len(ids) < 2 and score < 2:
+                continue
+            key = (score, len(ids), -(pts[mem[-1]][0] - p0))
+            if best is None or key > best[0]:
+                best = (key, mem)
+        if not best:
+            break
+        used.update(best[1])
+        lo, hi = pts[best[1][0]][0] - pad, pts[best[1][-1]][0] + pad
+        out.append({"lo": round(lo, 1), "hi": round(hi, 1), "score": best[0][0], "members": [pts[j][1] for j in best[1]],
+                    "role": "support" if hi < close else "resistance" if lo > close else "pivot"})
+    out.sort(key=lambda z: -z["hi"])
+    for k, z in enumerate(out, 1):
+        z["id"] = f"Z{k}"
+    return out
+
+
 def _focus_zones(raw, df):
-    """مناطق Fable: يختار معرّفات من مستويات الفلتر فقط، والكود يحسب السعر، فلا يكتب النموذج أسعارًا من عنده."""
-    if not isinstance(raw, list) or not df or not df.get("levels"):
+    """مناطق Fable: يختار من مناطق التجمّع بمعرّفاتها (Z1، Z2…) ولا يكتب أسعارًا."""
+    if not isinstance(raw, list) or not df or not df.get("zones"):
         return None
-    lv = {x["id"]: x["v"] for x in df["levels"] if x.get("id") != "close"}
-    span = 1.5 * (df.get("sigma_usd") or 50)
-    zones = []
-    for z in raw[:4]:
-        if not isinstance(z, dict) or z.get("role") not in ("support", "resistance", "pivot"):
-            continue
-        ids = [i for i in (z.get("ids") or [])[:3] if i in lv]
-        if not ids:
-            continue
-        lo, hi = min(lv[i] for i in ids), max(lv[i] for i in ids)
-        if hi - lo > span:
-            continue
-        zones.append({"ids": ids, "lo": round(lo, 1), "hi": round(hi, 1), "role": z["role"], "why": str(z.get("why") or "")[:200]})
-    return {"asof": df.get("asof"), "zones": zones} if zones else None
+    zs = {z["id"]: z for z in df["zones"]}
+    picked, seen = [], set()
+    for x in raw[:4]:
+        zid = isinstance(x, dict) and x.get("zone")
+        if zid in zs and zid not in seen:
+            seen.add(zid)
+            picked.append({"zone": zid, "why": str(x.get("why") or "")[:200]})
+    return {"asof": df.get("asof"), "zones": picked} if picked else None
 
 
 def tv_code(df, ai):
-    """سطر واحد يُلصق في مؤشر TradingView: الإصدار|التاريخ|النظام|الميزة|Gamma|المستويات|مناطق Fable.
-    مناطق Fable تُضاف فقط إن بُنيت على مستويات الجلسة نفسها."""
+    """سطر واحد يُلصق في مؤشر TradingView:
+    GFL2|التاريخ|النظام|الميزة|Gamma|KEY=price;…|lo-hi:الوزن:الدور:Fable:الأعضاء,…
+    مناطق Fable تُعلَّم فقط إن بُنيت على مستويات الجلسة نفسها."""
     lv = ";".join(f"{TV_KEYS[x['id']]}={x['v']:.1f}" for x in df.get("levels") or [] if x.get("id") in TV_KEYS)
     gx = {"positive": "pos", "negative": "neg"}.get((df.get("gex") or {}).get("regime"), "na")
     focus = ((ai or {}).get("latest") or {}).get("focus") or {}
-    zones = focus.get("zones") if focus.get("asof") == df.get("asof") else []
-    zs = ",".join(f"{z['role'][0].upper()}:{z['lo']:.1f}-{z['hi']:.1f}" for z in zones or [])
+    fz = {z["zone"]: z["why"] for z in focus.get("zones") or [] if "zone" in z} if focus.get("asof") == df.get("asof") else {}
+    zs = ",".join(f"{z['lo']:.1f}-{z['hi']:.1f}:{z['score']:g}:{z['role'][0].upper()}:{int(z['id'] in fz)}:"
+                  + "+".join(TV_KEYS.get(m, m) for m in z["members"]) for z in df.get("zones") or [])
     edge = "long" if df.get("signal") == "long_edge" else "none"
-    return f"GFL1|{df.get('asof')}|{df.get('regime')}|{edge}|{gx}|{lv}|{zs}", (zones or [])
+    picked = [{**z, "why": fz[z["id"]]} for z in df.get("zones") or [] if z["id"] in fz]
+    return f"GFL2|{df.get('asof')}|{df.get('regime')}|{edge}|{gx}|{lv}|{zs}", picked
 
 
 def score_filter(cur, days, px, bars=None):
@@ -2620,7 +2659,7 @@ def ai_digest(d):
     if df.get("bands"):
         g["statistical_direction_filter"] = {
             **{k: df.get(k) for k in ("asof", "close", "day_ret", "z", "ma200", "ma50", "mom120", "regime", "signal",
-                                      "sigma_pct", "sigma_usd", "bands", "levels", "gex", "invalidation")},
+                                      "sigma_pct", "sigma_usd", "bands", "levels", "zones", "gex", "invalidation")},
             "history": df.get("stats"), "live_scoring": {k: v for k, v in (df.get("track") or {}).items() if k != "rows"},
             "note": ("tested on gold since 2008: only signal=long_edge (down session while above MA200, next session up ~57%) "
                      "held in every era; signal=none means no statistical edge; bands = next-close range from 20-session "
@@ -2687,10 +2726,10 @@ Rules:
 - statistical_direction_filter is shown publicly under your bias: a trend regime, a tested edge (or none), volatility bands
   and a levels map. Explain in one or two sentences how today's news and data fit it. If your 14-day bias points the other
   way from the regime, or you see an edge where it says none, say why. Its numbers may be quoted.
-- focus_zones: pick the 3 or 4 zones that matter most for the next session from statistical_direction_filter.levels.
-  Each zone is 1 to 3 of its level ids that sit close together (within about one sigma_usd). Use only ids from that
-  list and never write prices yourself. role: "support", "resistance" or "pivot". why: one short Arabic line grounded in
-  the data (e.g. which levels coincide and what the gamma regime implies there). These zones are drawn on the owner's chart.
+- focus_zones: statistical_direction_filter.zones lists confluence zones (Z1, Z2...) built in code from the levels map,
+  with their members and weight. Pick the 3 or 4 that matter most for the next session, by zone id only; never write
+  prices. why: one short Arabic line grounded in the data (which levels coincide there and what the gamma regime
+  implies). The chosen zones are highlighted on the owner's chart.
 - Be factual. This is not investment advice: no buy/sell recommendations, no price targets.
 - After weighing every section and today's events, give your own analytical bias for gold over the next 14 calendar days
   and exactly three scenarios, one per direction, with estimated probabilities in whole percent that sum to 100, most likely
@@ -2705,7 +2744,7 @@ Return ONLY one JSON object, no markdown fences, with exactly this shape:
         "sections": [{"title": "...", "body": "..."}], "events": [{"title": "...", "impact": "...", "source": "https://..."}],
         "watch": ["..."], "risks": "...",
         "outlook": {"bias_note": "one line on why", "scenarios": [{"title": "...", "why": "..."}, {...}, {...}]}},
- "focus_zones": [{"ids": ["put_2", "-1.5s"], "role": "support|resistance|pivot", "why": "سطر قصير بالعربية"}]}
+ "focus_zones": [{"zone": "Z2", "why": "سطر قصير بالعربية"}]}
 The three scenarios follow the order of outlook.scenarios; each direction appears exactly once.
 Also add a top-level "research_map" (English only, up to 10 items) describing what you searched for and why, so the
 platform can learn which outside information each section needs:
