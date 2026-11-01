@@ -1627,8 +1627,7 @@ WGC_SYSTEM = """Extract numbers from a World Gold Council monthly "Gold ETF Flow
 {"data_month":"YYYY-MM","global_holdings_t":number|null,"global_demand_t":number|null,"global_flow_usd_bn":number|null,
  "aum_usd_bn":number|null,
  "regions":{"north_america":{"flow_usd_bn":number|null,"demand_t":number|null},"europe":{...},"asia":{...},"other":{...}},
- "headline_en":"one sentence","headline_ar":"جملة واحدة بالعربية الفصحى","headline_it":"una frase in italiano",
- "headline_es":"una frase en español"}
+ "headline_ar":"جملة واحدة بالعربية الفصحى"}
 Use null when a number is not stated. Outflows are negative. data_month is the month the data covers (not the publication month).
 US$ millions must be converted to billions (e.g. US$495mn = 0.495)."""
 
@@ -2076,7 +2075,7 @@ DAILY_REPORT_AT = (13, 30)
 class _AIWait(Exception):
     pass
 AI_URL = "https://api.anthropic.com/v1/messages"
-AI_LANGS = ("ar", "en", "it", "es")
+AI_LANGS = ("ar",)                      # المنصة بالعربية فقط
 PRICES_PER_MTOK = (("claude-fable", 10, 50), ("claude-mythos", 10, 50), ("claude-opus-5-5", 4, 20), ("claude-opus", 5, 25),
                    ("claude-sonnet", 2, 10), ("claude-haiku-5-5", 0.1, 0.5), ("claude-haiku", 1, 5))
 
@@ -2657,19 +2656,15 @@ Rules:
   first. The directions are scored objectively later against the COMEX gold close 14 days from now:
   "up" = more than 2% above today's price, "down" = more than 2% below, "flat" = within ±2%.
   Each scenario gets one short line on why, grounded in the data or events.
-- Write the same report in four languages, with the same content and numbers in each:
-  Arabic in correct Modern Standard Arabic (فصحى); clear, professional English; natural, correct professional Italian;
-  natural, correct professional Spanish (Spain). Keep technical terms in English in every language (COT, EFP, ETF, Long, Short).
+- Write the report in Arabic only, in correct Modern Standard Arabic (فصحى). Keep technical terms in English
+  (COT, EFP, ETF, Long, Short, GEX, Gamma, Open Interest).
 Return ONLY one JSON object, no markdown fences, with exactly this shape:
 {"outlook": {"bias": "bullish|bearish|neutral", "scenarios": [{"dir": "up|flat|down", "p": 45}, {"dir": "...", "p": 30}, {"dir": "...", "p": 25}]},
  "ar": {"headline": "...", "tone": "إيجابي|سلبي|محايد|متباين", "summary": ["...", "..."],
         "sections": [{"title": "...", "body": "..."}], "events": [{"title": "...", "impact": "...", "source": "https://..."}],
         "watch": ["..."], "risks": "...",
-        "outlook": {"bias_note": "one line on why", "scenarios": [{"title": "...", "why": "..."}, {...}, {...}]}},
- "en": {same keys, "tone": "positive|negative|neutral|mixed"},
- "it": {same keys, "tone": "positivo|negativo|neutrale|misto"},
- "es": {same keys, "tone": "positivo|negativo|neutral|mixto"}}
-The three scenarios in every language follow the order of outlook.scenarios; each direction appears exactly once.
+        "outlook": {"bias_note": "one line on why", "scenarios": [{"title": "...", "why": "..."}, {...}, {...}]}}}
+The three scenarios follow the order of outlook.scenarios; each direction appears exactly once.
 Also add a top-level "research_map" (English only, up to 10 items) describing what you searched for and why, so the
 platform can learn which outside information each section needs:
  "research_map": [{"section": "macro|gex|countries|cb|banks|noncomm|signals|f13|comex|etf|physical|general",
@@ -2798,7 +2793,7 @@ def _outlook(rep):
     for lang in AI_LANGS:
         lo = (rep.get(lang) or {}).get("outlook") or {}
         sc = lo.get("scenarios")
-        if lang in ("ar", "en") and not (isinstance(sc, list) and len(sc) >= 3):
+        if lang == "ar" and not (isinstance(sc, list) and len(sc) >= 3):
             return None
         if isinstance(rep.get(lang), dict) and isinstance(sc, list):
             rep[lang]["outlook"] = {"bias_note": str(lo.get("bias_note") or ""),
@@ -2829,7 +2824,7 @@ def research_memory(prev_ai, releases, now):
     found = []
     if rlog and rlog[-1].get("generated_utc") == since:
         found = [{k: m.get(k) for k in ("section", "need", "found", "sources")} for m in rlog[-1].get("research_map") or []]
-    events = [{"title": e.get("title"), "source": e.get("source")} for e in (last.get("en") or {}).get("events") or []]
+    events = [{"title": e.get("title"), "source": e.get("source")} for e in (last.get("ar") or last.get("en") or {}).get("events") or []]
     nm = (now.replace(day=1) + dt.timedelta(days=32)).replace(day=1)
     fri = now.date() + dt.timedelta(days=(4 - now.weekday()) % 7)
     return {"previous_report_utc": since,
@@ -2945,8 +2940,8 @@ def ai_report(data, prev, new_major, releases):
     i, j = text.find("{"), text.rfind("}")
     try:
         rep = json.loads(text[i:j + 1])
-        if not (isinstance(rep.get("ar"), dict) and isinstance(rep.get("en"), dict)):
-            raise ValueError("missing ar/en")
+        if not isinstance(rep.get("ar"), dict):
+            raise ValueError("missing ar")
     except Exception as e:
         raise RuntimeError(f"AI report: could not parse JSON ({e}); first chars: {text[:120]!r}")
     outlook = _outlook(rep)
@@ -3108,7 +3103,7 @@ def positioning(d):
     return out
 
 
-POS_NOTE_SYSTEM = """You write ONE short sentence (max 28 words in every language) reading COMEX gold futures positioning for a dashboard, in four languages.
+POS_NOTE_SYSTEM = """You write ONE short sentence (max 28 words) in Arabic reading COMEX gold futures positioning for a dashboard.
 Data has three layers: (1) CME daily open interest with price (freshest, 1/5/15 sessions; cannot split spreads),
 (2) COT weekly 'who': changes in long/short/spread for managed_money (mm), swap dealers, producers (3 days old),
 (3) mm_cost: estimated average entry of the Managed Money net long vs today's price.
@@ -3119,10 +3114,10 @@ the meaning (e.g. recent buyers under water = loss-cutting). If roll.warn is tru
 Never write internal codes or field names (flat_oi, long_liquidation, oi_change_dir, mm_cost, roll.warn...): say them in plain words
 (e.g. "open interest barely changed", "longs exiting"). Never invent causes or news, never call selling profit-taking unless mm_cost shows profit, no trade advice, no hype.
 Arabic in Modern Standard Arabic, keep terms like Open Interest, COT, Managed Money, Long, Short, Spread in English.
-Return only JSON: {"ar": "...", "en": "...", "it": "...", "es": "..."}"""
+Return only JSON: {"ar": "..."}"""
 
 
-POS_NOTE_V = 2              # رفعه يعيد كتابة السطر عند تغيير التعليمات
+POS_NOTE_V = 3              # رفعه يعيد كتابة السطر عند تغيير التعليمات
 
 
 def positioning_note(pos, prev_note):
