@@ -1435,6 +1435,7 @@ SC_RULES = {
     "bands": {"min_n": 60, "tol_pts": 5},          # كل نطاق σ في حدود ±5 نقاط من نسبته التاريخية بعد 60 جلسة
     "edge": {"min_n": 30, "pass_pct": 55},         # ميزة Long تصيب 55٪ أو أكثر بعد 30 إشارة
     "fable": {"prelim_windows": 13, "min_windows": 26},   # مهارة Brier موجبة مقابل المعدل التاريخي، بنوافذ 14 يومًا مستقلة
+    "fable_direction": {"prelim_windows": 13, "min_windows": 26},   # في النوافذ التي تحرك فيها السعر أكثر من 2٪ فقط
     "levels": {"min_touch": 20, "margin_pts": 10},  # مستويات GEX تصمد أكثر من المستويات العادية بـ 10 نقاط
     "gex_regime": {"min_n": 20, "margin_sigma": 0.15},   # الحركة في Gamma سالبة أكبر منها في الموجبة
 }
@@ -1487,6 +1488,20 @@ def scorecard(data, now=None):
                     "scored_this_week": [{"date": e["date"], "bias": e["bias"], "p": dict(zip(e["dirs"], e["p"])),
                                           "outcome": e["result"]["outcome"], "ret": e["result"]["ret"], "brier": e["result"]["brier"]}
                                          for e in scored if e["result"]["date"] >= week_ago]}
+    # 3ب) اتجاه Fable وحده (النوافذ الحاسمة فقط): تحتاج نحو سنتين لـ 26 نافذة مستقلة
+    dr = s.get("direction") or {}
+    w = dr.get("windows", 0)
+    good = (dr.get("skill") or 0) > 0 if dr.get("skill") is not None else ((dr.get("hit") or 0) > 50 and (dr.get("brier") or 1) < 0.25)
+    if w < R["fable_direction"]["prelim_windows"]:
+        v = "not_yet"
+    elif w < R["fable_direction"]["min_windows"]:
+        v = "preliminary_positive" if good else "preliminary_negative"
+    else:
+        v = "pass" if good else "fail"
+    out["fable_direction"] = {"verdict": v, "decisive": dr.get("n", 0), "independent_windows": w,
+                              "need": R["fable_direction"]["min_windows"], "lean_hit_pct": dr.get("hit"), "n_lean": dr.get("n_lean", 0),
+                              "brier": dr.get("brier"), "brier_coin": 0.25, "brier_base_rate": dr.get("brier_base"),
+                              "skill_vs_base_pct": dr.get("skill")}
     # 4) المستويات: GEX مقابل المستويات العادية (σ وأعلى/أدنى سابق)
     lv = tr.get("levels") or {}
     gx = lv.get("gex") or {}
@@ -2606,8 +2621,8 @@ Rules:
   Real and nominal yields, breakeven inflation, the dollar index and GLD gamma levels are in the platform data: take those
   numbers from there, not from search results.
 - Connect the sections: say when they agree or contradict each other (e.g. speculators crowded long while ETFs see outflows).
-- Anchor your three probabilities on gold_trend_and_base_rates (the historical frequency of each outcome in similar
-  conditions) and move away from those base rates only for reasons you name. Read the trend (moving averages, distance
+- Start your three probabilities from gold_trend_and_base_rates (the historical frequency of each outcome in similar
+  conditions) and move them as far as your evidence justifies, naming the reasons. Read the trend (moving averages, distance
   from the 52-week high, down-day streaks, realized volatility) as well as the fundamentals.
 - Use futures_positioning to say who is moving price: whether open interest shows fresh shorts or longs or exits, whether
   the largest traders are concentrating on one side, and whether Managed Money is selling at a profit or a loss versus its
@@ -2640,8 +2655,8 @@ Rules:
 - After weighing every section and today's events, give your own analytical bias for gold over the next 14 calendar days
   and exactly three scenarios, one per direction, with estimated probabilities in whole percent that sum to 100, most likely
   first. The directions are scored objectively later against the COMEX gold close 14 days from now:
-  "up" = more than 2% above today's price, "down" = more than 2% below, "flat" = within ±2%. Calibrate: your track record
-  is public. Each scenario gets one short line on why, grounded in the data or events.
+  "up" = more than 2% above today's price, "down" = more than 2% below, "flat" = within ±2%.
+  Each scenario gets one short line on why, grounded in the data or events.
 - Write the same report in four languages, with the same content and numbers in each:
   Arabic in correct Modern Standard Arabic (فصحى); clear, professional English; natural, correct professional Italian;
   natural, correct professional Spanish (Spain). Keep technical terms in English in every language (COT, EFP, ETF, Long, Short).
@@ -3264,7 +3279,36 @@ def score_outlooks():
     if based:
         b, bb = sum(r["brier"] for r in based) / len(based), sum(r["brier_base"] for r in based) / len(based)
         summ.update(brier_base=round(bb, 3), skill=round((1 - b / bb) * 100, 1) if bb else None, n_base=len(based))
+    dr = outlook_direction(log_)
+    if dr:
+        summ["direction"] = dr
     return {"summary": summ, "days": OUTLOOK_DAYS, "band": OUTLOOK_BAND * 100, "rows": log_[-30:]}
+
+
+def outlook_direction(log_):
+    """الاتجاه وحده: في النوافذ التي تحرّك فيها الذهب أكثر من 2٪ فقط، هل كان ميل النموذج (صعود مقابل هبوط، مع تجاهل
+    العرضي) في الجهة الصحيحة؟ ومعه Brier ثنائي لحصة الصعود صعود ÷ (صعود + هبوط): 0.25 لمن يقول 50/50 دائمًا."""
+    dec = [e for e in log_ if e.get("result") and e["result"]["outcome"] != "flat"]
+    if not dec:
+        return None
+    hits, br, brb = [], [], []
+    for e in dec:
+        P = dict(zip(e["dirs"], e["p"]))
+        u, dn = P.get("up", 0), P.get("down", 0)
+        up = e["result"]["outcome"] == "up"
+        if u != dn:
+            hits.append((u > dn) == up)
+        br.append(((u / (u + dn) if u + dn else 0.5) - up) ** 2)
+        b = e.get("base_rates") or {}
+        if b.get("up", 0) + b.get("down", 0):
+            brb.append((b["up"] / (b["up"] + b["down"]) - up) ** 2)
+    out = {"n": len(dec), "n_lean": len(hits), "hit": round(sum(hits) / len(hits) * 100) if hits else None,
+           "brier": round(sum(br) / len(br), 3), "brier_coin": 0.25,
+           "windows": _windows([e["base"]["date"] for e in dec if e.get("base")])}
+    if len(brb) == len(br):
+        bb = sum(brb) / len(brb)
+        out.update(brier_base=round(bb, 3), skill=round((1 - out["brier"] / bb) * 100, 1) if bb else None)
+    return out
 
 
 MIRROR_MIN = 10
