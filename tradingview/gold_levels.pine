@@ -7,7 +7,7 @@
 indicator("Gold Flows Levels", shorttitle = "GF Levels", overlay = true, max_lines_count = 100, max_labels_count = 100, max_boxes_count = 20)
 
 code      = input.text_area("", "Levels code", tooltip = "السطر المنسوخ من المنصة، يبدأ بـ GFL2")
-basisMode = input.string("Auto", "Price basis", options = ["Auto", "Off", "Manual"], tooltip = "Auto: على XAUUSD تُزاح المستويات بفرق GC1! − السعر الحالي. Off: بلا إزاحة. Manual: فرق تكتبه أنت.")
+basisMode = input.string("Auto", "Price basis", options = ["Auto", "Off", "Manual"], tooltip = "Auto: على XAUUSD تُزاح المستويات بفرق إغلاق أمس بين GC1! والسعر الفوري، ويبقى ثابتًا طوال اليوم. Off: بلا إزاحة. Manual: فرق تكتبه أنت.")
 manualOff = input.float(0.0, "Manual offset (GC − chart)", step = 0.1)
 showZones = input.bool(true, "Confluence zones")
 onlyFable = input.bool(false, "Only Claude's zones (★)")
@@ -27,9 +27,12 @@ cSig   = input.color(color.new(#9AA4B2, 0), "σ color")
 cPrior = input.color(color.new(#E0B44C, 0), "Prior high/low color")
 cMa    = input.color(color.new(#4C9AFF, 0), "MA color")
 
-gcClose = request.security("COMEX:GC1!", timeframe.period, close, ignore_invalid_symbol = true)
-isSpot  = str.contains(syminfo.ticker, "XAU")
-float basis = basisMode == "Manual" ? manualOff : (basisMode == "Auto" and isSpot and not na(gcClose)) ? gcClose - close : 0.0
+// الفرق يُحسب من إغلاق الأمس للرمزين، فيبقى ثابتًا طوال الجلسة. (الحساب اللحظي كان يجعل المستويات تتحرك مع السعر،
+// لأن بيانات GC1! في TradingView مؤجلة غالبًا بينما XAUUSD لحظي، فيتغير الفرق مع كل حركة.)
+gcPrev = request.security("COMEX:GC1!", "D", close[1], lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+spPrev = request.security(syminfo.tickerid, "D", close[1], lookahead = barmerge.lookahead_on)
+isSpot = str.contains(syminfo.ticker, "XAU")
+float basis = basisMode == "Manual" ? manualOff : (basisMode == "Auto" and isSpot and not na(gcPrev) and not na(spPrev)) ? gcPrev - spPrev : 0.0
 
 grp(string k) =>
     string g = "gex"
