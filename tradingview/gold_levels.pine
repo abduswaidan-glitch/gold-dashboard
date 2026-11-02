@@ -1,12 +1,13 @@
 // Gold Flows Levels — يرسم مستويات منصة «تدفقات الذهب» على الشارت.
 // الاستعمال: انسخ سطر المستويات من المنصة (قسم «فلتر الاتجاه الإحصائي» ← «انسخ المستويات»)
 // ثم الصقه في خانة «Levels code» في إعدادات المؤشر. يرسم مناطق التجمّع (كل منطقة تجمع مستويات متقاربة)،
-// والمستويات المنفردة اختيارية. يعمل على GC1! وMGC1! مباشرة، وعلى XAUUSD يُزاح كل شيء تلقائيًا بالفرق الحي
-// بين GC1! والسعر الفوري.
+// والمستويات المنفردة اختيارية. يعمل على GC1! وMGC1! مباشرة، وعلى XAUUSD يُزاح كل شيء تلقائيًا بفرق إغلاق
+// الأمس بين GC1! والسعر الفوري. لا حاجة لحذف السطر القديم: الصق الجديد تحته والمؤشر يأخذ الأحدث. ويرسم MA21.
 //@version=6
 indicator("Gold Flows Levels", shorttitle = "GF Levels", overlay = true, max_lines_count = 100, max_labels_count = 100, max_boxes_count = 20)
 
-code      = input.text_area("", "Levels code", tooltip = "السطر المنسوخ من المنصة، يبدأ بـ GFL2")
+code      = input.text_area("", "Levels code", tooltip = "الصق سطر المنصة هنا. لا حاجة لحذف القديم: المؤشر يأخذ أحدث سطر GFL2 تلقائيًا، فالصق الجديد تحت القديم. لاستبدال الكل: حدّد الكل (Ctrl+A) ثم الصق.")
+hideCode  = input.bool(false, "Clear: hide all platform levels", tooltip = "يخفي كل المستويات والمناطق دون حذف النص المحفوظ.")
 basisMode = input.string("Auto", "Price basis", options = ["Auto", "Off", "Manual"], tooltip = "Auto: على XAUUSD تُزاح المستويات بفرق إغلاق أمس بين GC1! والسعر الفوري، ويبقى ثابتًا طوال اليوم. Off: بلا إزاحة. Manual: فرق تكتبه أنت.")
 manualOff = input.float(0.0, "Manual offset (GC − chart)", step = 0.1)
 showZones = input.bool(true, "Confluence zones")
@@ -21,6 +22,10 @@ cSup      = input.color(color.new(#4C7DD9, 0), "Support zone color")
 cRes      = input.color(color.new(#D9534F, 0), "Resistance zone color")
 cPiv      = input.color(color.new(#FF9800, 0), "Pivot zone color")
 showTable = input.bool(true, "Status table")
+showMa21  = input.bool(true, "MA21")
+ma21Type  = input.string("EMA", "MA21 type", options = ["EMA", "SMA"])
+ma21Len   = input.int(21, "MA21 length", minval = 1)
+cMa21     = input.color(color.new(#F5CE6B, 0), "MA21 color")
 
 cGex   = input.color(color.new(#A970FF, 0), "GEX color")
 cSig   = input.color(color.new(#9AA4B2, 0), "σ color")
@@ -82,7 +87,18 @@ if barstate.islast
     array.clear(bxs)
     table.clear(tb, 0, 0, 1, 6)
 
-    parts = str.split(str.trim(code), "|")
+    // أحدث سطر GFL2 في الخانة (يسمح بلصق الجديد تحت القديم دون حذف)
+    string best = ""
+    float bestD = -1.0
+    if not hideCode
+        for seg in str.split(code, "GFL2|")
+            string t = str.trim(seg)
+            if str.length(t) > 10
+                float dn = str.tonumber(str.replace_all(array.get(str.split(t, "|"), 0), "-", ""))
+                if not na(dn) and dn > bestD
+                    bestD := dn
+                    best := "GFL2|" + t
+    parts = str.split(best, "|")
     bool ok = array.size(parts) >= 6 and array.get(parts, 0) == "GFL2"
     if ok
         // المستويات المنفردة (اختيارية)
@@ -122,7 +138,7 @@ if barstate.islast
     if showTable
         table.cell(tb, 0, 0, "Gold Flows", text_color = #F5CE6B, text_size = size.small)
         if not ok
-            table.cell(tb, 1, 0, "الصق سطر المستويات", text_color = #EF5350, text_size = size.small)
+            table.cell(tb, 1, 0, hideCode ? "المستويات مخفية" : "الصق سطر المستويات", text_color = hideCode ? color.gray : #EF5350, text_size = size.small)
         else
             string d = array.get(parts, 1)
             dp = str.split(d, "-")
@@ -148,3 +164,7 @@ if barstate.islast
             table.cell(tb, 1, 4, gm == "pos" ? "موجبة" : gm == "neg" ? "سالبة" : "—", text_color = color.white, text_size = size.small)
             table.cell(tb, 0, 5, "الإزاحة", text_color = color.gray, text_size = size.small)
             table.cell(tb, 1, 5, str.tostring(basis, "#.0"), text_color = color.white, text_size = size.small)
+
+// MA21 على رمز الشارت نفسه (لا يحتاج إزاحة)
+ma21 = ma21Type == "EMA" ? ta.ema(close, ma21Len) : ta.sma(close, ma21Len)
+plot(showMa21 ? ma21 : na, "MA21", color = cMa21, linewidth = 2)
