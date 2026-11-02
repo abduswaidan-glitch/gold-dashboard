@@ -982,6 +982,11 @@ def yahoo_chart(symbol, rng, interval, period=None, ohlc=False):
     raise RuntimeError(f"Yahoo {symbol} {interval}: " + " | ".join(errors))
 
 
+def _weekend(day):
+    """جلسة GC التي تفتح مساء الأحد تخص الاثنين؛ Yahoo يؤرّخها أحيانًا بالأحد فتظهر جلسة وهمية قصيرة."""
+    return dt.date.fromisoformat(day).weekday() >= 5
+
+
 def _day(t):
     return dt.datetime.fromtimestamp(t, dt.timezone.utc).date().isoformat()
 
@@ -1020,7 +1025,8 @@ def fetch_prices():
             log(f"daily price backfill returned only {len(full)} points; keeping the stored history")
     for t, c in recent:
         d[_day(t)] = round(c, 2)
-    d = {k: v for k, v in d.items() if k >= START_DAY_PRICES}
+    d = {k: v for k, v in d.items() if k >= START_DAY_PRICES and not _weekend(k)}
+    ohlc = {k: v for k, v in ohlc.items() if not _weekend(k)}
     try:
         _, hourly = yahoo_chart("GC=F", "5d", "60m")
         h = [[dt.datetime.fromtimestamp(t, dt.timezone.utc).replace(microsecond=0).isoformat(), round(c, 2)] for t, c in hourly]
@@ -1268,7 +1274,7 @@ def _pct(xs):
 
 def direction_filter(d, now=None):
     P = load(PRICES_OUT, {})
-    rows = [r for r in P.get("daily") or [] if r[1]]
+    rows = [r for r in P.get("daily") or [] if r[1] and not _weekend(r[0])]
     if rows and not _session_done(rows[-1][0], now):
         rows = rows[:-1]
     if len(rows) < 600:
@@ -1324,7 +1330,7 @@ def direction_filter(d, now=None):
     levels = [{"id": "close", "v": round(c, 1)}, {"id": "ma200", "v": round(m200, 1)}, {"id": "ma50", "v": round(m50, 1)}]
     for b in bands:
         levels += [{"id": f"+{b['k']:g}s", "v": b["hi"]}, {"id": f"-{b['k']:g}s", "v": b["lo"]}]
-    bars = {r[0]: r for r in P.get("ohlc") or []}
+    bars = {r[0]: r for r in P.get("ohlc") or [] if not _weekend(r[0])}
     if days[i] in bars:
         levels += [{"id": "pdh", "v": bars[days[i]][2]}, {"id": "pdl", "v": bars[days[i]][3]}]
     # الأسبوع السابق = آخر أسبوع اكتمل (إن كان آخر إغلاق جمعة فهو أسبوعه)
@@ -1447,7 +1453,7 @@ def tv_code(df, ai):
 
 def score_filter(cur, days, px, bars=None):
     """يسجّل قراءة كل جلسة مكتملة ويقيّمها بعد الجلسة التالية: هل صدقت الميزة؟ وهل بقي الإغلاق داخل نطاقات σ؟"""
-    log_ = load(FILTER_LOG, [])
+    log_ = [e for e in load(FILTER_LOG, []) if not _weekend(e["date"])]
     by = {e["date"]: e for e in log_}
     by.setdefault(cur["date"], cur)
     by[cur["date"]].setdefault("levels", cur["levels"])     # القراءة تُجمَّد عند أول تسجيل؛ نكمل المستويات فقط إن نقصت
@@ -1456,11 +1462,15 @@ def score_filter(cur, days, px, bars=None):
         j = pos.get(e["date"])
         if j is None:
             continue
-        if "r1" not in e and j + 1 < len(px):
+        if j + 1 < len(px):                         # يُعاد حسابها كل مرة: حتمية من الإغلاقات، وتصحح أي جلسة وهمية سابقة
             e["r1"] = round(math.log(px[j + 1] / px[j]) * 100, 3)
-        if "up5" not in e and j + 5 < len(px):
+        else:
+            e.pop("r1", None)
+        if j + 5 < len(px):
             e["up5"] = px[j + 5] > px[j]
         # المستويات: هل لمسها سعر الجلسة التالية؟ وإن لمسها، هل صمدت (أغلق السعر على جهته الأصلية) أم كُسرت؟
+        if "lv" in e and ("lv_next" not in e or e["lv_next"] != (days[j + 1] if j + 1 < len(days) else None)):
+            e.pop("lv", None)
         if "lv" not in e and e.get("levels") and j + 1 < len(days) and (bars or {}).get(days[j + 1]):
             b = bars[days[j + 1]]
             hi, lo, c1 = b[2], b[3], px[j + 1]
@@ -1469,7 +1479,7 @@ def score_filter(cur, days, px, bars=None):
                 up = v > e["close"]
                 t = hi >= v if up else lo <= v
                 res.append([lid, int(t), (int(c1 < v) if up else int(c1 > v)) if t else None])
-            e["lv"] = res
+            e["lv"], e["lv_next"] = res, days[j + 1]
     log_ = [by[k] for k in sorted(by)][-500:]
     save(FILTER_LOG, log_)
     done = [e for e in log_ if "r1" in e]
