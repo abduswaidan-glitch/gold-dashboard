@@ -10,7 +10,7 @@ code      = input.text_area("", "Levels code", tooltip = "السطر المنس�
 basisMode = input.string("Auto", "Price basis", options = ["Auto", "Off", "Manual"], tooltip = "Auto: على XAUUSD تُزاح المستويات بفرق GC1! − السعر الحالي. Off: بلا إزاحة. Manual: فرق تكتبه أنت.")
 manualOff = input.float(0.0, "Manual offset (GC − chart)", step = 0.1)
 showZones = input.bool(true, "Confluence zones")
-onlyFable = input.bool(false, "Only Fable's zones (★)")
+onlyFable = input.bool(false, "Only Claude's zones (★)")
 zoneText  = input.bool(true, "Zone labels")
 showLines = input.bool(false, "Individual levels (lines)")
 showGex   = input.bool(true, "  · GEX: Zero Gamma, Walls, Strikes")
@@ -97,7 +97,7 @@ if barstate.islast
                     int w = k == "ZG" or k == "CW" or k == "PW" ? 2 : 1
                     array.push(lns, line.new(bar_index - 1, y, bar_index, y, extend = extend.both, color = c, style = sty, width = w))
                     array.push(lbs, label.new(bar_index + 3, y, nameOf(k) + "  " + str.tostring(y, "#.0"), style = label.style_label_left, color = color.new(color.black, 100), textcolor = c, size = size.small))
-        // مناطق التجمّع: lo-hi:الوزن:الدور:Fable:الأعضاء
+        // مناطق التجمّع: lo-hi:الوزن:الدور:اختيار Claude:الأعضاء
         if showZones and array.size(parts) >= 7 and str.length(array.get(parts, 6)) > 0
             for z in str.split(array.get(parts, 6), ",")
                 f = str.split(z, ":")
