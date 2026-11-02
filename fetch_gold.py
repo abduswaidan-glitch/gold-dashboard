@@ -1557,7 +1557,7 @@ def scorecard(data, now=None):
     else:
         v = "pass" if (skill or 0) > 0 else "fail"
     week_ago = (now - dt.timedelta(days=7)).date().isoformat()
-    out["fable"] = {"verdict": v, "scored": s.get("n", 0), "pending": s.get("pending", 0), "independent_windows": w,
+    out["fable"] = {"verdict": v, "model_now": AI_MODEL, "by_model": s.get("by_model") or {}, "scored": s.get("n", 0), "pending": s.get("pending", 0), "independent_windows": w,
                     "need": R["fable"]["min_windows"], "hit_pct": s.get("hit"), "brier": s.get("brier"),
                     "brier_guess": s.get("brier_naive", 0.667), "brier_base_rate": s.get("brier_base"), "skill_vs_base_pct": skill,
                     "beats_guessing": beat_guess,
@@ -2131,7 +2131,8 @@ def classify_f13(out):
 
 # ---------------------------------------------------------------- AI daily report (Claude API)
 AI_HIST = os.path.join("data", "ai_history.json")
-AI_MODEL = os.environ.get("AI_MODEL", "claude-fable-5-1")
+AI_MODEL = os.environ.get("AI_MODEL", "claude-opus-5-5")
+AI_EFFORT = os.environ.get("AI_EFFORT", "xhigh")        # Opus 5.5: low/medium/high/xhigh/max؛ الافتراضي في الـ API هو medium
 AI_RESEARCH_LOG = os.path.join("data", "ai_research_log.json")
 OWNER_PROMPT = os.path.join("prompts", "fable.md")        # تعليمات صاحب المنصة، يعدّلها من GitHub مباشرة
 # مرحلة الاكتشاف: Fable يبحث وحده (تقرير يوميًا بعد الإغلاق الأمريكي) ونسجّل كل بحث، لنعرف ما يحتاجه كل قسم
@@ -2966,10 +2967,10 @@ def ai_report(data, prev, new_major, releases):
     while attempts:
         tools, fallback = attempts[0]
         try:
-            # Fable: التفكير دائمًا مفعّل ويُحسب من max_tokens، فنعطيه مساحة أكبر؛ العمق يُضبط بـ effort فقط
+            # Opus 5.5: التفكير دائمًا مفعّل (لا يُعطَّل) ويُحسب من max_tokens؛ العمق يُضبط بـ effort فقط
             # التخزين المؤقت (5 دقائق): كل دورة داخلية يعيد فيها النموذج قراءة السياق تُحسب قراءةً من الذاكرة
             # بجزء صغير من السعر بدل السعر الكامل؛ المحتوى الذي يراه النموذج لا يتغير
-            payload = {"model": AI_MODEL, "max_tokens": 64000, "messages": list(messages), "output_config": {"effort": "high"}}
+            payload = {"model": AI_MODEL, "max_tokens": 64000, "messages": list(messages), "output_config": {"effort": AI_EFFORT}}
             if use_cache:
                 payload["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
                 payload["cache_control"] = {"type": "ephemeral"}
@@ -3361,6 +3362,15 @@ def score_outlooks():
     dr = outlook_direction(log_)
     if dr:
         summ["direction"] = dr
+    # كل نموذج على حدة، كي لا يختلط سجل نموذج بآخر عند التبديل
+    byx = {}
+    for e in log_:
+        if e.get("result"):
+            byx.setdefault(e.get("model") or "?", []).append(e["result"])
+    summ["by_model"] = {m: {"n": len(rs), "hit": round(sum(r["bias_hit"] for r in rs) / len(rs) * 100),
+                            "brier": round(sum(r["brier"] for r in rs) / len(rs), 3),
+                            **({"brier_base": round(sum(r["brier_base"] for r in rs) / len(rs), 3)} if all("brier_base" in r for r in rs) else {})}
+                        for m, rs in byx.items()}
     return {"summary": summ, "days": OUTLOOK_DAYS, "band": OUTLOOK_BAND * 100, "rows": log_[-30:]}
 
 
