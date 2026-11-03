@@ -327,7 +327,7 @@ h4.layer{margin:18px 0 8px;font-size:15.5px}h4.layer small{font-weight:400;font-
 .dir.up{background:color-mix(in srgb,var(--buy) 16%,transparent)} .dir.down{background:color-mix(in srgb,var(--sell) 16%,transparent)}
 .dir.flat{background:color-mix(in srgb,var(--blue) 16%,transparent);color:var(--blue)}
 .ai-card.track{margin-bottom:18px}
-.ai-card.dfilter{margin-bottom:18px}.ai-card.dcal{margin-bottom:18px}.ol-flip{font-size:13.5px;margin:6px 0 0}.ol-trig{display:block;font-size:12.5px;color:var(--gold-hi);margin-top:3px}.df-tv{border:1px solid var(--rule);border-radius:10px;padding:10px 12px;margin:10px 0}.df-tv-head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}.df-all{margin:8px 0}.df-all summary{cursor:pointer;color:var(--muted);font-size:13.5px;margin:4px 0}.df-zones{margin:6px 0;padding-inline-start:18px}.df-zones li{margin:5px 0;font-size:13.5px;line-height:1.7}.df-badges{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 10px}.df-badges .bias{flex:0 1 auto;white-space:normal;max-width:100%}.df-line{font-size:13.5px;margin:6px 0;line-height:1.7}.df-kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:8px 0}.df-kv div{background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:8px 10px}.df-kv small{display:block;color:var(--muted);font-size:12px}.df-kv b{font-size:15px}.ai-card.dfilter tr.df-cur td{background:var(--gold-soft);font-weight:700}
+.ai-card.dfilter{margin-bottom:18px}.ai-card.dcal{margin-bottom:18px}.ev-date{display:inline-block;font-size:12px;padding:1px 8px;border-radius:99px;border:1px solid var(--rule);color:var(--gold-hi);margin-bottom:4px}.ev-date.old{color:var(--muted)}.ol-flip{font-size:13.5px;margin:6px 0 0}.ol-trig{display:block;font-size:12.5px;color:var(--gold-hi);margin-top:3px}.df-tv{border:1px solid var(--rule);border-radius:10px;padding:10px 12px;margin:10px 0}.df-tv-head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}.df-all{margin:8px 0}.df-all summary{cursor:pointer;color:var(--muted);font-size:13.5px;margin:4px 0}.df-zones{margin:6px 0;padding-inline-start:18px}.df-zones li{margin:5px 0;font-size:13.5px;line-height:1.7}.df-badges{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 10px}.df-badges .bias{flex:0 1 auto;white-space:normal;max-width:100%}.df-line{font-size:13.5px;margin:6px 0;line-height:1.7}.df-kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:8px 0}.df-kv div{background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:8px 10px}.df-kv small{display:block;color:var(--muted);font-size:12px}.df-kv b{font-size:15px}.ai-card.dfilter tr.df-cur td{background:var(--gold-soft);font-weight:700}
 .ai-card.liq{margin:0 0 18px}
 .ol-bias small{font-size:12.5px}
 .liq-list{list-style:none;padding:0;margin:0 0 14px;display:grid;gap:6px}
@@ -1851,6 +1851,9 @@ const TONE = {'إيجابي':'pos','سلبي':'neg','محايد':'neu','متبا
 const modelName = id => { const m = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2})(?!\d))?/.exec(String(id || ''));
   return m ? `Claude ${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? '.' + m[3] : ''}` : String(id || 'Claude'); };
 const aiRep = r => r.ar || {};
+/* تاريخ الخبر: ما في التقرير، وإلا التاريخ المكتوب في رابط المصدر (مثل /2026/11/02/ أو 202611021107) */
+const evDate = e => { if (/^\d{4}-\d{2}-\d{2}$/.test(e.date || '')) return e.date;
+  const m = /(?<!\d)(20\d{2})[-/_]?(0[1-9]|1[0-2])[-/_]?(0[1-9]|[12]\d|3[01])/.exec(e.source || ''); return m ? `${m[1]}-${m[2]}-${m[3]}` : null; };
 const safeUrl = u => /^https:\/\/[^\s"'<>]+$/i.test(String(u || '')) ? String(u) : null;
 const hostOf = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch (e) { return ''; } };
 const extLink = u => { const s = safeUrl(u); return s ? `<a href="${esc(s)}" target="_blank" rel="noopener noreferrer nofollow">${esc(hostOf(s))} ↗</a>` : ''; };
@@ -1893,8 +1896,9 @@ R.ai = () => {
   h += `<h3 class="rv-title">${'التقرير المفصّل'}</h3>
     <div class="ai-grid">${(rep.sections || []).map(s => `<div class="ai-card"><h3>${esc(s.title)}</h3><p>${esc(s.body)}</p></div>`).join('')}</div>`;
   h += `<div class="ai-grid">
-    <div class="ai-card"><h3>${'أحداث اليوم'}</h3>${(rep.events || []).map(e =>
-      `<div class="ai-ev"><b>${esc(e.title)}</b><span>${esc(e.impact)}</span> ${extLink(e.source)}</div>`).join('') || `<p class="empty">${'لا أحداث مسجّلة.'}</p>`}</div>
+    <div class="ai-card"><h3>الأحداث المؤثرة</h3>${(rep.events || []).map(e => { const d = evDate(e), age = d ? Math.round((toDate(r.date) - toDate(d)) / 864e5) : null;
+      const chip = d ? `<span class="ev-date${age > 2 ? ' old' : ''}">${fDay.format(toDate(d))}${age === 0 ? ' · اليوم' : age === 1 ? ' · أمس' : age > 1 ? ` · قبل ${bd(nf0.format(age))} أيام` : ''}</span>` : '<span class="ev-date old">التاريخ غير معروف</span>';
+      return `<div class="ai-ev">${chip}<b>${esc(e.title)}</b><span>${esc(e.impact)}</span> ${extLink(e.source)}</div>`; }).join('') || `<p class="empty">${'لا أحداث مسجّلة.'}</p>`}</div>
     <div class="ai-card"><h3>${'ما يستحق المتابعة'}</h3><ul>${(rep.watch || []).map(w => `<li>${esc(w)}</li>`).join('')}</ul>
       <h3 style="margin-top:12px">${'المخاطر'}</h3><p>${esc(rep.risks || '')}</p></div></div>`;
   const src = (r.sources || []).filter(s => safeUrl(s.url));
