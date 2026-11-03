@@ -2391,10 +2391,12 @@ DISCOVERY_END = "2026-11-03"
 DISCOVERY_HOUR_UTC = 21
 DISCOVERY_SEARCHES = 8
 AI_RETRY_HOURS = 6
-# التقرير اليومي: أيام العمل الساعة 13:30 بتوقيت فيينا، حين تكون بيانات الأمس كلها قد وصلت (OI، ETF، COMEX...)
+# التقرير اليومي: أيام العمل الساعة 9:00 نيويورك، أي قبل نصف ساعة من الافتتاح، بعد أن تكون بيانات الأمس كلها قد وصلت
+# (OI، ETF، COMEX...) وبعد إصدارات 8:30 نيويورك (NFP وCPI وغيرها). التوقيت بنيويورك لا بفيينا، لأن فارق الساعات بين
+# المدينتين يتغير مع توقيت الصيف في كل منهما؛ فيينا تبقى 15:00 في معظم السنة، لكنها 14:00 في فترة بين مارس وأبريل.
 # وقبل افتتاح نيويورك بساعتين. التقارير الكبرى (COT وغيرها) لا تطلق تقريرًا فوريًا: تُجمع وتظهر في التقرير التالي.
 VIENNA = ZoneInfo("Europe/Vienna")
-DAILY_REPORT_AT = (13, 30)
+DAILY_REPORT_NY = (9, 0)
 
 
 class _AIWait(Exception):
@@ -3901,7 +3903,9 @@ def main():
     vn = now_d.astimezone(VIENNA)
     last_utc = ((prev.get("ai") or {}).get("latest") or {}).get("generated_utc")
     last_vn = dt.datetime.fromisoformat(last_utc).astimezone(VIENNA).date() if last_utc else None
-    due_daily = vn.weekday() < 5 and (vn.hour, vn.minute) >= DAILY_REPORT_AT and last_vn != vn.date()
+    ny = now_d.astimezone(NEW_YORK)
+    last_ny = dt.datetime.fromisoformat(last_utc).astimezone(NEW_YORK).date() if last_utc else None
+    due_daily = ny.weekday() < 5 and (ny.hour, ny.minute) >= DAILY_REPORT_NY and last_ny != ny.date()
     if due_daily and not active:
         new_major = {**new_major, "daily": vn.date().isoformat()}
     fail = state.get("ai_fail") or {}
@@ -3909,7 +3913,7 @@ def main():
     try:
         if not active and not forced and not due_daily:
             if new_major:
-                log("AI report: held for the next daily report (13:30 Vienna):", ", ".join(new_major))
+                log("AI report: held for the next daily report (9:00 New York):", ", ".join(new_major))
             raise _AIWait()
         if new_major and wait_until and now_d.isoformat() < wait_until:
             # بعد فشل طلب مكلف لا نعيده كل نصف ساعة: ننتظر AI_RETRY_HOURS ثم نحاول مرة أخرى
