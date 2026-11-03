@@ -1422,6 +1422,28 @@ def level_zones(levels, close, su, max_zones=6):
     return out
 
 
+# درجات المصادر: 1 رسمي (الناشر الأصلي للبيانات)، 2 وكالات وصحف مالية كبرى، 3 كل ما عداها (مواقع أسعار ومجمّعات ومدونات)
+SOURCE_TIER1 = ("federalreserve.gov", "bls.gov", "bea.gov", "census.gov", "treasury.gov", "home.treasury.gov", "cftc.gov",
+                "cmegroup.com", "sec.gov", "imf.org", "bis.org", "ecb.europa.eu", "bankofengland.co.uk", "pbc.gov.cn",
+                "safe.gov.cn", "rbi.org.in", "nbp.pl", "tcmb.gov.tr", "cbr.ru", "boj.or.jp", "snb.ch", "gold.org",
+                "lbma.org.uk", "sge.com.cn", "spdrgoldshares.com", "ishares.com", "fred.stlouisfed.org", "stlouisfed.org",
+                "clevelandfed.org", "newyorkfed.org", "atlantafed.org", "dol.gov", "ism.org", "sca.isr.umich.edu")
+SOURCE_TIER2 = ("reuters.com", "bloomberg.com", "wsj.com", "ft.com", "cnbc.com", "apnews.com", "marketwatch.com",
+                "barrons.com", "nytimes.com", "economist.com", "nikkei.com", "asia.nikkei.com", "kitco.com", "mining.com",
+                "scmp.com", "caixinglobal.com", "economictimes.indiatimes.com", "livemint.com", "business-standard.com",
+                "theguardian.com", "bbc.com", "forexlive.com", "fxstreet.com", "investing.com", "finance.yahoo.com")
+
+
+def source_tier(url):
+    """درجة المصدر من نطاقه: 1 رسمي، 2 وكالة أو صحيفة مالية كبرى، 3 غير ذلك."""
+    m = re.match(r"https?://([^/]+)", str(url or ""))
+    host = (m.group(1).lower() if m else "").removeprefix("www.")
+    for tier, doms in ((1, SOURCE_TIER1), (2, SOURCE_TIER2)):
+        if any(host == d or host.endswith("." + d) for d in doms):
+            return tier
+    return 3 if host else None
+
+
 URL_DATE = re.compile(r"(?<!\d)(20\d{2})[-/_]?(0[1-9]|1[0-2])[-/_]?(0[1-9]|[12]\d|3[01])")
 MONTHS = ("january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
           "november", "december")
@@ -1501,6 +1523,8 @@ def backfill_event_dates(ai, today, limit=10):
         for lang in AI_LANGS:
             for e in (rep.get(lang) or {}).get("events") or []:
                 u = e.get("source") or ""
+                if "tier" not in e:
+                    e["tier"] = source_tier(u)
                 if e.get("date") or not u.startswith("https://"):
                     continue
                 d, src = _date_from(u, today), "url"
@@ -2976,6 +3000,17 @@ Rules:
   gold reacted. Use gold_reaction_history once it has 3 or more cases. Do not search for the calendar itself.
 - Tie the report to the platform's own estimates and levels: say which zones and sigma bands frame each scenario, and
   where an early estimate (hidden_nowcasts) changes the read of a lagging report (without quoting its numbers).
+- LAW 1, dates first: before you use any news item or number, establish its date: when it happened and when it was
+  published. Prefer the date stated on the page or in the data itself over the date you read it. If you cannot establish
+  a date, do not present it as current news. Data points carry their own date in the platform; say how old they are.
+- LAW 2, sources: check who published every item and weigh it by source tier.
+  Tier 1, official: the original publisher of the data, e.g. central banks, the Fed and regional Feds, BLS, BEA,
+  Treasury, CFTC, CME, SEC, IMF, WGC, LBMA, SGE, the fund sponsors.
+  Tier 2: major wires and financial press, e.g. Reuters, Bloomberg, WSJ, FT, CNBC, AP, MarketWatch, Kitco, Mining.com,
+  FXStreet.
+  Tier 3: everything else (price-quote sites, aggregators, blogs, unknown sites).
+  Go to the original source when you can, rather than a site repeating it. A number that only a tier-3 source reports must
+  be confirmed by tier 1 or 2, or marked as unconfirmed in the report; a tier-3 item must never drive the bias.
 - Every event carries "date": the day the news happened (YYYY-MM-DD), not the day you read it. If it is more than
   two days old, say so in its impact line and weigh it as already priced in unless something new followed.
 - focus_zones: statistical_direction_filter.zones lists confluence zones (Z1, Z2...) built in code from the levels map,
@@ -3299,6 +3334,9 @@ def ai_report(data, prev, new_major, releases):
     latest = {"date": today, "generated_utc": now.replace(microsecond=0).isoformat(), "model": model,
               **langs, "outlook": outlook, "sources": sources[:10]}
     _event_dates(rep, sources, today)
+    for lang in AI_LANGS:
+        for e in (rep.get(lang) or {}).get("events") or []:
+            e["tier"] = source_tier(e.get("source"))
     fz = _focus_zones(rep.get("focus_zones"), digest_obj.get("statistical_direction_filter"))
     if fz:
         latest["focus"] = fz  # الكلفة تُكتب في سجل Actions فقط، لا في الملفات المنشورة
