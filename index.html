@@ -1897,7 +1897,7 @@ R.ai = () => {
     <div class="ai-grid">${(rep.sections || []).map(s => `<div class="ai-card"><h3>${esc(s.title)}</h3><p>${esc(s.body)}</p></div>`).join('')}</div>`;
   h += `<div class="ai-grid">
     <div class="ai-card"><h3>الأحداث المؤثرة</h3>${(rep.events || []).map(e => { const d = evDate(e), age = d ? Math.round((toDate(r.date) - toDate(d)) / 864e5) : null;
-      const chip = d ? `<span class="ev-date${age > 2 ? ' old' : ''}">${fDay.format(toDate(d))}${age === 0 ? ' · اليوم' : age === 1 ? ' · أمس' : age > 1 ? ` · قبل ${bd(nf0.format(age))} أيام` : ''}</span>` : '<span class="ev-date old">التاريخ غير معروف</span>';
+      const chip = d ? `<span class="ev-date${age > 2 ? ' old' : ''}" title="${e.date_from === 'page' ? 'تاريخ نشر الصفحة كما تعلنه هي' : e.date_from === 'url' ? 'التاريخ المكتوب في رابط المصدر' : 'تاريخ الخبر'}">${e.date_from ? 'نُشر ' : ''}${fDay.format(toDate(d))}${age === 0 ? ' · اليوم' : age === 1 ? ' · أمس' : age === 2 ? ' · قبل يومين' : age > 2 && age <= 10 ? ` · قبل ${bd(nf0.format(age))} أيام` : age > 10 ? ` · قبل ${bd(nf0.format(age))} يومًا` : ''}</span>` : '<span class="ev-date old">التاريخ غير معروف</span>';
       return `<div class="ai-ev">${chip}<b>${esc(e.title)}</b><span>${esc(e.impact)}</span> ${extLink(e.source)}</div>`; }).join('') || `<p class="empty">${'لا أحداث مسجّلة.'}</p>`}</div>
     <div class="ai-card"><h3>${'ما يستحق المتابعة'}</h3><ul>${(rep.watch || []).map(w => `<li>${esc(w)}</li>`).join('')}</ul>
       <h3 style="margin-top:12px">${'المخاطر'}</h3><p>${esc(rep.risks || '')}</p></div></div>`;
