@@ -3411,7 +3411,9 @@ def haiku_experiment(data, model, effort="xhigh"):
     # web_search_20250305: web_search_20260209 is not offered to Haiku
     tools = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 4}]
     resp, turns, spent = None, [], []
-    payload = {"model": model, "max_tokens": 64000, "messages": messages, "tools": tools,
+    # xhigh thinking plus searches used all 64,000 tokens in the last run without writing any text (stop=max_tokens),
+    # so the limit is Haiku's maximum; a larger budget costs only what is actually generated
+    payload = {"model": model, "max_tokens": 128000, "messages": messages, "tools": tools,
                "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
                "cache_control": {"type": "ephemeral"}, "output_config": {"effort": effort}}
     resp = _claude_stream(payload, key, None)
