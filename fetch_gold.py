@@ -982,6 +982,11 @@ def yahoo_chart(symbol, rng, interval, period=None, ohlc=False):
     raise RuntimeError(f"Yahoo {symbol} {interval}: " + " | ".join(errors))
 
 
+def _weekend(day):
+    """جلسة GC التي تفتح مساء الأحد تخص الاثنين؛ Yahoo يؤرّخها أحيانًا بالأحد فتظهر جلسة وهمية قصيرة."""
+    return dt.date.fromisoformat(day).weekday() >= 5
+
+
 def _day(t):
     return dt.datetime.fromtimestamp(t, dt.timezone.utc).date().isoformat()
 
@@ -1020,7 +1025,8 @@ def fetch_prices():
             log(f"daily price backfill returned only {len(full)} points; keeping the stored history")
     for t, c in recent:
         d[_day(t)] = round(c, 2)
-    d = {k: v for k, v in d.items() if k >= START_DAY_PRICES}
+    d = {k: v for k, v in d.items() if k >= START_DAY_PRICES and not _weekend(k)}
+    ohlc = {k: v for k, v in ohlc.items() if not _weekend(k)}
     try:
         _, hourly = yahoo_chart("GC=F", "5d", "60m")
         h = [[dt.datetime.fromtimestamp(t, dt.timezone.utc).replace(microsecond=0).isoformat(), round(c, 2)] for t, c in hourly]
@@ -1268,7 +1274,7 @@ def _pct(xs):
 
 def direction_filter(d, now=None):
     P = load(PRICES_OUT, {})
-    rows = [r for r in P.get("daily") or [] if r[1]]
+    rows = [r for r in P.get("daily") or [] if r[1] and not _weekend(r[0])]
     if rows and not _session_done(rows[-1][0], now):
         rows = rows[:-1]
     if len(rows) < 600:
@@ -1324,7 +1330,7 @@ def direction_filter(d, now=None):
     levels = [{"id": "close", "v": round(c, 1)}, {"id": "ma200", "v": round(m200, 1)}, {"id": "ma50", "v": round(m50, 1)}]
     for b in bands:
         levels += [{"id": f"+{b['k']:g}s", "v": b["hi"]}, {"id": f"-{b['k']:g}s", "v": b["lo"]}]
-    bars = {r[0]: r for r in P.get("ohlc") or []}
+    bars = {r[0]: r for r in P.get("ohlc") or [] if not _weekend(r[0])}
     if days[i] in bars:
         levels += [{"id": "pdh", "v": bars[days[i]][2]}, {"id": "pdl", "v": bars[days[i]][3]}]
     # الأسبوع السابق = آخر أسبوع اكتمل (إن كان آخر إغلاق جمعة فهو أسبوعه)
@@ -1447,7 +1453,7 @@ def tv_code(df, ai):
 
 def score_filter(cur, days, px, bars=None):
     """يسجّل قراءة كل جلسة مكتملة ويقيّمها بعد الجلسة التالية: هل صدقت الميزة؟ وهل بقي الإغلاق داخل نطاقات σ؟"""
-    log_ = load(FILTER_LOG, [])
+    log_ = [e for e in load(FILTER_LOG, []) if not _weekend(e["date"])]
     by = {e["date"]: e for e in log_}
     by.setdefault(cur["date"], cur)
     by[cur["date"]].setdefault("levels", cur["levels"])     # القراءة تُجمَّد عند أول تسجيل؛ نكمل المستويات فقط إن نقصت
@@ -1456,11 +1462,15 @@ def score_filter(cur, days, px, bars=None):
         j = pos.get(e["date"])
         if j is None:
             continue
-        if "r1" not in e and j + 1 < len(px):
+        if j + 1 < len(px):                         # يُعاد حسابها كل مرة: حتمية من الإغلاقات، وتصحح أي جلسة وهمية سابقة
             e["r1"] = round(math.log(px[j + 1] / px[j]) * 100, 3)
-        if "up5" not in e and j + 5 < len(px):
+        else:
+            e.pop("r1", None)
+        if j + 5 < len(px):
             e["up5"] = px[j + 5] > px[j]
         # المستويات: هل لمسها سعر الجلسة التالية؟ وإن لمسها، هل صمدت (أغلق السعر على جهته الأصلية) أم كُسرت؟
+        if "lv" in e and ("lv_next" not in e or e["lv_next"] != (days[j + 1] if j + 1 < len(days) else None)):
+            e.pop("lv", None)
         if "lv" not in e and e.get("levels") and j + 1 < len(days) and (bars or {}).get(days[j + 1]):
             b = bars[days[j + 1]]
             hi, lo, c1 = b[2], b[3], px[j + 1]
@@ -1469,7 +1479,7 @@ def score_filter(cur, days, px, bars=None):
                 up = v > e["close"]
                 t = hi >= v if up else lo <= v
                 res.append([lid, int(t), (int(c1 < v) if up else int(c1 > v)) if t else None])
-            e["lv"] = res
+            e["lv"], e["lv_next"] = res, days[j + 1]
     log_ = [by[k] for k in sorted(by)][-500:]
     save(FILTER_LOG, log_)
     done = [e for e in log_ if "r1" in e]
@@ -1606,6 +1616,108 @@ def scorecard(data, now=None):
         last = ai[-1]
         out["now"]["fable_bias"] = {"date": last.get("date"), "outlook": last.get("outlook")}
     return out
+
+
+# ---------------------------------------------------------------- economic calendar (ForexFactory export feed)
+# الأحداث الأمريكية التي تحرك الذهب: موعدها والتوقع والسابق (والفعلي إن ظهر). ونسجّل حركة الذهب في يوم كل حدث
+# كي تتكوّن بمرور الوقت نسبة تاريخية لرد فعل الذهب على كل نوع من الأحداث.
+FF_FEEDS = ("https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+            "https://nfs.faireconomy.media/ff_calendar_nextweek.json")
+CAL_LOG = os.path.join("data", "calendar_log.json")
+CAL_TIERS = (                    # (كلمات في عنوان الحدث، الوزن للذهب، الأعلى من التوقع يعني عادة للذهب)
+    (("ADP Non-Farm",), 2, "hawkish"), (("Non-Farm", "NFP"), 3, "hawkish"), (("Core CPI", "CPI m/m", "CPI y/y"), 3, "hawkish"),
+    (("Core PCE", "PCE Price"), 3, "hawkish"), (("FOMC", "Federal Funds Rate", "Fed Chair", "Powell"), 3, "event"),
+    (("Unemployment Rate",), 2, "dovish"), (("Unemployment Claims",), 2, "dovish"), (("Average Hourly Earnings",), 2, "hawkish"),
+    (("PPI",), 2, "hawkish"), (("Advance GDP", "Prelim GDP", "Final GDP", "GDP q/q"), 2, "hawkish"),
+    (("ISM Manufacturing PMI", "ISM Services PMI"), 2, "hawkish"), (("Retail Sales",), 2, "hawkish"),
+    (("JOLTS",), 2, "hawkish"),
+    (("Inflation Expectations", "UoM"), 2, "hawkish"), (("Treasury", "Bond Auction"), 1, "event"))
+
+
+def _cal_tier(title, impact):
+    for keys, w, sign in CAL_TIERS:
+        if any(k.lower() in title.lower() for k in keys):
+            return w, sign
+    return (2 if impact == "High" else 1), "event"
+
+
+def fetch_calendar():
+    """تقويم هذا الأسبوع والقادم: الدولار الأمريكي فقط (محرك الذهب الأول)، والتأثير المرتفع والمتوسط."""
+    events, errors = {}, []
+    for url in FF_FEEDS:
+        try:
+            rows = browser_get(url, headers={"Accept": "application/json"}).json()
+        except Exception as e:
+            errors.append(f"{url.rsplit('/', 1)[-1]}: {str(e)[:80]}")
+            continue
+        for r in rows or []:
+            if (r.get("country") or "").upper() != "USD" or r.get("impact") not in ("High", "Medium"):
+                continue
+            try:
+                t = dt.datetime.fromisoformat(str(r["date"])).astimezone(dt.timezone.utc)
+            except Exception:
+                continue
+            w, sign = _cal_tier(r.get("title") or "", r.get("impact"))
+            e = {"utc": t.replace(microsecond=0).isoformat(), "title": (r.get("title") or "").strip(), "impact": r["impact"],
+                 "weight": w, "higher_means": sign, "forecast": (r.get("forecast") or "").strip() or None,
+                 "previous": (r.get("previous") or "").strip() or None, "actual": (r.get("actual") or "").strip() or None}
+            events[(e["utc"], e["title"])] = e
+    if not events:
+        raise RuntimeError("calendar: " + (" | ".join(errors) or "no USD events"))
+    if errors:
+        log("calendar partial:", " | ".join(errors))
+    prev = (load(OUT, {}).get("calendar") or {}).get("events") or []
+    for e in prev:                                   # نحتفظ بالأحداث الماضية (14 يومًا) ونُكمل الفعلي إن ظهر لاحقًا
+        k = (e["utc"], e["title"])
+        if k not in events and e["utc"] >= (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=14)).isoformat():
+            events[k] = e
+    evs = sorted(events.values(), key=lambda e: e["utc"])
+    log(f"calendar ok: {len(evs)} USD events, {sum(e['weight'] >= 2 for e in evs)} weighted for gold")
+    return {"calendar": {"fetched_utc": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(), "events": evs}}
+
+
+def calendar_reactions(cal):
+    """سجل حركة الذهب في يوم كل حدث مهم (إغلاق إلى إغلاق، وحجمها بـ σ، ومدى الجلسة بـ σ)، وملخص لكل نوع حدث."""
+    P = load(PRICES_OUT, {})
+    rows = [r for r in P.get("daily") or [] if r[1] and not _weekend(r[0])]
+    if len(rows) < 30:
+        return {}
+    days, px = [r[0] for r in rows], [r[1] for r in rows]
+    pos = {d: i for i, d in enumerate(days)}
+    bars = {r[0]: r for r in P.get("ohlc") or []}
+    lr = [0.0] + [math.log(px[i] / px[i - 1]) for i in range(1, len(px))]
+    logx = {f"{e['utc']}|{e['title']}": e for e in load(CAL_LOG, [])}
+    for ev in (cal or {}).get("events") or []:
+        if ev["weight"] < 2:
+            continue
+        k = f"{ev['utc']}|{ev['title']}"
+        e = logx.setdefault(k, {kk: ev.get(kk) for kk in ("utc", "title", "weight", "higher_means", "forecast", "previous")})
+        if ev.get("actual"):
+            e["actual"] = ev["actual"]
+        # جلسة GC التي تحتوي الحدث: الحدث بعد 17:00 نيويورك ينتمي لجلسة اليوم التالي
+        ny = dt.datetime.fromisoformat(ev["utc"]).astimezone(NEW_YORK)
+        sd = (ny + dt.timedelta(days=1)).date() if ny.hour >= 17 else ny.date()
+        while sd.weekday() >= 5:
+            sd += dt.timedelta(days=1)
+        i = pos.get(sd.isoformat())
+        if i is None or i < 21 or "r1" in e:
+            continue
+        sig = statistics.stdev(lr[i - 20:i])
+        e["session"], e["r1"] = sd.isoformat(), round(lr[i] * 100, 2)
+        e["move_sigma"] = round(abs(lr[i]) / sig, 2) if sig else None
+        b = bars.get(sd.isoformat())
+        if b and sig:
+            e["range_sigma"] = round((b[2] - b[3]) / px[i - 1] / sig, 2)
+    log_ = sorted(logx.values(), key=lambda e: e["utc"])[-400:]
+    save(CAL_LOG, log_)
+    by = {}
+    for e in log_:
+        if "r1" in e:
+            by.setdefault(e["title"], []).append(e)
+    return {t: {"n": len(v), "avg_move_sigma": round(sum(x.get("move_sigma") or 0 for x in v) / len(v), 2),
+                "avg_range_sigma": round(sum(x.get("range_sigma") or 0 for x in v if x.get("range_sigma")) / max(1, sum(1 for x in v if x.get("range_sigma"))), 2),
+                "last": [{k: x.get(k) for k in ("session", "forecast", "actual", "r1")} for x in v[-3:]]}
+            for t, v in by.items()}
 
 
 # ---------------------------------------------------------------- GEX on GLD (Cboe delayed options, free)
@@ -2656,6 +2768,23 @@ def ai_digest(d):
         g["hidden_nowcasts"] = nowcast_pack(d)
     except Exception as e:
         log("nowcast pack FAILED:", repr(e)[:200])
+    cal = d.get("calendar") or {}
+    if cal.get("events"):
+        now_u = dt.datetime.now(dt.timezone.utc)
+        def _ev(e):
+            t = dt.datetime.fromisoformat(e["utc"])
+            return {**{k: e.get(k) for k in ("title", "impact", "weight", "higher_means", "forecast", "previous", "actual")},
+                    "vienna": t.astimezone(VIENNA).strftime("%a %Y-%m-%d %H:%M"), "hours_from_now": round((t - now_u).total_seconds() / 3600, 1)}
+        up = [_ev(e) for e in cal["events"] if e["weight"] >= 2 and now_u <= dt.datetime.fromisoformat(e["utc"]) <= now_u + dt.timedelta(days=14)]
+        past = [_ev(e) for e in cal["events"] if e["weight"] >= 2 and now_u - dt.timedelta(days=3) <= dt.datetime.fromisoformat(e["utc"]) < now_u]
+        g["economic_calendar"] = {
+            "upcoming_14d": up[:25], "last_3d": past[-10:],
+            "gold_reaction_history": calendar_reactions(cal),
+            "note": ("US events from the ForexFactory calendar, times in Vienna. weight 3 = moves gold most (CPI, PCE, NFP, FOMC), "
+                     "2 = often moves it. higher_means: hawkish = a print above forecast usually lifts yields and the dollar "
+                     "and weighs on gold; dovish = the opposite; event = depends on the content. actual is empty until the "
+                     "release; gold_reaction_history is the platform's own log of gold's move on past event days, in sigma "
+                     "(it starts small and grows)")}
     df = d.get("direction_filter") or {}
     if df.get("bands"):
         g["statistical_direction_filter"] = {
@@ -2727,6 +2856,14 @@ Rules:
 - statistical_direction_filter is shown publicly under your bias: a trend regime, a tested edge (or none), volatility bands
   and a levels map. Explain in one or two sentences how today's news and data fit it. If your 14-day bias points the other
   way from the regime, or you see an edge where it says none, say why. Its numbers may be quoted.
+- economic_calendar gives the coming US releases with Vienna time, forecast and previous. Give real weight to every
+  weight-3 event (and weight-2 events in the next 5 sessions): say when it is, what forecast versus previous implies,
+  what a hotter or colder print would likely do to yields, the dollar and gold, and which zone of
+  statistical_direction_filter.zones it could push price into. Your three probabilities must reflect the event risk inside
+  the 14-day window. For events in last_3d, compare actual with forecast (search only if actual is missing) and say how
+  gold reacted. Use gold_reaction_history once it has 3 or more cases. Do not search for the calendar itself.
+- Tie the report to the platform's own estimates and levels: say which zones and sigma bands frame each scenario, and
+  where an early estimate (hidden_nowcasts) changes the read of a lagging report (without quoting its numbers).
 - focus_zones: statistical_direction_filter.zones lists confluence zones (Z1, Z2...) built in code from the levels map,
   with their members and weight. Pick the 3 or 4 that matter most for the next session, by zone id only; never write
   prices. why: one short Arabic line grounded in the data (which levels coincide there and what the gamma regime
@@ -2744,7 +2881,8 @@ Return ONLY one JSON object, no markdown fences, with exactly this shape:
  "ar": {"headline": "...", "tone": "إيجابي|سلبي|محايد|متباين", "summary": ["...", "..."],
         "sections": [{"title": "...", "body": "..."}], "events": [{"title": "...", "impact": "...", "source": "https://..."}],
         "watch": ["..."], "risks": "...",
-        "outlook": {"bias_note": "one line on why", "scenarios": [{"title": "...", "why": "..."}, {...}, {...}]}},
+        "outlook": {"bias_note": "one line on why", "scenarios": [{"title": "...", "why": "...", "trigger": "the event and/or the zone that would confirm this scenario"}, {...}, {...}],
+                    "flip": "what would change the bias: an event outcome and/or a close beyond a named zone"}},
  "focus_zones": [{"zone": "Z2", "why": "سطر قصير بالعربية"}]}
 The three scenarios follow the order of outlook.scenarios; each direction appears exactly once.
 Also add a top-level "research_map" (English only, up to 10 items) describing what you searched for and why, so the
@@ -2878,8 +3016,9 @@ def _outlook(rep):
         if lang == "ar" and not (isinstance(sc, list) and len(sc) >= 3):
             return None
         if isinstance(rep.get(lang), dict) and isinstance(sc, list):
-            rep[lang]["outlook"] = {"bias_note": str(lo.get("bias_note") or ""),
-                                    "scenarios": [{"title": str(x.get("title") or ""), "why": str(x.get("why") or "")}
+            rep[lang]["outlook"] = {"bias_note": str(lo.get("bias_note") or ""), "flip": str(lo.get("flip") or "")[:300],
+                                    "scenarios": [{"title": str(x.get("title") or ""), "why": str(x.get("why") or ""),
+                                                   "trigger": str(x.get("trigger") or "")[:200]}
                                                   for x in sc[:3] if isinstance(x, dict)]}
     return {"bias": o["bias"], "p": p, **({"dirs": dirs} if dirs else {})}
 
@@ -2917,7 +3056,7 @@ def research_memory(prev_ai, releases, now):
                 "COT": f"Friday {fri.isoformat()}, 15:30 New York time",
                 "PBoC monthly reserves": f"around {nm.date().replace(day=7).isoformat()}",
                 "WGC monthly ETF flows": f"around {nm.date().replace(day=5).isoformat()} to {nm.date().replace(day=8).isoformat()}",
-                "US CPI": "mid-month (check the BLS schedule only if it matters today)",
+                "US data": "see economic_calendar (exact times from ForexFactory)",
                 "IMF central-bank data": "monthly, two to three months behind"},
             "rule": ("These facts were already found or are already in the platform data. Do not spend searches finding them "
                      "again unless a newer release is due, the release date has passed, or you have a concrete reason to doubt "
@@ -3453,6 +3592,7 @@ SECTIONS = {
     "macro": (fetch_macro, ("macro", "liquidation")),
     "gex": (fetch_gex, ("gex",)),
     "oi_daily": (fetch_oi_daily, ("oi_daily",)),
+    "calendar": (fetch_calendar, ("calendar",)),
 }
 CHECK_KEYS = {"comex": ("comex",), "deliveries": ("deliveries",)}     # مفاتيح تُبنى من ملفات السجل لا من دالة الجلب
 MAJOR = ("cot", "cot_legacy", "imf", "f13", "wgc")      # تقارير كبرى تستحق تقريرًا ذكيًا جديدًا
@@ -3515,6 +3655,8 @@ def is_due(name, st, prev):
         return now >= expected
     if name in ("deliveries", "comex", "etf", "etf2", "physical", "macro", "gex", "oi_daily"):
         return now.weekday() != 6 and hours_since(st.get("checked")) >= 2.8      # تقارير يومية: كل 3 ساعات
+    if name == "calendar":
+        return hours_since(st.get("checked")) >= 5.5
     if name in ("imf", "f13", "wgc"):
         return hours_since(st.get("checked")) >= 11.5                          # شهرية وربعية: مرتين يوميًا
     return True

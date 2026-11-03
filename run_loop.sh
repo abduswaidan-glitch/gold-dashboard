@@ -60,6 +60,10 @@ while :; do
   [ "$NEXT" -le $(( NOW + 60 )) ] && NEXT=$(( NEXT + 1800 ))
   if [ $(( NEXT - START )) -gt "$LIMIT" ]; then
     echo "[loop] time limit reached"
+    # جدولة GitHub قد تتأخر ساعة أو أكثر، فيسلّم التشغيل الدور لتشغيل جديد فورًا بدل انتظارها (لا في عطلة نهاية الأسبوع)
+    if [ -n "${EVENT:-}" ] && [ "${DRY_RUN:-false}" != "true" ] && ! weekend; then
+      gh workflow run update.yml --ref "$BRANCH" -f loop_minutes=325 && echo "[loop] next run dispatched" || echo "[loop] could not dispatch the next run"
+    fi
     break
   fi
   while [ "$(date +%s)" -lt "$NEXT" ]; do
