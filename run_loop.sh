@@ -53,7 +53,7 @@ while :; do
   echo "[loop] iteration at $(date -u +%H:%M:%S) UTC"
   iteration
   FIRST=0
-  export AI_FORCE=false FULL_REFRESH=false     # الطلب اليدوي للتحديث الأول فقط
+  export AI_FORCE=false FULL_REFRESH=false EXPERIMENT_MODEL=    # الطلب اليدوي للتحديث الأول فقط
   [ "$LIMIT" -le 0 ] && break
   NOW=$(date +%s)
   NEXT=$(( NOW / 1800 * 1800 + 420 ))            # الدقيقة 07 أو 37

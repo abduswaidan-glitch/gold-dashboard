@@ -25,6 +25,10 @@ on:
         description: "اختبار: شغّل حتى في عطلة نهاية الأسبوع (true / false)"
         required: false
         default: "false"
+      experiment:
+        description: "تجربة يومية: haiku = يكتب Haiku تقريرًا ثانيًا بعد قراءة تقرير Opus (يُحفظ في data/experiments، ولا يمسّ الصفحة)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -57,6 +61,7 @@ jobs:
           LOOP_MINUTES: ${{ github.event_name == 'schedule' && '325' || github.event.inputs.loop_minutes || '325' }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
           IGNORE_WEEKEND: ${{ github.event.inputs.ignore_weekend || 'false' }}
+          EXPERIMENT_MODEL: ${{ github.event.inputs.experiment == 'haiku' && 'claude-haiku-5-5' || '' }}
           EVENT: ${{ github.event_name }}
           GH_TOKEN: ${{ github.token }}
         run: cp run_loop.sh "$RUNNER_TEMP/loop.sh" && bash "$RUNNER_TEMP/loop.sh"   # نسخة: السكربت يسحب الكود أثناء عمله
