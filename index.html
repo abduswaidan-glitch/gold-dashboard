@@ -327,7 +327,7 @@ h4.layer{margin:18px 0 8px;font-size:15.5px}h4.layer small{font-weight:400;font-
 .dir.up{background:color-mix(in srgb,var(--buy) 16%,transparent)} .dir.down{background:color-mix(in srgb,var(--sell) 16%,transparent)}
 .dir.flat{background:color-mix(in srgb,var(--blue) 16%,transparent);color:var(--blue)}
 .ai-card.track{margin-bottom:18px}
-.ai-card.dfilter{margin-bottom:18px}.ai-card.dcal{margin-bottom:18px}
+.ai-card.dfilter{margin-bottom:18px}.ai-card.dcal{margin-bottom:18px}.ai-card.dfilter{position:relative}.df-copy{position:absolute;top:12px;left:12px;z-index:1;font:inherit;font-size:12.5px;font-weight:600;padding:5px 12px;border-radius:99px;border:1px solid var(--gold);background:var(--gold-soft);color:var(--gold-hi);cursor:pointer}.df-copy:focus-visible{outline:3px solid var(--gold-hi);outline-offset:2px}
 .ai-full{margin:6px 0 18px}
 .ai-full>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;padding:10px 14px;border:1px solid var(--rule);border-radius:var(--radius);background:var(--surface)}
 .ai-full>summary::-webkit-details-marker{display:none}
@@ -1725,17 +1725,12 @@ function filterHTML(){
   const BK = [['down_above', 'جلسة هابطة · فوق MA200'], ['up_above', 'جلسة صاعدة · فوق MA200'],
     ['down_below', 'جلسة هابطة · تحت MA200'], ['up_below', 'جلسة صاعدة · تحت MA200']];
   const CM = '، ', er = st.edge_eras || [], pc = v => v == null ? '—' : bd(nf0.format(v) + '%');
-  let h = `<section class="ai-card dfilter"><div class="ol-head"><h3>${'فلتر الاتجاه الإحصائي'}</h3>
+  let h = `<section class="ai-card dfilter">${f.tv_code ? '<button type="button" class="df-copy" data-tv-copy>انسخ المستويات</button>' : ''}<div class="ol-head"><h3>${'فلتر الاتجاه الإحصائي'}</h3>
     <small>${`للجلسة التالية بعد إغلاق ${fDay.format(toDate(f.asof))} · قواعد مختبرة منذ 2008 · ليس توقعًا`}</small></div>
     <p class="explain">${'اختبرنا 45 عاملًا (الاتجاه، والزخم، وCOT، والعوائد، والدولار، والصناديق، وغيرها) على بيانات الذهب منذ 2008: لا شيء منها يتنبأ باتجاه الجلسة التالية بدقة تُذكر، إلا قاعدة واحدة ثابتة عبر الحقب. أما حجم الحركة فيمكن تقديره جيدًا. لذلك يحدد هذا الفلتر الجهة المفضّلة وحدود الحركة المتوقعة؛ والدخول نفسه من الـ order flow عند أحد المستويات.'}</p>
     <div class="df-badges"><span class="bias ${rg[0]} sm">${rg[1]}</span><span class="bias ${sigB[0]} sm">${sigB[1]}</span>${gxB ? `<span class="bias ${gxB[0]} sm">${gxB[1]}</span>` : ''}</div>
     <div class="df-kv"><div><small>${'الإغلاق'}</small><b>${P(f.close)}</b></div><div><small>${'تغيّر الجلسة'}</small><b>${bd(`${sPCT(f.day_ret)}${f.z != null ? ` · ${sg(f.z) + nf1.format(Math.abs(f.z))}σ` : ''}`)}</b></div><div><small>${'MA200'}</small><b>${P(f.ma200)}</b></div><div><small>${'Momentum 120 يومًا'}</small><b>${sPCT(f.mom120)}</b></div><div><small>${'تقلّب 20 جلسة'}</small><b>${bd(nf2.format(f.sigma_pct) + '%')}</b></div><div><small>${'حركة يومية عادية (1σ)'}</small><b>${bd('±$' + nf1.format(su))}</b></div></div>
     <p class="df-line"><b>${'الإبطال'}:</b> ${IV}</p>
-    ${f.tv_code ? `<div class="df-tv"><div class="df-tv-head"><b>مستويات TradingView</b><button type="button" class="chip-btn" data-tv-copy>انسخ المستويات</button></div>
-      <p class="df-line muted">الصق السطر في خانة «Levels code» في مؤشر Gold Flows Levels. تتحدّث المستويات بعد إغلاق كل جلسة، ومناطق Claude بعد تقرير 13:30 بتوقيت فيينا.</p>
-      ${(f.focus || []).length ? `<ul class="df-zones">${f.focus.map(z => `<li><span class="bias sm ${z.role === 'support' ? 'pos' : z.role === 'resistance' ? 'neg' : 'mix'}">${{support: 'دعم', resistance: 'مقاومة', pivot: 'محور'}[z.role]}</span> ${bd('$' + nf1.format(z.lo) + (z.hi !== z.lo ? ' – $' + nf1.format(z.hi) : ''))} <span class="muted">${esc(z.why)}</span></li>`).join('')}</ul>`
-        : `<p class="df-line muted">لا مناطق Claude لهذه الجلسة بعد؛ تُضاف بعد تقرير 13:30.</p>`}
-      <a href="https://github.com/abduswaidan-glitch/gold-dashboard/blob/main/tradingview/gold_levels.pine" target="_blank" rel="noopener">كود المؤشر (يُثبَّت مرة واحدة)</a></div>` : ''}
     ${(f.zones || []).length ? `<h3 class="rv-title">مناطق التجمّع <small class="muted">GC · كل منطقة تجمع مستويات متقاربة؛ ★ = اختارها Claude</small></h3>
     <div class="tablebox"><table class="pos-t"><thead><tr><th>المنطقة</th><th class="n">النطاق</th><th>المستويات</th><th class="n">الوزن</th></tr></thead><tbody>
     ${f.zones.map(z => { const fav = (f.focus || []).some(x => x.id === z.id), LV = Object.fromEntries(f.levels.map(x => [x.id, x]));
