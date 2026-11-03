@@ -3411,7 +3411,7 @@ def haiku_experiment(data, model, effort="xhigh"):
     # web_search_20250305: web_search_20260209 is not offered to Haiku
     tools = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 4}]
     resp, turns, spent = None, [], []
-    payload = {"model": model, "max_tokens": 32000, "messages": messages, "tools": tools,
+    payload = {"model": model, "max_tokens": 64000, "messages": messages, "tools": tools,
                "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
                "cache_control": {"type": "ephemeral"}, "output_config": {"effort": effort}}
     resp = _claude_stream(payload, key, None)
@@ -3424,6 +3424,12 @@ def haiku_experiment(data, model, effort="xhigh"):
         resp = _claude_stream(payload, key, None)
         spent.append(resp.get("usage") or {})
         turns.append(resp)
+    u = _usage_sum(spent)
+    cost = _cost(model, u)
+    blocks = [b.get("type") for t in turns for b in t.get("content", [])]
+    log(f"EXPERIMENT {model} effort={effort}: stop={resp.get('stop_reason')} blocks={blocks}; {u['calls']} calls, "
+        f"{u['input_tokens']} in / {u['output_tokens']} out tokens, cache {u['cache_creation_input_tokens']} written / "
+        f"{u['cache_read_input_tokens']} read, {u['web_search_requests']} searches, est. ${cost:.3f}")
     if resp.get("stop_reason") == "refusal":
         raise RuntimeError("experiment: request declined")
     queries, sources, text = [], [], ""
@@ -3440,15 +3446,12 @@ def haiku_experiment(data, model, effort="xhigh"):
         if b.get("type") == "text":
             text += b.get("text", "")
     i, j = text.find("{"), text.rfind("}")
+    if i < 0 or j < i:
+        raise RuntimeError(f"experiment: no JSON in the reply (stop={resp.get('stop_reason')}, blocks={blocks})")
     rep = json.loads(text[i:j + 1])
     if not isinstance(rep.get("ar"), dict):
         raise RuntimeError("experiment: report has no ar block")
     outlook = _outlook(rep)
-    u = _usage_sum(spent)
-    cost = _cost(model, u)
-    log(f"EXPERIMENT {model} effort={effort}: {u['calls']} calls, {u['input_tokens']} in / {u['output_tokens']} out tokens, "
-        f"cache {u['cache_creation_input_tokens']} written / {u['cache_read_input_tokens']} read, "
-        f"{u['web_search_requests']} searches, est. ${cost:.3f}")
     save(path, {"date": today, "generated_utc": now.replace(microsecond=0).isoformat(), "model": model, "effort": effort,
                 "outlook": outlook, "ar": rep["ar"], "research_map": rep.get("research_map") or [], "queries": queries,
                 "opus": {"generated_utc": opus.get("generated_utc"), "model": opus.get("model"),
