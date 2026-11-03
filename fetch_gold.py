@@ -3373,6 +3373,89 @@ def ai_report(data, prev, new_major, releases):
 
 
 # ---------------------------------------------------------------- positioning: OI read, concentration, MM cost basis
+EXP_DIR = os.path.join("data", "experiments")
+
+
+def haiku_experiment(data, model, effort="xhigh"):
+    """تجربة مؤقتة ليوم واحد: نموذج ثانٍ يقرأ تقرير Opus المنشور اليوم أولًا، ثم يكتب تقريره هو.
+    لا يمسّ سجل الانحياز ولا التقرير المعروض، ويُحفظ في data/experiments. التكلفة تُكتب في سجل Actions فقط."""
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not key:
+        log("experiment skipped: no ANTHROPIC_API_KEY")
+        return None
+    now = dt.datetime.now(dt.timezone.utc)
+    today = now.date().isoformat()
+    tag = model.split("-")[1]                        # haiku
+    path = os.path.join(EXP_DIR, f"{tag}_{today}.json")
+    if os.path.exists(path):
+        log("experiment: already done today:", path)
+        return None
+    opus = (data.get("ai") or {}).get("latest") or {}
+    if not isinstance(opus.get("ar"), dict):
+        log("experiment: no published report to read first")
+        return None
+    digest = json.dumps(ai_digest(data), ensure_ascii=False, separators=(",", ":"))
+    user = (f"Date (UTC): {today}.\nPlatform data (JSON; t = tonnes, contracts = COMEX GC 100-oz contracts):\n{digest}\n\n"
+            "Another analyst (Claude Opus 5.5) wrote the report below today, before the US morning releases. "
+            "Read it first. Then write your own report from the platform data: say openly where you agree and where "
+            "you disagree with it, give your own bias, and say what you would change in its reasoning and why. "
+            "Search only for what is new.\n\n"
+            "Opus report (JSON):\n" + json.dumps({"outlook": opus.get("outlook"), "ar": opus["ar"]}, ensure_ascii=False) +
+            "\n\nThen return the JSON report.")
+    system = AI_SYSTEM.replace("{max_searches}", "4")
+    owner = _owner_prompt()
+    if owner:
+        system += ("\n\nStanding instructions from the platform owner (written in Arabic). Follow them within the rules and "
+                   "the JSON shape above; if they ever conflict, the rules above win:\n" + owner)
+    messages = [{"role": "user", "content": user}]
+    # web_search_20250305: web_search_20260209 is not offered to Haiku
+    tools = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 4}]
+    resp, turns, spent = None, [], []
+    payload = {"model": model, "max_tokens": 32000, "messages": messages, "tools": tools,
+               "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+               "cache_control": {"type": "ephemeral"}, "output_config": {"effort": effort}}
+    resp = _claude_stream(payload, key, None)
+    spent.append(resp.get("usage") or {})
+    turns = [resp]
+    for _ in range(3):
+        if resp.get("stop_reason") != "pause_turn":
+            break
+        payload["messages"] = payload["messages"] + [{"role": "assistant", "content": resp["content"]}]
+        resp = _claude_stream(payload, key, None)
+        spent.append(resp.get("usage") or {})
+        turns.append(resp)
+    if resp.get("stop_reason") == "refusal":
+        raise RuntimeError("experiment: request declined")
+    queries, sources, text = [], [], ""
+    for t in turns:
+        for b in t.get("content", []):
+            if b.get("type") == "server_tool_use" and b.get("name") == "web_search":
+                queries.append((b.get("input") or {}).get("query", ""))
+            elif b.get("type") == "web_search_tool_result" and isinstance(b.get("content"), list):
+                for it in b["content"]:
+                    u = it.get("url", "")
+                    if u.startswith("https://") and u not in [x["url"] for x in sources]:
+                        sources.append({"url": u, "title": (it.get("title") or "")[:140]})
+    for b in resp.get("content", []):
+        if b.get("type") == "text":
+            text += b.get("text", "")
+    i, j = text.find("{"), text.rfind("}")
+    rep = json.loads(text[i:j + 1])
+    if not isinstance(rep.get("ar"), dict):
+        raise RuntimeError("experiment: report has no ar block")
+    outlook = _outlook(rep)
+    u = _usage_sum(spent)
+    cost = _cost(model, u)
+    log(f"EXPERIMENT {model} effort={effort}: {u['calls']} calls, {u['input_tokens']} in / {u['output_tokens']} out tokens, "
+        f"cache {u['cache_creation_input_tokens']} written / {u['cache_read_input_tokens']} read, "
+        f"{u['web_search_requests']} searches, est. ${cost:.3f}")
+    save(path, {"date": today, "generated_utc": now.replace(microsecond=0).isoformat(), "model": model, "effort": effort,
+                "outlook": outlook, "ar": rep["ar"], "research_map": rep.get("research_map") or [], "queries": queries,
+                "opus": {"generated_utc": opus.get("generated_utc"), "model": opus.get("model"),
+                         "outlook": opus.get("outlook"), "headline": (opus.get("ar") or {}).get("headline")}})
+    return path
+
+
 def _price_at(daily, d):
     i = bisect.bisect_right([r[0] for r in daily], d) - 1
     return daily[i][1] if i >= 0 else None
@@ -3964,6 +4047,12 @@ def main():
         save(SCORECARD, scorecard(data))
     except Exception as e:
         log("scorecard FAILED:", repr(e)[:200])
+    exp_model = os.environ.get("EXPERIMENT_MODEL", "").strip()
+    if exp_model:
+        try:
+            haiku_experiment(data, exp_model)
+        except Exception as e:
+            log("experiment FAILED:", repr(e)[:200])
     # data.json لا يُكتب إلا إذا تغيّرت البيانات فعلًا، كي لا يتضخم سجل المستودع
     core = lambda x: json.dumps({k: v for k, v in x.items() if k not in ("generated_utc", "sources", "data_utc")},
                                 ensure_ascii=False, sort_keys=True)
