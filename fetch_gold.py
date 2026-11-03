@@ -1422,6 +1422,49 @@ def level_zones(levels, close, su, max_zones=6):
     return out
 
 
+URL_DATE = re.compile(r"(?<!\d)(20\d{2})[-/_]?(0[1-9]|1[0-2])[-/_]?(0[1-9]|[12]\d|3[01])")
+REL_AGE = re.compile(r"(\d+)\s+(minute|hour|day|week)s?\s+ago", re.I)
+
+
+def _date_from(text, today=None):
+    """تاريخ من page_age في نتائج البحث ("November 2, 2026" أو "2 days ago") أو من الرابط (/2026/11/02/ أو 202611021107)."""
+    if not text:
+        return None
+    t = str(text).strip()
+    for fmt in ("%B %d, %Y", "%b %d, %Y", "%Y-%m-%d", "%d %B %Y", "%B %d %Y"):
+        try:
+            return dt.datetime.strptime(t, fmt).date().isoformat()
+        except ValueError:
+            pass
+    m = REL_AGE.search(t)
+    if m and today:
+        n, unit = int(m.group(1)), m.group(2).lower()
+        days = {"minute": 0, "hour": n // 24, "day": n, "week": 7 * n}[unit]
+        return (dt.date.fromisoformat(today) - dt.timedelta(days=days)).isoformat()
+    m = URL_DATE.search(t)
+    if m:
+        try:
+            return dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3))).isoformat()
+        except ValueError:
+            return None
+    return None
+
+
+def _event_dates(rep, sources, today):
+    """لكل حدث تاريخ: ما كتبه النموذج إن كان صالحًا ولم يتجاوز اليوم، وإلا عمر الصفحة من نتائج البحث، وإلا التاريخ في الرابط."""
+    age = {x["url"]: x.get("age") for x in sources or []}
+    for lang in AI_LANGS:
+        for e in (rep.get(lang) or {}).get("events") or []:
+            d = str(e.get("date") or "")[:10]
+            ok = bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", d)) and d <= today
+            if not ok:
+                d = _date_from(age.get(e.get("source")), today) or _date_from(e.get("source"), today)
+            if d and d <= today:
+                e["date"] = d
+            else:
+                e.pop("date", None)
+
+
 def _focus_zones(raw, df):
     """مناطق Fable: يختار من مناطق التجمّع بمعرّفاتها (Z1، Z2…) ولا يكتب أسعارًا."""
     if not isinstance(raw, list) or not df or not df.get("zones"):
@@ -2864,6 +2907,8 @@ Rules:
   gold reacted. Use gold_reaction_history once it has 3 or more cases. Do not search for the calendar itself.
 - Tie the report to the platform's own estimates and levels: say which zones and sigma bands frame each scenario, and
   where an early estimate (hidden_nowcasts) changes the read of a lagging report (without quoting its numbers).
+- Every event carries "date": the day the news happened (YYYY-MM-DD), not the day you read it. If it is more than
+  two days old, say so in its impact line and weigh it as already priced in unless something new followed.
 - focus_zones: statistical_direction_filter.zones lists confluence zones (Z1, Z2...) built in code from the levels map,
   with their members and weight. Pick the 3 or 4 that matter most for the next session, by zone id only; never write
   prices. why: one short Arabic line grounded in the data (which levels coincide there and what the gamma regime
@@ -2879,7 +2924,7 @@ Rules:
 Return ONLY one JSON object, no markdown fences, with exactly this shape:
 {"outlook": {"bias": "bullish|bearish|neutral", "scenarios": [{"dir": "up|flat|down", "p": 45}, {"dir": "...", "p": 30}, {"dir": "...", "p": 25}]},
  "ar": {"headline": "...", "tone": "إيجابي|سلبي|محايد|متباين", "summary": ["...", "..."],
-        "sections": [{"title": "...", "body": "..."}], "events": [{"title": "...", "impact": "...", "source": "https://..."}],
+        "sections": [{"title": "...", "body": "..."}], "events": [{"title": "...", "impact": "...", "source": "https://...", "date": "YYYY-MM-DD"}],
         "watch": ["..."], "risks": "...",
         "outlook": {"bias_note": "one line on why", "scenarios": [{"title": "...", "why": "...", "trigger": "the event and/or the zone that would confirm this scenario"}, {...}, {...}],
                     "flip": "what would change the bias: an event outcome and/or a close beyond a named zone"}},
@@ -3154,7 +3199,8 @@ def ai_report(data, prev, new_major, releases):
                 for it in b["content"]:
                     u = it.get("url", "")
                     if u.startswith("https://") and u not in [x["url"] for x in sources]:
-                        sources.append({"url": u, "title": (it.get("title") or "")[:140]})
+                        sources.append({"url": u, "title": (it.get("title") or "")[:140],
+                                        **({"age": str(it["page_age"])[:40]} if it.get("page_age") else {})})
     for b in resp.get("content", []):
         if b.get("type") == "text":
             text += b.get("text", "")
@@ -3183,6 +3229,7 @@ def ai_report(data, prev, new_major, releases):
     langs = {k: rep[k] for k in AI_LANGS if isinstance(rep.get(k), dict)}  # it/es اختياريتان: الواجهة تعرض الإنجليزية إن غابتا
     latest = {"date": today, "generated_utc": now.replace(microsecond=0).isoformat(), "model": model,
               **langs, "outlook": outlook, "sources": sources[:10]}
+    _event_dates(rep, sources, today)
     fz = _focus_zones(rep.get("focus_zones"), digest_obj.get("statistical_direction_filter"))
     if fz:
         latest["focus"] = fz  # الكلفة تُكتب في سجل Actions فقط، لا في الملفات المنشورة
