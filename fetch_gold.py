@@ -1423,6 +1423,10 @@ def level_zones(levels, close, su, max_zones=6):
 
 
 URL_DATE = re.compile(r"(?<!\d)(20\d{2})[-/_]?(0[1-9]|1[0-2])[-/_]?(0[1-9]|[12]\d|3[01])")
+MONTHS = ("january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
+          "november", "december")
+SLUG_DATE = re.compile(r"(?:(" + "|".join(MONTHS) + r")[-_ ](\d{1,2})[-_ ,]+(20\d{2})|(\d{1,2})[-_ ](" + "|".join(MONTHS)
+                       + r")[-_ ,]+(20\d{2}))", re.I)
 REL_AGE = re.compile(r"(\d+)\s+(minute|hour|day|week)s?\s+ago", re.I)
 
 
@@ -1441,6 +1445,13 @@ def _date_from(text, today=None):
         n, unit = int(m.group(1)), m.group(2).lower()
         days = {"minute": 0, "hour": n // 24, "day": n, "week": 7 * n}[unit]
         return (dt.date.fromisoformat(today) - dt.timedelta(days=days)).isoformat()
+    m = SLUG_DATE.search(t)
+    if m:
+        mon, day, yr = (m.group(1), m.group(2), m.group(3)) if m.group(1) else (m.group(5), m.group(4), m.group(6))
+        try:
+            return dt.date(int(yr), MONTHS.index(mon.lower()) + 1, int(day)).isoformat()
+        except ValueError:
+            pass
     m = URL_DATE.search(t)
     if m:
         try:
@@ -1448,6 +1459,64 @@ def _date_from(text, today=None):
         except ValueError:
             return None
     return None
+
+
+SOURCE_DATES = os.path.join("data", "source_dates.json")
+PAGE_DATE_PATTERNS = (
+    r'property=["\']article:published_time["\'][^>]*content=["\']([^"\']+)',
+    r'content=["\']([^"\']+)["\'][^>]*property=["\']article:published_time',
+    r'itemprop=["\']datePublished["\'][^>]*content=["\']([^"\']+)',
+    r'"datePublished"\s*:\s*"([^"]+)"',
+    r'name=["\'](?:pubdate|publish-date|publishdate|date|dc\.date\.issued|parsely-pub-date|sailthru\.date)["\'][^>]*content=["\']([^"\']+)',
+    r'<time[^>]*datetime=["\']([^"\']+)',
+)
+
+
+def _page_date(url):
+    """تاريخ نشر الصفحة كما تعلنه هي (article:published_time أو datePublished أو <time>)، لا كما نخمّنه."""
+    try:
+        creq = ensure("curl_cffi.requests", "curl_cffi")
+        r = creq.get(url, impersonate="chrome", timeout=15)
+        if r.status_code != 200:
+            return None
+        html = r.text[:400000]
+    except Exception:
+        return None
+    for pat in PAGE_DATE_PATTERNS:
+        m = re.search(pat, html, re.I)
+        if m:
+            d = _date_from(m.group(1)[:10]) or _date_from(m.group(1))
+            if d:
+                return d
+    return None
+
+
+def backfill_event_dates(ai, today, limit=10):
+    """أي خبر بلا تاريخ في التقارير المنشورة: نفتح صفحة مصدره ونقرأ تاريخ نشرها، ونحفظ النتيجة كي لا نعيد الفتح."""
+    if not ai:
+        return 0
+    cache = load(SOURCE_DATES, {})
+    fetched, filled = 0, 0
+    for rep in [ai.get("latest") or {}] + list(ai.get("history") or []):
+        for lang in AI_LANGS:
+            for e in (rep.get(lang) or {}).get("events") or []:
+                u = e.get("source") or ""
+                if e.get("date") or not u.startswith("https://"):
+                    continue
+                d, src = _date_from(u, today), "url"
+                if not d:
+                    c = cache.get(u)
+                    if (c is None or (not c.get("d") and c.get("t") != today)) and fetched < limit:
+                        c = cache[u] = {"d": _page_date(u), "t": today}
+                        fetched += 1
+                    d, src = (c or {}).get("d"), "page"
+                if d and d <= today:
+                    e["date"], e["date_from"] = d, src
+                    filled += 1
+    if fetched or filled:
+        save(SOURCE_DATES, dict(list(cache.items())[-800:]))
+        log(f"event dates: {filled} events dated (from the source URL or the page's own publish date); {fetched} pages opened")
+    return filled
 
 
 def _event_dates(rep, sources, today):
@@ -3834,6 +3903,10 @@ def main():
         status["sources"]["ai"] = {"ok": False, "checked": now, "error": str(e)[:300]}
         if prev.get("ai"):
             data["ai"] = _no_cost(prev["ai"])
+    try:
+        backfill_event_dates(data.get("ai"), dt.datetime.now(VIENNA).date().isoformat())
+    except Exception as e:
+        log("event dates FAILED:", repr(e)[:200])
     if data.get("direction_filter"):
         try:
             data["direction_filter"]["tv_code"], data["direction_filter"]["focus"] = tv_code(data["direction_filter"], data.get("ai"))
