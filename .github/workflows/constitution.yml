@@ -1,0 +1,29 @@
+name: حارس الدستور
+
+# يفحص أن الدستور مطابق للكود والبيانات، وأن قواعد «ما لا يُفعل أبدًا» محترمة، على كل PR وكل دفع إلى main.
+# دفعات بوت البيانات (بـ GITHUB_TOKEN) لا تطلق هذا الفحص، لأن التشغيل الحي يشغّل الحارس بنفسه كل 30 دقيقة.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: فحص الدستور
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python constitution_guard.py --ci

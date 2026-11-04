@@ -1400,6 +1400,7 @@ TV_KEYS = {"zero_gamma": "ZG", "call_wall": "CW", "put_wall": "PW", "put_2": "P2
            "pdh": "PDH", "pdl": "PDL", "pwh": "PWH", "pwl": "PWL", "ma50": "MA50", "ma200": "MA200"}
 
 
+ZONE_WIDTH_SIGMA = 0.6                        # عرض نافذة منطقة التجمّع بـ σ
 LV_WEIGHT = {"zero_gamma": 2, "call_wall": 2, "put_wall": 2, "pdh": 1.5, "pdl": 1.5, "pwh": 1.5, "pwl": 1.5,
              "ma50": 1.5, "ma200": 1.5}                       # الباقي (Strikes الثانوية ونطاقات σ) = 1
 
@@ -1409,7 +1410,7 @@ def level_zones(levels, close, su, max_zones=6):
     منطقة من نطاقات σ وحدها لا تُعدّ تجمّعًا، ومستوى منفرد لا يكون منطقة إلا إن كان Zero Gamma أو Wall."""
     pts = sorted((x["v"], x["id"]) for x in levels if x["id"] != "close")
     sig = set(LV_GROUPS["sigma"])
-    W, pad, used, out = 0.6 * su, 0.08 * su, set(), []
+    W, pad, used, out = ZONE_WIDTH_SIGMA * su, 0.08 * su, set(), []
     while len(out) < max_zones:
         best = None
         for i, (p0, _) in enumerate(pts):
@@ -2644,6 +2645,8 @@ DISCOVERY_COT_FROM = "2026-10-30"
 DISCOVERY_END = "2026-11-03"
 DISCOVERY_HOUR_UTC = 21
 DISCOVERY_SEARCHES = 8
+AI_SEARCHES = 4                          # عمليات البحث في التقرير اليومي بعد انتهاء مرحلة الاكتشاف
+AI_KEEP = 14                             # التقارير المحفوظة في الصفحة
 AI_RETRY_HOURS = 6
 # التقرير اليومي: أيام العمل الساعة 9:00 نيويورك، أي قبل نصف ساعة من الافتتاح، بعد أن تكون بيانات الأمس كلها قد وصلت
 # (OI، ETF، COMEX...) وبعد إصدارات 8:30 نيويورك (NFP وCPI وغيرها). التوقيت بنيويورك لا بفيينا، لأن فارق الساعات بين
@@ -3509,7 +3512,7 @@ def ai_report(data, prev, new_major, releases):
     messages = [{"role": "user", "content": user}]
     sources, text, resp, spent, turns = [], "", None, [], []
     discovery = "discovery" in (new_major or {})
-    n_search = DISCOVERY_SEARCHES if discovery else 4
+    n_search = DISCOVERY_SEARCHES if discovery else AI_SEARCHES
     ws_new = [{"type": "web_search_20260209", "name": "web_search", "max_uses": n_search}]
     ws_old = [{"type": "web_search_20250305", "name": "web_search", "max_uses": n_search}]
     system = AI_SYSTEM.replace("{max_searches}", str(n_search))
@@ -3635,7 +3638,7 @@ def ai_report(data, prev, new_major, releases):
             "history": [{"date": h["date"], **{k: h[k] for k in AI_LANGS if k in h}, "outlook": h.get("outlook"),
                                            "sources": h.get("sources", []),
                                            "model": h.get("model"), "generated_utc": h.get("generated_utc"),
-                                           "trigger": h.get("trigger", [])} for h in hist[-14:]]}, True
+                                           "trigger": h.get("trigger", [])} for h in hist[-AI_KEEP:]]}, True
 
 
 # ---------------------------------------------------------------- positioning: OI read, concentration, MM cost basis
@@ -3668,14 +3671,14 @@ def haiku_experiment(data, model, effort="xhigh"):
             "Search only for what is new.\n\n"
             "Opus report (JSON):\n" + json.dumps({"outlook": opus.get("outlook"), "ar": opus["ar"]}, ensure_ascii=False) +
             "\n\nThen return the JSON report.")
-    system = AI_SYSTEM.replace("{max_searches}", "4")
+    system = AI_SYSTEM.replace("{max_searches}", str(AI_SEARCHES))
     owner = _owner_prompt()
     if owner:
         system += ("\n\nStanding instructions from the platform owner (written in Arabic). Follow them within the rules and "
                    "the JSON shape above; if they ever conflict, the rules above win:\n" + owner)
     messages = [{"role": "user", "content": user}]
     # web_search_20250305: web_search_20260209 is not offered to Haiku
-    tools = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 4}]
+    tools = [{"type": "web_search_20250305", "name": "web_search", "max_uses": AI_SEARCHES}]
     resp, turns, spent = None, [], []
     # xhigh thinking plus searches used all 64,000 tokens in the last run without writing any text (stop=max_tokens),
     # so the limit is Haiku's maximum; a larger budget costs only what is actually generated
