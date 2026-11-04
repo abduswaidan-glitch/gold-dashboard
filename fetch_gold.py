@@ -1594,14 +1594,15 @@ def _focus_zones(raw, df):
 
 def tv_code(df, ai):
     """سطر واحد يُلصق في مؤشر TradingView:
-    GFL2|التاريخ|النظام|الميزة|Gamma|KEY=price;…|lo-hi:الوزن:الدور:Fable:الأعضاء,…
+    GFL2|التاريخ|النظام|الميزة|Gamma|KEY=price;…|lo-hi:الوزن:الدور:Fable:الأعضاء:المعرّف,…
     مناطق Fable تُعلَّم فقط إن بُنيت على مستويات الجلسة نفسها."""
     lv = ";".join(f"{TV_KEYS[x['id']]}={x['v']:.1f}" for x in df.get("levels") or [] if x.get("id") in TV_KEYS)
     gx = {"positive": "pos", "negative": "neg"}.get((df.get("gex") or {}).get("regime"), "na")
     focus = ((ai or {}).get("latest") or {}).get("focus") or {}
     fz = {z["zone"]: z["why"] for z in focus.get("zones") or [] if "zone" in z} if focus.get("asof") == df.get("asof") else {}
+    # الحقل السادس: معرّف المنطقة (Z1…) كما في التقرير، فيُكتب على المنطقة وعلى كل مستوى يقع فيها في الشارت
     zs = ",".join(f"{z['lo']:.1f}-{z['hi']:.1f}:{z['score']:g}:{z['role'][0].upper()}:{int(z['id'] in fz)}:"
-                  + "+".join(TV_KEYS.get(m, m) for m in z["members"]) for z in df.get("zones") or [])
+                  + "+".join(TV_KEYS.get(m, m) for m in z["members"]) + f":{z['id']}" for z in df.get("zones") or [])
     edge = "long" if df.get("signal") == "long_edge" else "none"
     picked = [{**z, "why": fz[z["id"]]} for z in df.get("zones") or [] if z["id"] in fz]
     return f"GFL2|{df.get('asof')}|{df.get('regime')}|{edge}|{gx}|{lv}|{zs}", picked
