@@ -1986,8 +1986,8 @@ def publish_news(fj=None):
         row = {"id": i, "kind": "news", "utc": t.replace(microsecond=0).isoformat(), "en": title[:300],
                "labels": (it.get("labels") or [])[:5],
                "gold": bool(FJ_HOT.search(title + " " + " ".join(it.get("labels") or []))),
-               **({"breaking": True} if it.get("breaking") else {}),
-               # لا رابط للقصة: روابط FinancialJuice تُحوَّل إلى صفحات Reuters قديمة لا علاقة لها بالخبر (تحقّق 4 نوفمبر)
+               **({"breaking": True} if it.get("breaking") else {})}
+        # لا رابط للقصة: روابط FinancialJuice تُحوَّل إلى صفحات Reuters قديمة لا علاقة لها بالخبر (تحقّق 4 نوفمبر)
         if old.get("ar") and old.get("en") == row["en"]:
             row["ar"] = old["ar"]
         items[i] = row
