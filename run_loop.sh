@@ -45,6 +45,14 @@ iteration() {
   echo "push failed; changes stay for the next iteration"
 }
 
+# مستمع FinancialJuice في الخلفية طوال التشغيل: يكتب في ملف مؤقت خارج المستودع (لا يُرفع)، ويقرؤه كل تحديث
+if [ -n "${FJ_API_KEY:-}" ] && ! weekend; then
+  export FJ_BUFFER="${RUNNER_TEMP:-/tmp}/fj_stream.jsonl"
+  python fj_listen.py &
+  FJ_PID=$!
+  trap 'kill "$FJ_PID" 2>/dev/null' EXIT
+fi
+
 while :; do
   if weekend && ! { [ "$FIRST" = 1 ] && [ "${EVENT:-}" = "workflow_dispatch" ]; }; then
     echo "[loop] weekend (Vienna): platform paused"
