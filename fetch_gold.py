@@ -1987,7 +1987,7 @@ def publish_news(fj=None):
                "labels": (it.get("labels") or [])[:5],
                "gold": bool(FJ_HOT.search(title + " " + " ".join(it.get("labels") or []))),
                **({"breaking": True} if it.get("breaking") else {}),
-               **({"link": it["link"]} if str(it.get("link") or "").startswith("https://") else {})}
+               # لا رابط للقصة: روابط FinancialJuice تُحوَّل إلى صفحات Reuters قديمة لا علاقة لها بالخبر (تحقّق 4 نوفمبر)
         if old.get("ar") and old.get("en") == row["en"]:
             row["ar"] = old["ar"]
         items[i] = row
@@ -2092,7 +2092,7 @@ def fj_pack(fj, unmatched, via_macro=False):
         hot = bool(FJ_HOT.search(title + " " + " ".join(it.get("labels") or [])))
         items.append((hot or bool(it.get("breaking")), t, {
             "utc": t.strftime("%Y-%m-%d %H:%M"), "title": title[:220], "labels": (it.get("labels") or [])[:5],
-            **({"breaking": True} if it.get("breaking") else {}), **({"link": it["link"]} if it.get("link") else {})}))
+            **({"breaking": True} if it.get("breaking") else {})}))
     items.sort(key=lambda x: (x[0], x[1]), reverse=True)
     heads = [x[2] for x in items[:45]]
     heads.sort(key=lambda x: x["utc"], reverse=True)
