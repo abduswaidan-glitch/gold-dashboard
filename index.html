@@ -327,7 +327,7 @@ h4.layer{margin:18px 0 8px;font-size:15.5px}h4.layer small{font-weight:400;font-
 .dir.up{background:color-mix(in srgb,var(--buy) 16%,transparent)} .dir.down{background:color-mix(in srgb,var(--sell) 16%,transparent)}
 .dir.flat{background:color-mix(in srgb,var(--blue) 16%,transparent);color:var(--blue)}
 .ai-card.track{margin-bottom:18px}
-.ai-card.dfilter{margin-bottom:18px}.ai-card.dcal{margin-bottom:18px}.ol-fold{margin:8px 0 4px}.abc{margin-top:10px;padding-top:10px;border-top:1px solid var(--rule)}.abc h3{font-size:15px;margin:0 0 8px}.abc-row{display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--rule)}.abc-row:last-child{border-bottom:0}.abc-l{flex:none;width:30px;height:30px;border-radius:99px;display:inline-flex;align-items:center;justify-content:center;font-weight:800;background:var(--gold-soft);color:var(--gold-hi)}.abc-t{display:flex;flex-direction:column;gap:3px;min-width:0}.abc-t>b{font-size:14.5px}.abc-t>span{font-size:13.5px;color:var(--muted);line-height:1.65}.ai-card.dfilter{position:relative}.df-copy{position:absolute;top:12px;left:12px;z-index:1;font:inherit;font-size:12.5px;font-weight:600;padding:5px 12px;border-radius:99px;border:1px solid var(--gold);background:var(--gold-soft);color:var(--gold-hi);cursor:pointer}.df-copy:focus-visible{outline:3px solid var(--gold-hi);outline-offset:2px}
+.nw-list{list-style:none;margin:0;padding:0}.nw-day{font-size:12.5px;font-weight:700;color:var(--muted);padding:12px 0 4px;border-bottom:1px solid var(--rule)}.nw-row{display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--rule)}.nw-row:last-child{border-bottom:0}.nw-time{flex:none;width:58px;display:flex;flex-direction:column;font-weight:700;font-size:14px}.nw-time small{font-weight:400;font-size:11.5px;color:var(--muted)}.nw-body{min-width:0;font-size:14.5px;line-height:1.7}.nw-row.gld .nw-time{color:var(--gold-hi)}.nw-tag{display:inline-block;font-size:11.5px;font-weight:700;padding:1px 8px;border-radius:99px;margin-inline-end:6px;vertical-align:1px}.nw-tag.brk{background:rgba(229,83,75,.15);color:#E5534B}.nw-tag.dat{background:var(--gold-soft);color:var(--gold-hi)}.nw-row.brk .nw-t{font-weight:700}.nw-link{color:var(--muted);text-decoration:none;font-size:13px}.nw-nums{display:block;font-size:13px;color:var(--muted)}.nw-nums b{color:var(--ink)}.ai-card.dfilter{margin-bottom:18px}.ai-card.dcal{margin-bottom:18px}.ol-fold{margin:8px 0 4px}.abc{margin-top:10px;padding-top:10px;border-top:1px solid var(--rule)}.abc h3{font-size:15px;margin:0 0 8px}.abc-row{display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--rule)}.abc-row:last-child{border-bottom:0}.abc-l{flex:none;width:30px;height:30px;border-radius:99px;display:inline-flex;align-items:center;justify-content:center;font-weight:800;background:var(--gold-soft);color:var(--gold-hi)}.abc-t{display:flex;flex-direction:column;gap:3px;min-width:0}.abc-t>b{font-size:14.5px}.abc-t>span{font-size:13.5px;color:var(--muted);line-height:1.65}.ai-card.dfilter{position:relative}.df-copy{position:absolute;top:12px;left:12px;z-index:1;font:inherit;font-size:12.5px;font-weight:600;padding:5px 12px;border-radius:99px;border:1px solid var(--gold);background:var(--gold-soft);color:var(--gold-hi);cursor:pointer}.df-copy:focus-visible{outline:3px solid var(--gold-hi);outline-offset:2px}
 .ai-full{margin:6px 0 18px}
 .ai-full>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;padding:10px 14px;border:1px solid var(--rule);border-radius:var(--radius);background:var(--surface)}
 .ai-full>summary::-webkit-details-marker{display:none}
@@ -2061,7 +2061,7 @@ document.addEventListener('click', e => { if (e.target.closest('#fab')) copyDige
 
 /* ================= shell ================= */
 const TABS = () => [
-  ['ai', 'الملخص والتقرير'], ['macro', 'العوائد والدولار'], ['gex', 'GEX (GLD)'], ['countries', 'الدول'], ['cb', 'البنوك المركزية'], ['banks', 'البنوك التجارية'],
+  ['ai', 'الملخص والتقرير'], ['news', 'أخبار لحظية'], ['macro', 'العوائد والدولار'], ['gex', 'GEX (GLD)'], ['countries', 'الدول'], ['cb', 'البنوك المركزية'], ['banks', 'البنوك التجارية'],
   ['noncomm', 'COT Non-Commercial'], ['signals', 'إشارات COT'], ['f13', 'المؤسسات (13F)'],
   ['comex', 'COMEX'], ['etf', 'صناديق ETF'], ['physical', 'السوق الفعلي'],
 ];
@@ -2287,6 +2287,54 @@ document.addEventListener('mouseout', e => {
   if (plot && !plot.contains(e.relatedTarget)){ const tt = plot.querySelector('.tt'); if (tt) tt.hidden = true; }
 });
 
+
+/* أخبار لحظية: news.json من بث FinancialJuice (بتأخير 10 دقائق)، يتحدّث كل 10 دقائق، والصفحة تعيد قراءته كل دقيقتين */
+let NEWS = null;
+state.newsGold = false;
+const NWT = new Intl.DateTimeFormat('ar-u-nu-latn', {hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Europe/Vienna'});
+const NWD = new Intl.DateTimeFormat('ar-u-nu-latn', {weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Europe/Vienna'});
+function agoAr(iso){
+  const m = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000));
+  return m < 1 ? 'الآن' : m < 60 ? `قبل ${m} د` : `قبل ${Math.floor(m / 60)} س ${m % 60 ? (m % 60) + ' د' : ''}`.trim();
+}
+R.news = () => {
+  const all = (NEWS && NEWS.items) || [];
+  const gold = all.filter(x => x.gold);
+  const list = state.newsGold ? gold : all;
+  let h = `<section class="ai-card news"><div class="ol-head"><h3>أخبار لحظية</h3>
+    <small>المصدر FinancialJuice · يصل الخبر بعد نحو 10 دقائق من نشره · تتحدّث القائمة كل 10 دقائق · الترجمة آلية · بتوقيت فيينا${NEWS && NEWS.updated_utc ? ` · آخر تحديث ${bd(NWT.format(new Date(NEWS.updated_utc)))}` : ''}</small></div>`;
+  if (!all.length){
+    return h + `<p class="muted">لا أخبار بعد. يبدأ البث مع التشغيل الحي للمنصة في أيام التداول، ويتوقف في عطلة نهاية الأسبوع.</p></section>`;
+  }
+  h += `<div class="chips"><button class="chip-btn" data-news-f="0" aria-pressed="${!state.newsGold}">الكل ${bd(all.length)}</button>
+    <button class="chip-btn" data-news-f="1" aria-pressed="${state.newsGold}">المؤثر في الذهب ${bd(gold.length)}</button></div><ol class="nw-list">`;
+  let day = '';
+  for (const x of list){
+    const d = NWD.format(new Date(x.utc));
+    if (d !== day){ day = d; h += `<li class="nw-day">${esc(d)}</li>`; }
+    const t = x.ar || x.en, link = safeUrl(x.link);
+    const nums = x.kind === 'data'
+      ? `<span class="nw-nums">الفعلي <b>${bd(esc(x.actual ?? '—'))}</b> · التوقع ${bd(esc(x.forecast ?? '—'))} · السابق ${bd(esc(x.previous ?? '—'))}${x.country ? ` · ${bd(esc(x.country))}` : ''}</span>` : '';
+    h += `<li class="nw-row${x.breaking ? ' brk' : ''}${x.gold ? ' gld' : ''}">
+      <span class="nw-time">${bd(NWT.format(new Date(x.utc)))}<small>${esc(agoAr(x.utc))}</small></span>
+      <div class="nw-body">${x.breaking ? '<span class="nw-tag brk">عاجل</span>' : ''}${x.kind === 'data' ? '<span class="nw-tag dat">بيان</span>' : ''}<span class="nw-t"${x.ar ? '' : ' dir="auto"'}>${esc(t)}</span>${link ? ` <a class="nw-link" href="${esc(link)}" target="_blank" rel="noopener noreferrer" aria-label="المصدر">↗</a>` : ''}${nums}</div></li>`;
+  }
+  return h + `</ol></section>`;
+};
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-news-f]');
+  if (!b) return;
+  state.newsGold = b.dataset.newsF === '1';
+  if (state.tab === 'news') render();
+});
+async function loadNews(){
+  const n = await fetch('news.json?t=' + Date.now(), {cache: 'no-store'}).then(x => x.ok ? x.json() : null).catch(() => null);
+  if (!n) return;
+  const changed = !NEWS || NEWS.updated_utc !== n.updated_utc;
+  NEWS = n;
+  if (state.tab === 'news' && DATA && changed) render();
+}
+setInterval(() => { loadNews(); if (state.tab === 'news' && DATA) render(); }, 120000);
 window.addEventListener('hashchange', () => {
   const h = location.hash.slice(1);
   if (TABS().some(([id]) => id === h) && h !== state.tab){ state.tab = h; render(); }
@@ -2298,7 +2346,7 @@ window.addEventListener('hashchange', () => {
   applyLang();
   try {
     const get = f => fetch(f + '?t=' + Date.now(), {cache:'no-store'}).then(x => x.ok ? x.json() : null).catch(() => null);
-    const [d, p, s2] = await Promise.all([get('data.json'), get('prices.json'), get('status.json')]);
+    const [d, p, s2] = await Promise.all([get('data.json'), get('prices.json'), get('status.json'), loadNews()]);
     if (!d) throw new Error('data.json');
     DATA = d; PRICES = p; STATUS = s2 || {checked_utc: d.generated_utc, sources: d.sources || {}};
     renderMast();
