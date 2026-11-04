@@ -2327,11 +2327,28 @@ document.addEventListener('click', e => {
   state.newsGold = b.dataset.newsF === '1';
   if (state.tab === 'news') render();
 });
+/* مصدران يُدمجان: news.json لهذه المنصة (عناوين وبيانات صادرة) و/macro-platform/news.json (عناوين مترجمة جاهزة من منصة
+   الاقتصاد الكلي على النطاق نفسه). القراءة في المتصفح فقط، فلا يدخل نص العناوين مستودع الذهب. إن غاب أحدهما يكفي الآخر. */
+const NEWS_HOT = /\b(gold|xau|bullion|silver|fed|fomc|powell|treasur|yield|dollar|dxy|inflation|cpi|pce|ppi|payroll|jobs?|jobless|unemployment|gdp|ism|tariff|trump|white house|sanction|iran|israel|russia|ukraine|china|war|missile|strike|attack|ceasefire|central bank|rate cut|rate hike|bond|auction|shutdown|debt)/i;
 async function loadNews(){
-  const n = await fetch('news.json?t=' + Date.now(), {cache: 'no-store'}).then(x => x.ok ? x.json() : null).catch(() => null);
-  if (!n) return;
-  const changed = !NEWS || NEWS.updated_utc !== n.updated_utc;
-  NEWS = n;
+  const get = f => fetch(f + '?t=' + Date.now(), {cache: 'no-store'}).then(x => x.ok ? x.json() : null).catch(() => null);
+  const [own, mac] = await Promise.all([get('news.json'), get('/macro-platform/news.json')]);
+  const rows = new Map();
+  for (const x of (mac && mac.items) || []){
+    if (!x || x.id == null || !x.title_en) continue;
+    rows.set('news:' + x.id, {id: x.id, kind: 'news', utc: x.utc, en: x.title_en,
+      ar: x.title_ar && x.title_ar !== x.title_en ? x.title_ar : null, breaking: !!x.breaking, link: x.link,
+      gold: NEWS_HOT.test(x.title_en + ' ' + (x.labels || []).join(' '))});
+  }
+  for (const x of (own && own.items) || []){
+    const k = (x.kind || 'news') + ':' + x.id, m = rows.get(k);
+    rows.set(k, m && !x.ar && m.ar ? {...x, ar: m.ar} : x);   // ترجمة منصة الاقتصاد الكلي تسدّ ما لم يُترجم هنا
+  }
+  if (!rows.size) return;
+  const items = [...rows.values()].filter(x => x.utc).sort((a, b) => Date.parse(b.utc) - Date.parse(a.utc)).slice(0, 160);
+  const upd = [own && own.updated_utc, mac && mac.updated].filter(Boolean).sort((a, b) => Date.parse(a) - Date.parse(b)).pop();
+  const changed = !NEWS || NEWS.updated_utc !== upd || NEWS.items.length !== items.length;
+  NEWS = {items, updated_utc: upd};
   if (state.tab === 'news' && DATA && changed) render();
 }
 setInterval(() => { loadNews(); if (state.tab === 'news' && DATA) render(); }, 120000);
