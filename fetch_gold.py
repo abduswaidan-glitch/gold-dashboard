@@ -51,7 +51,9 @@ GEX_HIST = os.path.join("data", "gex_history.json")
 F13_TYPES = os.path.join("data", "f13_types.json")
 OUTLOOK_LOG = os.path.join("data", "outlook_log.json")
 
-IMF_URL = "https://api.imf.org/external/sdmx/2.1/data/IRFCL/.IRFCLDT1_IRFCL56V_FTO..M"
+# منذ 4 نوفمبر 2026 (IRFCL الإصدار 12) لا يُعرف المعرّف وحده («No such dataflow»)، فيلزم اسم الوكالة IMF.STA
+IMF_URL = "https://api.imf.org/external/sdmx/2.1/data/IMF.STA,IRFCL/.IRFCLDT1_IRFCL56V_FTO..M"
+IMF_SECTOR_PREF = {"S1XS1311": 0, "S1X": 1, "S1311": 2}   # السلطة النقدية والحكومة معًا أولًا، كي لا يُخلط قطاعان
 COT_URLS = [
     "https://publicreporting.cftc.gov/resource/72hh-3qpy.json",   # Disaggregated, Futures only
     "https://publicreporting.cftc.gov/resource/kh3c-gbw2.json",   # Disaggregated, Futures + Options
@@ -238,11 +240,11 @@ def imf_rows(text):
                             per = c.get("value")
                         elif _tag(c) == "ObsValue":
                             val = c.get("value")
-                rows.append((area, per, val))
+                rows.append((area, per, val, key.get("SECTOR")))
     else:
         for r in csv.DictReader(io.StringIO(t)):
             area = r.get("COUNTRY") or r.get("REF_AREA")
-            rows.append((area, r.get("TIME_PERIOD"), r.get("OBS_VALUE")))
+            rows.append((area, r.get("TIME_PERIOD"), r.get("OBS_VALUE"), r.get("SECTOR")))
     return rows
 
 
@@ -263,8 +265,8 @@ def fetch_imf():
     if not rows:
         raise RuntimeError("IMF: no data — " + (errors[-1] if errors else "")[:200])
 
-    raw, rejected = {}, []
-    for area, per, val in rows:
+    raw, rejected, rank = {}, [], {}
+    for area, per, val, sector in rows:
         if not area or not re.fullmatch(r"[A-Z]{3}", str(area)):
             continue
         d, v = period_to_date(per), num(val)
@@ -274,6 +276,10 @@ def fetch_imf():
         if kg > MAX_COUNTRY_KG:                      # خطأ وحدات في بيانات الدولة
             rejected.append(f"{area}:{d}")
             continue
+        pr = IMF_SECTOR_PREF.get(sector, 3)          # دولة تنشر أكثر من قطاع: نأخذ الأشمل لا آخر ما ورد
+        if pr > rank.get((area, d), 9):
+            continue
+        rank[(area, d)] = pr
         raw.setdefault(area, {})[d] = kg
 
     countries = {}
@@ -1293,13 +1299,17 @@ def direction_filter(d, now=None):
     # إحصاءات تاريخية تُعاد حسابها كل يوم (لا أرقام مكتوبة باليد)
     buckets, cover, base = {}, {k: [] for k in FILTER_BANDS}, []
     eras = [{"from": a[:4], "n": 0, "up1": [], "up10": []} for a, _ in FILTER_ERAS]
-    reg10, swing_cov = {}, {h: [] for h in FILTER_SWING}
+    reg10, swing_cov, stage_h = {}, {h: [] for h in FILTER_SWING}, {}
+    stage_at = lambda i: sum(px[i] > ma(i, w) for w in (20, 50, 200))
     regime_at = lambda i: ("up" if px[i] > ma(i, 200) and px[i] > px[i - 120] else
                            "down" if px[i] < ma(i, 200) and px[i] < px[i - 120] else "mixed")
     for i in range(250, n - 1):
         dn, above = feat(i)
         if i + 10 < n:
             reg10.setdefault(regime_at(i), []).append(px[i + 10] > px[i])
+            sh = stage_h.setdefault(stage_at(i), {"up5": [], "up10": []})
+            sh["up5"].append(px[i + 5] > px[i])
+            sh["up10"].append(px[i + 10] > px[i])
         for h in FILTER_SWING:
             if i + h < n:
                 swing_cov[h].append(abs(math.log(px[i + h] / px[i])) <= vol[i] * math.sqrt(h))
@@ -1363,13 +1373,22 @@ def direction_filter(d, now=None):
            "sigma": round(sig * 100, 3), "z": round(lr[i] / vol[i - 1], 2) if vol[i - 1] else None,
            "gex": gex and gex["regime"], "zero": gex and gex["zero"],
            "levels": [[x["id"], x["v"]] for x in levels if x["id"] != "close"]}
+    m20 = ma(i, 20)
+    mas = {"ma20": m20, "ma50": m50, "ma200": m200}
+    up_ = [(v, k) for k, v in mas.items() if v > c]
+    dn_ = [(v, k) for k, v in mas.items() if v <= c]
+    step = lambda x: x and {"id": x[1], "v": round(x[0], 1), "sig": round((x[0] - c) / su, 2) if su else None}
+    stages = {"now": stage_at(i), "ma20": round(m20, 1), "above": {k: c > v for k, v in mas.items()},
+              "up": step(min(up_) if up_ else None), "down": step(max(dn_) if dn_ else None),
+              "hist": {str(k): {"n": len(v["up10"]), "up5": _pct(v["up5"]), "up10": _pct(v["up10"])}
+                       for k, v in sorted(stage_h.items())}}
     swing = [{"days": h, "usd": round(su * math.sqrt(h), 1), "lo": round(c - su * math.sqrt(h), 1),
               "hi": round(c + su * math.sqrt(h), 1), "cover": _pct(swing_cov[h])} for h in FILTER_SWING]
     return {"asof": days[i], "close": round(c, 2), "day_ret": round(lr[i] * 100, 2), "z": cur["z"],
             "ma200": round(m200, 1), "ma50": round(m50, 1), "mom120": round(mom120, 1), "above200": above,
             "regime": regime, "signal": signal, "bucket": ("down" if dn else "up") + "_" + ("above" if above else "below"),
             "sigma_pct": round(sig * 100, 2), "sigma_usd": round(su, 1), "bands": bands,
-            "levels": sorted(levels, key=lambda x: -x["v"]), "gex": gex, "invalidation": inval,
+            "levels": sorted(levels, key=lambda x: -x["v"]), "gex": gex, "invalidation": inval, "stages": stages,
             "zones": level_zones(levels, c, su),
             "swing": swing, "regime_up10": {k: {"n": len(v), "up10": _pct(v)} for k, v in reg10.items()},
             "stats": {"buckets": stats, "base_up1": _pct(base), "edge_eras": eras, "since": days[250]},
@@ -2043,7 +2062,22 @@ def fj_calendar_apply(data, fj):
     return len(used_i), unmatched
 
 
-def fj_pack(fj, unmatched):
+MACRO_NEWS = "https://abduswaidan-glitch.github.io/macro-platform/news.json"
+
+
+def macro_wire():
+    """عناوين منصة الاقتصاد الكلي (المستمع الوحيد لـ FinancialJuice) بشكل ملف المستمع، مدخلًا للتقرير فقط؛ لا يُحفظ نصها."""
+    j = get(MACRO_NEWS, params={"t": int(dt.datetime.now().timestamp())}).json()
+    news = {}
+    for x in j.get("items") or []:
+        if x.get("id") is None or not x.get("title_en"):
+            continue
+        news[str(x["id"])] = {"newsId": x["id"], "datePublished": x.get("utc"), "title": x["title_en"],
+                              "labels": x.get("labels") or [], "breaking": x.get("breaking"), "link": x.get("link")}
+    return {"news": news, "cal": {}, "lines": len(news), "last_recv": j.get("updated"), "deleted": set()}
+
+
+def fj_pack(fj, unmatched, via_macro=False):
     """مدخل التقرير: عناوين آخر 24 ساعة (الأقرب للذهب أولًا) والبيانات الأمريكية الصادرة التي لم تطابق حدثًا في التقويم."""
     now = dt.datetime.now(dt.timezone.utc)
     items = []
@@ -2069,7 +2103,9 @@ def fj_pack(fj, unmatched):
     if not heads and not rels:
         return None
     return {"headlines_24h": heads, "released_us_data": rels[:20],
-            "note": ("live market wire (FinancialJuice), times in UTC, delivered about 10 minutes after publication. "
+            "note": ("live market wire (FinancialJuice" + (", read from the macro platform's feed, which refreshes about "
+                     "every 10 minutes and carries headlines only, no released figures" if via_macro else "") +
+                     "), times in UTC, delivered about 10 minutes after publication. "
                      "released_us_data are US figures already out that the calendar above does not list. Coverage starts "
                      "when the current run started, so an empty or short list does not mean nothing happened")}
 
@@ -3149,10 +3185,14 @@ def ai_digest(d):
     if df.get("bands"):
         g["statistical_direction_filter"] = {
             **{k: df.get(k) for k in ("asof", "close", "day_ret", "z", "ma200", "ma50", "mom120", "regime", "signal",
-                                      "sigma_pct", "sigma_usd", "bands", "levels", "zones", "gex", "invalidation")},
+                                      "sigma_pct", "sigma_usd", "bands", "levels", "zones", "gex", "invalidation",
+                                      "stages")},
             "history": df.get("stats"), "live_scoring": {k: v for k, v in (df.get("track") or {}).items() if k != "rows"},
             "note": ("tested on gold since 2008: only signal=long_edge (down session while above MA200, next session up ~57%) "
-                     "held in every era; signal=none means no statistical edge; bands = next-close range from 20-session "
+                     "held in every era; signal=none means no statistical edge; stages = how many of MA20/MA50/MA200 "
+                     "the close is above (0-3), the next MA to clear and the one that would be lost, with gold's "
+                     "historical 5- and 10-session up rates at each stage (descriptive base rates, not an edge); "
+                     "bands = next-close range from 20-session "
                      "volatility with historical coverage; the GEX regime is not historically tested yet")}
     lq = d.get("liquidation") or {}
     if lq.get("today"):
@@ -4180,7 +4220,12 @@ def main():
     try:
         fj = fj_read()
         if fj is None:
-            log("wire: no listener buffer (FJ_API_KEY not set, or the listener has not received anything yet)")
+            try:
+                mw = macro_wire()
+                data["_wire"] = fj_pack(mw, [], via_macro=True)  # للتقرير فقط؛ يُحذف قبل الحفظ
+                log(f"wire: no listener here; {len(mw['news'])} headlines from the macro platform (updated {mw['last_recv']})")
+            except Exception as e:
+                log("wire: no listener here, and the macro platform feed failed:", repr(e)[:160])
         else:
             filled, unmatched = fj_calendar_apply(data, fj)
             data["_wire"] = fj_pack(fj, unmatched)              # للتقرير فقط؛ يُحذف قبل الحفظ
