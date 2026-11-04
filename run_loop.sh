@@ -31,6 +31,8 @@ weekend() {
 iteration() {
   git pull -q --rebase origin "$BRANCH" || git rebase --abort 2>/dev/null
   python fetch_gold.py || echo "fetch_gold.py exited with an error"
+  # حارس الدستور: يحدّث أرقام البيانات في الدستور، ويكتب أي مخالفة في status.json فتظهر في الصفحة
+  python constitution_guard.py --fix-data --status || echo "[loop] constitution guard: violations (see status.json)"
   if [ "${DRY_RUN:-false}" = "true" ]; then
     git checkout -q -- . && git clean -fdq -e __pycache__
     return
