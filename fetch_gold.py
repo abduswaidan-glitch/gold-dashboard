@@ -1454,6 +1454,9 @@ SOURCE_TIER2 = ("reuters.com", "bloomberg.com", "wsj.com", "ft.com", "cnbc.com",
                 "theguardian.com", "bbc.com", "forexlive.com", "fxstreet.com", "investing.com", "finance.yahoo.com")
 
 
+FEED_URL = re.compile(r"(^|//)feeds?\.|/rss\b|\.xml(\?|$)|/feed/?($|\?)", re.I)
+
+
 def source_tier(url):
     """درجة المصدر من نطاقه: 1 رسمي، 2 وكالة أو صحيفة مالية كبرى، 3 غير ذلك."""
     m = re.match(r"https?://([^/]+)", str(url or ""))
@@ -3299,7 +3302,7 @@ Rules:
 Return ONLY one JSON object, no markdown fences, with exactly this shape:
 {"outlook": {"bias": "bullish|bearish|neutral", "scenarios": [{"dir": "up|flat|down", "p": 45}, {"dir": "...", "p": 30}, {"dir": "...", "p": 25}]},
  "ar": {"headline": "...", "tone": "إيجابي|سلبي|محايد|متباين", "summary": ["...", "..."],
-        "sections": [{"title": "...", "body": "..."}], "events": [{"title": "...", "impact": "...", "source": "https://...", "date": "YYYY-MM-DD"}],
+        "sections": [{"title": "...", "body": "..."}], "events": [{"title": "...", "impact": "...", "source": "https://... (a page you found in your search results; never an RSS or XML feed, never a URL from memory)", "date": "YYYY-MM-DD"}],
         "watch": ["..."], "risks": "...",
         "outlook": {"bias_note": "one line on why", "scenarios": [{"title": "...", "why": "...", "trigger": "the event and/or the zone that would confirm this scenario"}, {...}, {...}],
                     "flip": "what would change the bias: an event outcome and/or a close beyond a named zone"}},
@@ -3604,6 +3607,15 @@ def ai_report(data, prev, new_major, releases):
     langs = {k: rep[k] for k in AI_LANGS if isinstance(rep.get(k), dict)}  # it/es اختياريتان: الواجهة تعرض الإنجليزية إن غابتا
     latest = {"date": today, "generated_utc": now.replace(microsecond=0).isoformat(), "model": model,
               **langs, "outlook": outlook, "sources": sources[:10]}
+    # حدث بمصدر لم يظهر في نتائج البحث، أو ملف تغذية (RSS/XML)، رابط مشكوك فيه: يُحذف بدل أن يُعرض للقارئ.
+    # الاستثناء: المصادر الرسمية (tier 1) قد يذكرها النموذج من معرفته ولا تحتاج بحثًا.
+    searched = {x["url"] for x in sources}
+    for lang in AI_LANGS:
+        for e in (rep.get(lang) or {}).get("events") or []:
+            u = str(e.get("source") or "")
+            if u and (FEED_URL.search(u) or (u not in searched and source_tier(u) != 1)):
+                log("event source dropped:", u[:120])
+                e["source"] = ""
     _event_dates(rep, sources, today)
     for lang in AI_LANGS:
         for e in (rep.get(lang) or {}).get("events") or []:
