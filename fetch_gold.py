@@ -1872,7 +1872,7 @@ def fj_read():
     path = os.environ.get("FJ_BUFFER", "").strip()
     if not path or not os.path.exists(path):
         return None
-    news, cal, lines, last = {}, {}, 0, None
+    news, cal, lines, last, gone = {}, {}, 0, None, set()
     with open(path, encoding="utf-8") as f:
         for line in f:
             try:
@@ -1887,6 +1887,7 @@ def fj_read():
                 continue
             if ev == "deleted":
                 box.pop(str(d), None)
+                gone.add(("n" if t == "news" else "c") + str(d))
                 continue
             for it in (d if isinstance(d, list) else [d]):
                 if isinstance(it, dict):
@@ -1894,7 +1895,7 @@ def fj_read():
                     i = i if i is not None else it.get("id")
                     if i is not None:
                         box[str(i)] = it
-    return {"news": news, "cal": cal, "lines": lines, "last_recv": last}
+    return {"news": news, "cal": cal, "lines": lines, "last_recv": last, "deleted": gone}
 
 
 def _fj_utc(x):
@@ -1910,6 +1911,101 @@ def _title_words(t):
     t = t.replace("initial jobless claims", "unemployment claims").replace("jobless claims", "unemployment claims")
     w = set(re.findall(r"[a-z0-9][a-z0-9\-]*", t)) - {"us", "usa", "the", "of", "and", "change", "rate", "actual"}
     return w
+
+
+NEWS_OUT = "news.json"
+NEWS_KEEP_H, NEWS_MAX = 24, 120
+NEWS_SYSTEM = """Translate market-wire headlines into Modern Standard Arabic (فصحى) for a gold-market dashboard.
+Rules: translate faithfully; add nothing, drop nothing, no commentary. Keep every number, percent, date and ticker exactly.
+Keep these in English as written: CPI, PCE, PPI, PMI, ISM, GDP, NFP, ADP, JOLTS, FOMC, ECB, BoJ, BoE, PBoC, OPEC, ETF,
+MoM, YoY, QoQ, Bid-to-cover, MOO, MOC, and stock tickers. Write people's names and places in Arabic script.
+"Actual / Forecast / Previous" become «الفعلي / التوقع / السابق».
+Input: a JSON object {id: english headline}. Output ONLY a JSON object {id: arabic headline} with the same ids."""
+
+
+def _needs_ar(t):
+    return bool(re.search(r"[A-Za-z]{3,}", t or "")) and not re.search(r"[؀-ۿ]", t or "")
+
+
+def _translate(todo, key):
+    """Haiku يترجم ما يحتاج ترجمة فقط (عنوان بالعربية أو بلا كلمات إنجليزية لا يُرسل)."""
+    out = {}
+    ids = list(todo)
+    for i in range(0, len(ids), 40):
+        part = {k: todo[k] for k in ids[i:i + 40]}
+        resp = _claude({"model": WGC_MODEL, "max_tokens": 6000, "thinking": {"type": "disabled"}, "system": NEWS_SYSTEM,
+                        "messages": [{"role": "user", "content": json.dumps(part, ensure_ascii=False)}]}, key, timeout=120)
+        txt = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
+        got = json.loads(txt[txt.find("{"):txt.rfind("}") + 1])
+        for k, v in got.items():
+            if k in part and isinstance(v, str) and v.strip():
+                out[k] = v.strip()[:300]
+        u = resp.get("usage") or {}
+        log(f"news translation: {len(part)} sent, {sum(k in out for k in part)} back; "
+            f"{u.get('input_tokens')} in / {u.get('output_tokens')} out tokens, est. ${_cost(WGC_MODEL, u):.4f}")
+    return out
+
+
+def publish_news(fj=None):
+    """news.json للصفحة العامة: عناوين FinancialJuice لآخر 24 ساعة والبيانات الصادرة، مترجمة إلى العربية.
+    الترجمة تُحفظ مع العنصر فلا يُترجم عنوان مرتين، والكلفة في سجل Actions فقط."""
+    fj = fj if fj is not None else fj_read()
+    if fj is None:
+        return False
+    now = dt.datetime.now(dt.timezone.utc)
+    cut = now - dt.timedelta(hours=NEWS_KEEP_H)
+    prev = load(NEWS_OUT, {})
+    items = {it["id"]: it for it in prev.get("items") or [] if it.get("id") not in fj["deleted"]}
+    for it in fj["news"].values():
+        t = _fj_utc(it.get("datePublished"))
+        title = (it.get("title") or "").strip()
+        if not t or not title:
+            continue
+        i = "n" + str(it.get("newsId", it.get("id")))
+        old = items.get(i) or {}
+        row = {"id": i, "kind": "news", "utc": t.replace(microsecond=0).isoformat(), "en": title[:300],
+               "labels": (it.get("labels") or [])[:5],
+               "gold": bool(FJ_HOT.search(title + " " + " ".join(it.get("labels") or []))),
+               **({"breaking": True} if it.get("breaking") else {}),
+               **({"link": it["link"]} if str(it.get("link") or "").startswith("https://") else {})}
+        if old.get("ar") and old.get("en") == row["en"]:
+            row["ar"] = old["ar"]
+        items[i] = row
+    for e in fj["cal"].values():
+        if e.get("actual") in (None, "") or e.get("impact") not in (1, 2):
+            continue
+        us = (e.get("country") or "").upper() in FJ_US
+        if e.get("impact") != 1 and not us:
+            continue
+        t = _fj_utc(e.get("timeUtc"))
+        if not t:
+            continue
+        i = "c" + str(e.get("id"))
+        old = items.get(i) or {}
+        row = {"id": i, "kind": "data", "utc": t.replace(microsecond=0).isoformat(), "en": (e.get("title") or "").strip()[:200],
+               "country": e.get("country"), "impact": e.get("impact"), "gold": us,
+               **{k: (str(e[k]).strip() if e.get(k) not in (None, "") else None) for k in ("actual", "forecast", "previous")}}
+        if old.get("ar") and old.get("en") == row["en"]:
+            row["ar"] = old["ar"]
+        items[i] = row
+    rows = sorted((r for r in items.values() if r["utc"] >= cut.isoformat()), key=lambda r: r["utc"], reverse=True)[:NEWS_MAX]
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    todo = {r["id"]: r["en"] for r in rows if not r.get("ar") and _needs_ar(r["en"])}
+    if todo and key:
+        try:
+            got = _translate(todo, key)
+            for r in rows:
+                if r["id"] in got:
+                    r["ar"] = got[r["id"]]
+        except Exception as e:
+            log("news translation FAILED (English shown, retried next round):", repr(e)[:200])
+    out = {"source": "FinancialJuice", "delay_min": 10, "items": rows}
+    if json.dumps(out, sort_keys=True, ensure_ascii=False) == json.dumps({k: prev.get(k) for k in out}, sort_keys=True, ensure_ascii=False):
+        return False
+    out["updated_utc"] = now.replace(microsecond=0).isoformat()
+    save(NEWS_OUT, out)
+    log(f"news.json: {len(rows)} items ({sum(1 for r in rows if r.get('ar'))} in Arabic)")
+    return True
 
 
 def fj_calendar_apply(data, fj):
@@ -4088,6 +4184,7 @@ def main():
         else:
             filled, unmatched = fj_calendar_apply(data, fj)
             data["_wire"] = fj_pack(fj, unmatched)              # للتقرير فقط؛ يُحذف قبل الحفظ
+            publish_news(fj)
             log(f"wire: {fj['lines']} messages, {len(fj['news'])} headlines, {len(fj['cal'])} calendar items, "
                 f"{filled} actual(s) filled, {len(unmatched)} US release(s) not in the calendar; last {fj['last_recv']}")
     except Exception as e:
@@ -4218,4 +4315,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    if "--news" in sys.argv[1:]:          # تحديث الأخبار وحدها بين التحديثات الكاملة (run_loop.sh كل 10 دقائق)
+        publish_news()
+    else:
+        main()

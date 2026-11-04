@@ -53,6 +53,20 @@ if [ -n "${FJ_API_KEY:-}" ] && ! weekend; then
   trap 'kill "$FJ_PID" 2>/dev/null' EXIT
 fi
 
+# الأخبار وحدها كل 10 دقائق بين التحديثات الكاملة (الدقائق 17 و27 و47 و57): news.json فقط
+news_tick() {
+  python fetch_gold.py --news || return
+  [ "${DRY_RUN:-false}" = "true" ] && { git checkout -q -- . ; git clean -fdq -e __pycache__; return; }
+  git add news.json 2>/dev/null
+  git diff --cached --quiet && return
+  git commit -qm "أخبار لحظية $(date -u +%H:%M) UTC"
+  for i in 1 2 3; do
+    git push -q origin "HEAD:$BRANCH" && return
+    git pull -q --rebase origin "$BRANCH" || { git rebase --abort 2>/dev/null; break; }
+  done
+  echo "news push failed; it goes out with the next update"
+}
+
 while :; do
   if weekend && ! { [ "$FIRST" = 1 ] && [ "${EVENT:-}" = "workflow_dispatch" ]; }; then
     echo "[loop] weekend (Vienna): platform paused"
@@ -66,6 +80,8 @@ while :; do
   NOW=$(date +%s)
   NEXT=$(( NOW / 1800 * 1800 + 420 ))            # الدقيقة 07 أو 37
   [ "$NEXT" -le $(( NOW + 60 )) ] && NEXT=$(( NEXT + 1800 ))
+  NEWS_AT=$(( NOW / 600 * 600 + 420 ))           # الدقيقة 07 و17 و27...
+  while [ "$NEWS_AT" -le $(( NOW + 30 )) ]; do NEWS_AT=$(( NEWS_AT + 600 )); done
   if [ $(( NEXT - START )) -gt "$LIMIT" ]; then
     echo "[loop] time limit reached"
     # جدولة GitHub قد تتأخر ساعة أو أكثر، فيسلّم التشغيل الدور لتشغيل جديد فورًا بدل انتظارها (لا في عطلة نهاية الأسبوع)
@@ -78,6 +94,10 @@ while :; do
     if manual_waiting; then
       echo "[loop] manual run waiting: handing over"
       exit 0
+    fi
+    if [ -n "${FJ_PID:-}" ] && [ "$(date +%s)" -ge "$NEWS_AT" ]; then
+      [ "$NEWS_AT" -lt $(( NEXT - 120 )) ] && news_tick
+      NEWS_AT=$(( NEWS_AT + 600 ))
     fi
     sleep $(( NEXT - $(date +%s) < 60 ? NEXT - $(date +%s) : 60 ))
   done
