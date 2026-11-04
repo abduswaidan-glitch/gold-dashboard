@@ -71,6 +71,9 @@ button{font:inherit;color:inherit}
 .theme-btn{flex:none;margin-left:auto;display:inline-flex;align-items:center;justify-content:center;width:32px;height:30px;border-radius:99px;cursor:pointer;
   border:1px solid rgba(255,255,255,.18);background:none;color:var(--gold-hi)}
 .theme-btn svg{width:16px;height:16px}
+.macro-link{flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 12px;border-radius:99px;direction:rtl;border:1px solid var(--gold);background:var(--gold-soft);color:var(--gold-hi);font-size:12.5px;font-weight:600;text-decoration:none;white-space:nowrap}
+.macro-link:hover{background:var(--gold);color:var(--gold-ink)}.macro-link:focus-visible{outline:3px solid var(--gold-hi);outline-offset:2px}
+.macro-link + .theme-btn{margin-left:0}
 
 /* KPI strip */
 .kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-top:-1px;padding-top:16px;padding-bottom:4px}
@@ -415,7 +418,7 @@ tr.base td{background:var(--surface-2);color:var(--muted)}
 </head>
 <body>
 <header class="site-head">
-  <div class="util wrap"><p class="updated" id="updated"></p><button class="theme-btn" id="theme" type="button" data-act="theme"></button></div>
+  <div class="util wrap"><p class="updated" id="updated"></p><a class="macro-link" href="https://abduswaidan-glitch.github.io/macro-platform/">الاقتصاد الكلي الأمريكي <span aria-hidden="true">↗</span></a><button class="theme-btn" id="theme" type="button" data-act="theme"></button></div>
   <div class="brand-row wrap">
     <div class="brand"><span class="coin" aria-hidden="true"></span><div><h1 id="title">تدفقات الذهب</h1><p id="tagline"></p></div></div>
   </div>
