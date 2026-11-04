@@ -50,11 +50,12 @@ jobs:
           python-version: "3.12"
 
       - name: تثبيت المكتبات
-        run: pip install requests xlrd openpyxl pdfplumber curl_cffi
+        run: pip install requests xlrd openpyxl pdfplumber curl_cffi websockets
 
       - name: جلب البيانات وحفظها (تشغيل حي)
         env:
           SEC_CONTACT: ${{ secrets.SEC_CONTACT }}
+          FJ_API_KEY: ${{ secrets.FJ_API_KEY }}
           ANTHROPIC_API_KEY: ${{ github.event.inputs.dry_run != 'true' && secrets.ANTHROPIC_API_KEY || '' }}
           AI_FORCE: ${{ github.event.inputs.ai_force }}
           FULL_REFRESH: ${{ github.event.inputs.full_refresh }}

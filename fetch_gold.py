@@ -1807,6 +1807,8 @@ def fetch_calendar():
         k = (e["utc"], e["title"])
         if k not in events and e["utc"] >= (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=14)).isoformat():
             events[k] = e
+        elif k in events and not events[k]["actual"] and e.get("actual"):      # فعلي جاء من البث الحي سابقًا
+            events[k].update({kk: e[kk] for kk in ("actual", "actual_src", "revised_previous") if e.get(kk)})
     evs = sorted(events.values(), key=lambda e: e["utc"])
     log(f"calendar ok: {len(evs)} USD events, {sum(e['weight'] >= 2 for e in evs)} weighted for gold")
     return {"calendar": {"fetched_utc": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(), "events": evs}}
@@ -1854,6 +1856,126 @@ def calendar_reactions(cal):
                 "avg_range_sigma": round(sum(x.get("range_sigma") or 0 for x in v if x.get("range_sigma")) / max(1, sum(1 for x in v if x.get("range_sigma"))), 2),
                 "last": [{k: x.get(k) for k in ("session", "forecast", "actual", "r1")} for x in v[-3:]]}
             for t, v in by.items()}
+
+
+# ---------------------------------------------------------------- FinancialJuice live wire (fj_listen.py)
+# المستمع يكتب الرسائل في ملف مؤقت خارج المستودع. نأخذ منه أمرين: القيمة الفعلية للبيانات الأمريكية فور صدورها
+# (تغذية ForexFactory لا تحملها)، وعناوين آخر 24 ساعة بتوقيت نشر دقيق مدخلًا للتقرير فقط. نص العناوين لا يُحفظ في المستودع.
+FJ_US = ("US", "USA", "USD", "UNITED STATES")
+FJ_HOT = re.compile(r"\b(gold|xau|bullion|silver|fed|fomc|powell|treasur|yield|dollar|dxy|inflation|cpi|pce|ppi|payroll|"
+                    r"jobs?|jobless|unemployment|gdp|ism|tariff|trump|white house|sanction|iran|israel|russia|ukraine|china|"
+                    r"war|missile|strike|attack|ceasefire|central bank|rate cut|rate hike|bond|auction|shutdown|debt)", re.I)
+
+
+def fj_read():
+    """يقرأ ملف المستمع: آخر نسخة من كل عنوان ومن كل حدث تقويم (مع احترام التعديل والحذف)."""
+    path = os.environ.get("FJ_BUFFER", "").strip()
+    if not path or not os.path.exists(path):
+        return None
+    news, cal, lines, last = {}, {}, 0, None
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            try:
+                m = json.loads(line)
+            except Exception:
+                continue
+            lines += 1
+            last = m.get("recv_utc") or last
+            t, ev, d = m.get("type"), m.get("event"), m.get("data")
+            box = news if t == "news" else cal if t == "calendar" else None
+            if box is None:
+                continue
+            if ev == "deleted":
+                box.pop(str(d), None)
+                continue
+            for it in (d if isinstance(d, list) else [d]):
+                if isinstance(it, dict):
+                    i = it.get("newsId") if t == "news" else None
+                    i = i if i is not None else it.get("id")
+                    if i is not None:
+                        box[str(i)] = it
+    return {"news": news, "cal": cal, "lines": lines, "last_recv": last}
+
+
+def _fj_utc(x):
+    try:
+        return dt.datetime.fromisoformat(str(x).replace("Z", "+00:00")).astimezone(dt.timezone.utc)
+    except Exception:
+        return None
+
+
+def _title_words(t):
+    t = t.lower().replace("m/m", " mom ").replace("y/y", " yoy ").replace("q/q", " qoq ")
+    t = t.replace("non-farm payrolls", "non-farm employment change").replace("nonfarm", "non-farm")
+    t = t.replace("initial jobless claims", "unemployment claims").replace("jobless claims", "unemployment claims")
+    w = set(re.findall(r"[a-z0-9][a-z0-9\-]*", t)) - {"us", "usa", "the", "of", "and", "change", "rate", "actual"}
+    return w
+
+
+def fj_calendar_apply(data, fj):
+    """يملأ actual في أحداث التقويم من البث: الحدث نفسه بالدقيقة نفسها، وأقرب عنوان بالكلمات (مطابقة واحد لواحد)."""
+    cal = data.get("calendar") or {}
+    if not fj or not cal.get("events"):
+        return 0, []
+    data["calendar"] = cal = json.loads(json.dumps(cal))    # نسخة: data نسخة سطحية من prev، ولا نريد تعديل prev معها
+    rel = [e for e in fj["cal"].values() if (e.get("country") or "").upper() in FJ_US and e.get("actual") not in (None, "")]
+    pairs = []
+    for i, e in enumerate(cal["events"]):
+        if e.get("actual"):
+            continue
+        t = _fj_utc(e["utc"])
+        for j, r in enumerate(rel):
+            rt = _fj_utc(r.get("timeUtc"))
+            if not t or not rt or abs((rt - t).total_seconds()) > 120:
+                continue
+            a, b = _title_words(e["title"]), _title_words(r.get("title") or "")
+            score = len(a & b) / max(1, len(a | b))
+            if score >= 0.34:
+                pairs.append((score, i, j))
+    used_i, used_j = set(), set()
+    for score, i, j in sorted(pairs, reverse=True):
+        if i in used_i or j in used_j:
+            continue
+        used_i.add(i)
+        used_j.add(j)
+        e, r = cal["events"][i], rel[j]
+        e["actual"], e["actual_src"] = str(r["actual"]).strip(), "wire"
+        if r.get("revision") not in (None, ""):
+            e["revised_previous"] = str(r["revision"]).strip()
+        log(f"wire actual: {e['title']} = {e['actual']} (forecast {e.get('forecast')}, previous {e.get('previous')})")
+    unmatched = [r for j, r in enumerate(rel) if j not in used_j]
+    return len(used_i), unmatched
+
+
+def fj_pack(fj, unmatched):
+    """مدخل التقرير: عناوين آخر 24 ساعة (الأقرب للذهب أولًا) والبيانات الأمريكية الصادرة التي لم تطابق حدثًا في التقويم."""
+    now = dt.datetime.now(dt.timezone.utc)
+    items = []
+    for it in fj["news"].values():
+        t = _fj_utc(it.get("datePublished"))
+        if not t or t < now - dt.timedelta(hours=24):
+            continue
+        title = (it.get("title") or "").strip()
+        if not title:
+            continue
+        hot = bool(FJ_HOT.search(title + " " + " ".join(it.get("labels") or [])))
+        items.append((hot or bool(it.get("breaking")), t, {
+            "utc": t.strftime("%Y-%m-%d %H:%M"), "title": title[:220], "labels": (it.get("labels") or [])[:5],
+            **({"breaking": True} if it.get("breaking") else {}), **({"link": it["link"]} if it.get("link") else {})}))
+    items.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    heads = [x[2] for x in items[:45]]
+    heads.sort(key=lambda x: x["utc"], reverse=True)
+    rels = [{"utc": (_fj_utc(r.get("timeUtc")) or now).strftime("%Y-%m-%d %H:%M"), "title": r.get("title"),
+             "impact": {1: "high", 2: "medium", 3: "low"}.get(r.get("impact"), r.get("impact")),
+             **{k: r.get(k) for k in ("actual", "forecast", "previous", "revision")}}
+            for r in unmatched if (_fj_utc(r.get("timeUtc")) or now) >= now - dt.timedelta(days=3) and r.get("impact") in (1, 2)]
+    rels.sort(key=lambda x: x["utc"], reverse=True)
+    if not heads and not rels:
+        return None
+    return {"headlines_24h": heads, "released_us_data": rels[:20],
+            "note": ("live market wire (FinancialJuice), times in UTC, delivered about 10 minutes after publication. "
+                     "released_us_data are US figures already out that the calendar above does not list. Coverage starts "
+                     "when the current run started, so an empty or short list does not mean nothing happened")}
 
 
 # ---------------------------------------------------------------- GEX on GLD (Cboe delayed options, free)
@@ -2911,7 +3033,8 @@ def ai_digest(d):
         now_u = dt.datetime.now(dt.timezone.utc)
         def _ev(e):
             t = dt.datetime.fromisoformat(e["utc"])
-            return {**{k: e.get(k) for k in ("title", "impact", "weight", "higher_means", "forecast", "previous", "actual")},
+            return {**{k: e.get(k) for k in ("title", "impact", "weight", "higher_means", "forecast", "previous", "actual",
+                                              "revised_previous")},
                     "vienna": t.astimezone(VIENNA).strftime("%a %Y-%m-%d %H:%M"), "hours_from_now": round((t - now_u).total_seconds() / 3600, 1)}
         up = [_ev(e) for e in cal["events"] if e["weight"] >= 2 and now_u <= dt.datetime.fromisoformat(e["utc"]) <= now_u + dt.timedelta(days=14)]
         past = [_ev(e) for e in cal["events"] if e["weight"] >= 2 and now_u - dt.timedelta(days=3) <= dt.datetime.fromisoformat(e["utc"]) < now_u]
@@ -2921,8 +3044,11 @@ def ai_digest(d):
             "note": ("US events from the ForexFactory calendar, times in Vienna. weight 3 = moves gold most (CPI, PCE, NFP, FOMC), "
                      "2 = often moves it. higher_means: hawkish = a print above forecast usually lifts yields and the dollar "
                      "and weighs on gold; dovish = the opposite; event = depends on the content. actual is empty until the "
-                     "release; gold_reaction_history is the platform's own log of gold's move on past event days, in sigma "
+                     "release (a live wire fills it within minutes of the release when the listener runs); "
+                     "gold_reaction_history is the platform's own log of gold's move on past event days, in sigma "
                      "(it starts small and grows)")}
+    if d.get("_wire"):
+        g["live_wire"] = d["_wire"]
     df = d.get("direction_filter") or {}
     if df.get("bands"):
         g["statistical_direction_filter"] = {
@@ -3002,6 +3128,10 @@ Rules:
   gold reacted. Use gold_reaction_history once it has 3 or more cases. Do not search for the calendar itself.
 - Tie the report to the platform's own estimates and levels: say which zones and sigma bands frame each scenario, and
   where an early estimate (hidden_nowcasts) changes the read of a lagging report (without quoting its numbers).
+- live_wire, when present, holds market-wire headlines from the last 24 hours with exact UTC publish times, and US
+  figures already released. Their dates are certain, so LAW 1 is met for them. A headline is a tier-2 wire claim: use it
+  to see what moved and when, and confirm a big claim by search before you build a scenario on it. A released actual
+  in economic_calendar or live_wire is the figure to use: do not search for it again. Do not copy headlines word for word.
 - LAW 1, dates first: before you use any news item or number, establish its date: when it happened and when it was
   published. Prefer the date stated on the page or in the data itself over the date you read it. If you cannot establish
   a date, do not present it as current news. Data points carry their own date in the platform; say how old they are.
@@ -3952,6 +4082,17 @@ def main():
         releases[k] = dict(sorted(releases[k].items())[-80:])
     data["releases"] = releases
     try:
+        fj = fj_read()
+        if fj is None:
+            log("wire: no listener buffer (FJ_API_KEY not set, or the listener has not received anything yet)")
+        else:
+            filled, unmatched = fj_calendar_apply(data, fj)
+            data["_wire"] = fj_pack(fj, unmatched)              # للتقرير فقط؛ يُحذف قبل الحفظ
+            log(f"wire: {fj['lines']} messages, {len(fj['news'])} headlines, {len(fj['cal'])} calendar items, "
+                f"{filled} actual(s) filled, {len(unmatched)} US release(s) not in the calendar; last {fj['last_recv']}")
+    except Exception as e:
+        log("wire FAILED:", repr(e)[:200])
+    try:
         pos = positioning(data)
         if pos:
             prev_note = (prev.get("positioning") or {}).get("ai_note")
@@ -4058,6 +4199,7 @@ def main():
             haiku_experiment(data, exp_model)
         except Exception as e:
             log("experiment FAILED:", repr(e)[:200])
+    data.pop("_wire", None)                     # نص العناوين لا يُرفع إلى المستودع العام
     # data.json لا يُكتب إلا إذا تغيّرت البيانات فعلًا، كي لا يتضخم سجل المستودع
     core = lambda x: json.dumps({k: v for k, v in x.items() if k not in ("generated_utc", "sources", "data_utc")},
                                 ensure_ascii=False, sort_keys=True)
