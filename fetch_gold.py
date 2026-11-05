@@ -1596,7 +1596,13 @@ def tv_code(df, ai):
     """سطر واحد يُلصق في مؤشر TradingView:
     GFL2|التاريخ|النظام|الميزة|Gamma|KEY=price;…|lo-hi:الوزن:الدور:Fable:الأعضاء:المعرّف,…
     مناطق Fable تُعلَّم فقط إن بُنيت على مستويات الجلسة نفسها."""
-    lv = ";".join(f"{TV_KEYS[x['id']]}={x['v']:.1f}" for x in df.get("levels") or [] if x.get("id") in TV_KEYS)
+    # كل مستوى يحمل منطقته في السطر نفسه: KEY=السعر@Zn، والمستوى خارج المناطق يبقى بلا @
+    zone_of = {}
+    for z in df.get("zones") or []:
+        for m in z["members"]:
+            zone_of.setdefault(m, z["id"])
+    lv = ";".join(f"{TV_KEYS[x['id']]}={x['v']:.1f}" + (f"@{zone_of[x['id']]}" if x["id"] in zone_of else "")
+                  for x in df.get("levels") or [] if x.get("id") in TV_KEYS)
     gx = {"positive": "pos", "negative": "neg"}.get((df.get("gex") or {}).get("regime"), "na")
     focus = ((ai or {}).get("latest") or {}).get("focus") or {}
     fz = {z["zone"]: z["why"] for z in focus.get("zones") or [] if "zone" in z} if focus.get("asof") == df.get("asof") else {}

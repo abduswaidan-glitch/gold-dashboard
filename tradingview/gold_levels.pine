@@ -14,6 +14,7 @@ showZones = input.bool(true, "Confluence zones")
 onlyFable = input.bool(false, "Only Claude's zones (★)")
 zoneText  = input.bool(true, "Zone labels")
 showLines = input.bool(false, "Individual levels (lines)")
+showCoded = input.bool(true, "Coded levels: each level with its zone", tooltip = "يكتب كل مستوى باسمه وسعره ورقم منطقته (Z1…)، و«—» لمستوى خارج المناطق.")
 showGex   = input.bool(true, "  · GEX: Zero Gamma, Walls, Strikes")
 showSig   = input.bool(false, "  · σ bands")
 showPrior = input.bool(true, "  · Previous day / week high-low")
@@ -101,25 +102,14 @@ if barstate.islast
     parts = str.split(best, "|")
     bool ok = array.size(parts) >= 6 and array.get(parts, 0) == "GFL2"
     if ok
-        // مناطق التجمّع أولًا: حدودها ومعرّفها (Z1…) كي يُعلَّم كل مستوى منفرد بالمنطقة التي يقع فيها
-        array<float>  zL = array.new<float>()
-        array<float>  zH = array.new<float>()
-        array<string> zI = array.new<string>()
-        if showZones and array.size(parts) >= 7 and str.length(array.get(parts, 6)) > 0
-            for z in str.split(array.get(parts, 6), ",")
-                zf = str.split(z, ":")
-                if array.size(zf) >= 5 and (array.get(zf, 3) == "1" or not onlyFable)
-                    zr = str.split(array.get(zf, 0), "-")
-                    if array.size(zr) == 2
-                        array.push(zL, str.tonumber(array.get(zr, 0)) - basis)
-                        array.push(zH, str.tonumber(array.get(zr, 1)) - basis)
-                        array.push(zI, array.size(zf) >= 6 ? array.get(zf, 5) : "")
-        // المستويات المنفردة (اختيارية)
-        for t in (showLines ? str.split(array.get(parts, 5), ";") : array.new<string>())
+        // المستويات: كل مستوى يحمل منطقته في السطر نفسه (KEY=السعر@Zn)، فيُكتب بجانبه رقم المنطقة، و«—» إن لم يقع في منطقة
+        for t in (showLines or showCoded ? str.split(array.get(parts, 5), ";") : array.new<string>())
             kv = str.split(t, "=")
             if array.size(kv) == 2
                 string k = array.get(kv, 0)
-                float v = str.tonumber(array.get(kv, 1))
+                vs = str.split(array.get(kv, 1), "@")
+                float v = str.tonumber(array.get(vs, 0))
+                string zid = array.size(vs) == 2 ? array.get(vs, 1) : "—"
                 string g = grp(k)
                 bool show = g == "gex" ? showGex : g == "sig" ? showSig : g == "prior" ? showPrior : showMa
                 if show and not na(v)
@@ -127,14 +117,11 @@ if barstate.islast
                     color c = g == "gex" ? cGex : g == "sig" ? cSig : g == "prior" ? cPrior : cMa
                     string sty = g == "sig" ? line.style_dotted : g == "ma" ? line.style_dashed : line.style_solid
                     int w = k == "ZG" or k == "CW" or k == "PW" ? 2 : 1
-                    string zt = ""
-                    if array.size(zL) > 0
-                        for j = 0 to array.size(zL) - 1
-                            if y >= array.get(zL, j) and y <= array.get(zH, j) and str.length(array.get(zI, j)) > 0
-                                zt := "  " + array.get(zI, j)
-                                break
-                    array.push(lns, line.new(bar_index - 1, y, bar_index, y, extend = extend.both, color = c, style = sty, width = w))
-                    array.push(lbs, label.new(bar_index + 3, y, nameOf(k) + "  " + str.tostring(y, "#.0") + zt, style = label.style_label_left, color = color.new(color.black, 100), textcolor = c, size = size.small))
+                    string lab = nameOf(k) + "  " + str.tostring(y, "#.0") + "  · " + zid
+                    if showCoded
+                        array.push(lbs, label.new(bar_index + 3, y, lab, style = label.style_label_left, color = color.new(color.black, 100), textcolor = c, size = size.small))
+                    if showLines
+                        array.push(lns, line.new(bar_index - 1, y, bar_index, y, extend = extend.both, color = c, style = sty, width = w))
         // مناطق التجمّع: lo-hi:الوزن:الدور:اختيار Claude:الأعضاء
         if showZones and array.size(parts) >= 7 and str.length(array.get(parts, 6)) > 0
             for z in str.split(array.get(parts, 6), ",")
