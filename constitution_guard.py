@@ -70,6 +70,7 @@ FILES = [
     ("data/filter_log.json", "سجل تقييم فلتر الاتجاه اليومي."),
     ("data/gex_history.json", "سجل GEX اليومي على GLD."),
     ("data/gld_lbma_pm.json", "سعر LBMA PM المشتق من أرشيف GLD (LBMA يحجب الجلب المباشر)."),
+    ("data/weekly_brief.json", "خلاصة نشرة خبراء أسبوعية بصياغتنا (لا اقتباس ولا أرقام من النشرة)، تكتبها Routine كل اثنين ويقرؤها التقرير (المادة 15). **مشروط:** تظهر بعد أول تشغيل للـ Routine."),
     ("data/gld_close.json", "إغلاق سهم GLD اليومي، لنسبة GC ÷ GLD التي تحوّل مستويات GEX إلى GC (المادة 10). **مشروط:** يُكتب في أول جلب لـ GLD."),
     ("data/gld_ozps.json", "أونصات الذهب لكل سهم GLD شهريًا."),
     ("data/oi_daily.json", "Open Interest والحجم اليومي لعقد GC من CME."),
@@ -400,7 +401,8 @@ def ci_checks():
         author, _, subject = r.stdout.strip().partition("|")
         d = subprocess.run(["git", "diff", "--name-only", "HEAD~1", "HEAD"], cwd=ROOT, capture_output=True, text=True)
         changed = [x for x in d.stdout.splitlines() if x]
-        owner_prompt = changed and all(x.startswith("prompts/") for x in changed)   # المادة 5: يعدّلها صاحب المنصة مباشرة
+        owner_prompt = changed and all(x.startswith("prompts/") or x == "data/weekly_brief.json" for x in changed)
+        # المادة 5: تعليمات صاحب المنصة يعدّلها مباشرة، وخلاصة النشرة الأسبوعية تكتبها الـ Routine مباشرة
         if author != "gold-data-bot" and not subject.startswith("Merge pull request #") and not owner_prompt:
             V.append(("push", "24", f"دفع مباشر إلى main دون PR: «{subject[:60]}» ({author})"))
     return V
