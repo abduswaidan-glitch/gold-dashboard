@@ -44,6 +44,7 @@ GLD_OZPS = os.path.join("data", "gld_ozps.json")
 ETF_HIST = os.path.join("data", "etf_history.json")
 SGE_HIST = os.path.join("data", "sge_history.json")
 GLD_LBMA = os.path.join("data", "gld_lbma_pm.json")
+WEEKLY_BRIEF = os.path.join("data", "weekly_brief.json")   # خلاصة نشرة خبراء أسبوعية بصياغتنا، تكتبها Routine كل اثنين
 GLD_CLOSE = os.path.join("data", "gld_close.json")       # إغلاق سهم GLD اليومي، لتحويل مستويات GEX إلى GC
 STATE = os.path.join("data", "state.json")
 RELEASES = os.path.join("data", "releases.json")
@@ -3204,6 +3205,15 @@ def ai_digest(d):
                      "release (a live wire fills it within minutes of the release when the listener runs); "
                      "gold_reaction_history is the platform's own log of gold's move on past event days, in sigma "
                      "(it starts small and grows)")}
+    wb = load(WEEKLY_BRIEF, {})
+    try:
+        age = (dt.date.today() - dt.date.fromisoformat(str(wb.get("source_date"))[:10])).days
+    except ValueError:
+        age = None
+    if wb.get("points") and age is not None and 0 <= age <= 8:
+        g["weekly_expert_brief"] = {**{k: wb.get(k) for k in ("source_date", "points", "gold_view")}, "age_days": age,
+                                    "note": ("our own paraphrase of a weekly market newsletter the owner subscribes to, "
+                                             "written by its analysts; expert opinion, not data")}
     if d.get("_wire"):
         g["live_wire"] = d["_wire"]
     df = d.get("direction_filter") or {}
@@ -3289,6 +3299,10 @@ Rules:
   gold reacted. Use gold_reaction_history once it has 3 or more cases. Do not search for the calendar itself.
 - Tie the report to the platform's own estimates and levels: say which zones and sigma bands frame each scenario, and
   where an early estimate (hidden_nowcasts) changes the read of a lagging report (without quoting its numbers).
+- weekly_expert_brief, when present, is our paraphrase of a weekly newsletter of market analysts (dated by source_date).
+  Treat it as tier-2 expert opinion: weigh its views on gold and its drivers, say in one or two sentences where the
+  platform's data agrees or disagrees with it and why, and never let it alone set or flip the bias. Do not quote it,
+  do not name the newsletter, and do not repeat its own figures; refer to it as "نشرة الخبراء الأسبوعية".
 - live_wire, when present, holds market-wire headlines from the last 24 hours with exact UTC publish times, and US
   figures already released. Their dates are certain, so LAW 1 is met for them. A headline is a tier-2 wire claim: use it
   to see what moved and when, and confirm a big claim by search before you build a scenario on it. A released actual
