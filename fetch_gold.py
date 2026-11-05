@@ -44,6 +44,7 @@ GLD_OZPS = os.path.join("data", "gld_ozps.json")
 ETF_HIST = os.path.join("data", "etf_history.json")
 SGE_HIST = os.path.join("data", "sge_history.json")
 GLD_LBMA = os.path.join("data", "gld_lbma_pm.json")
+GLD_CLOSE = os.path.join("data", "gld_close.json")       # إغلاق سهم GLD اليومي، لتحويل مستويات GEX إلى GC
 STATE = os.path.join("data", "state.json")
 RELEASES = os.path.join("data", "releases.json")
 WGC_HIST = os.path.join("data", "wgc_etf.json")
@@ -700,11 +701,15 @@ def parse_gld_rows(rows, save_ozps=True):
     tnav_i = next((i for i, h in enumerate(hn) if "total net asset value" in h and "ounce" not in h and "tonne" not in h), None)
     if save_ozps:
         log("GLD archive columns:", " | ".join(f"{i}:{h[:38]}" for i, h in enumerate(hn))[:600])
-    out, ozps, lbma = {}, {}, {}
+    out, ozps, lbma, closes = {}, {}, {}, {}
     for r in rows[hi + 1:]:
         if len(r) <= max(di, ci):
             continue
         d, v = cell_day(r[di]), num(r[ci])
+        if save_ozps and d and d >= "2025-01-01" and ci_close is not None and len(r) > ci_close:
+            cl = num(r[ci_close])
+            if cl and 50 < cl < 5000:
+                closes[d] = round(cl, 2)
         if d and gi is not None and len(r) > gi and d >= "2015-01-01":
             g = num(r[gi])
             oz = g / 1000 if g and 50 < g < 110 else (g if g and 0.05 < g < 0.11 else None)   # بالألف أونصة أو بالأونصة
@@ -734,6 +739,8 @@ def parse_gld_rows(rows, save_ozps=True):
             + (f", latest {max(lbma)} = ${lbma[max(lbma)]:,.2f}" if lbma else ""))
         if lbma:
             save(GLD_LBMA, lbma)
+        if closes:
+            save(GLD_CLOSE, dict(sorted(closes.items())[-60:]))
     return sorted([d, v] for d, v in out.items())
 
 
@@ -2180,6 +2187,16 @@ def gex_from_chain(opts, S, now):
             "strikes": [[K, round(v[0] / 1e6, 2), round(v[1] / 1e6, 2)] for K, v in sorted(by_k.items()) if 0.88 * S <= K <= 1.12 * S]}
 
 
+def gc_gld_ratio():
+    """نسبة GC ÷ GLD من إغلاقي الجلسة نفسها، وسيط آخر 5 جلسات. لا تتأثر بساعة الجلب: خارج الجلسة الأمريكية تعطي Cboe
+    سعر GLD قديمًا أو من التداول الممتد، بينما GC يتداول ليلًا، فقسمة GC الحي عليه كانت تضخّم النسبة
+    (5 نوفمبر: 11.10 بدل نحو 10.94، فظهر Zero Gamma عند 4071 بدل نحو 4015)."""
+    cl = load(GLD_CLOSE, {})
+    daily = {d: v for d, v in (load(PRICES_OUT, {}).get("daily") or []) if v}
+    rs = [daily[d] / cl[d] for d in sorted(cl) if d in daily and cl[d]][-5:]
+    return round(statistics.median(rs), 4) if len(rs) >= 3 else None
+
+
 def fetch_gex():
     """مستويات Gamma لصندوق GLD من بيانات Cboe المؤجلة 15 دقيقة. نحفظ المستويات المحسوبة فقط، لا الأسعار الخام."""
     j = browser_get(CBOE_URL.format("GLD"), headers={"Accept": "application/json"}).json()
@@ -2192,7 +2209,10 @@ def fetch_gex():
     g["asof"] = now.replace(microsecond=0).isoformat()          # لحظة الجلب (UTC)؛ توقيت Cboe الخام بلا منطقة زمنية
     g["cboe_ts"] = str(j.get("timestamp") or "")
     gc = (load(PRICES_OUT, {}).get("last") or {}).get("price")
-    g["gc_ratio"] = round(gc / S, 4) if gc else None                # مستوى GLD × النسبة ≈ مستوى عقد الذهب GC
+    live = round(gc / S, 4) if gc else None
+    g["gc_ratio"] = gc_gld_ratio() or live                          # مستوى GLD × النسبة ≈ مستوى عقد الذهب GC
+    g["gc_ratio_src"] = "closes" if g["gc_ratio"] != live else "live"
+    log(f"GEX ratio GC/GLD: {g['gc_ratio']} ({g['gc_ratio_src']}; live would be {live})")
     hist = [h for h in load(GEX_HIST, []) if h.get("d") != now.date().isoformat()]
     hist.append({"d": now.date().isoformat(), **{k: g[k] for k in ("spot", "total_m", "zero_all", "zero_near", "call_wall", "put_wall", "gc_ratio")}})
     save(GEX_HIST, hist[-120:])
