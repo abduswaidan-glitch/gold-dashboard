@@ -70,6 +70,7 @@ FILES = [
     ("data/filter_log.json", "سجل تقييم فلتر الاتجاه اليومي."),
     ("data/gex_history.json", "سجل GEX اليومي على GLD."),
     ("data/gld_lbma_pm.json", "سعر LBMA PM المشتق من أرشيف GLD (LBMA يحجب الجلب المباشر)."),
+    ("data/gld_close.json", "إغلاق سهم GLD اليومي، لنسبة GC ÷ GLD التي تحوّل مستويات GEX إلى GC (المادة 10). **مشروط:** يُكتب في أول جلب لـ GLD."),
     ("data/gld_ozps.json", "أونصات الذهب لكل سهم GLD شهريًا."),
     ("data/oi_daily.json", "Open Interest والحجم اليومي لعقد GC من CME."),
     ("data/outlook_log.json", "سجل الانحيازات والاحتمالات للتقييم بعد 14 يومًا."),
