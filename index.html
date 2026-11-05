@@ -1736,7 +1736,9 @@ function filterHTML(){
   const NM = {close: 'إغلاق آخر جلسة', ma200: 'MA200', ma50: 'MA50',
     pdh: 'أعلى الجلسة السابقة', pdl: 'أدنى الجلسة السابقة',
     pwh: 'أعلى الأسبوع السابق', pwl: 'أدنى الأسبوع السابق',
-    zero_gamma: 'Zero Gamma (من GLD)', call_wall: 'Call Wall (من GLD)', put_wall: 'Put Wall (من GLD)'};
+    zero_gamma: 'Zero Gamma (من GLD)', call_wall: 'Call Wall (من GLD)', put_wall: 'Put Wall (من GLD)',
+    vp_poc: 'POC الجلسة السابقة', vp_vah: 'VAH الجلسة السابقة', vp_val: 'VAL الجلسة السابقة', wk_poc: 'POC الأسبوع السابق',
+    sp: 'Single prints (الجلسة النهارية)'};
   const cov = {}; f.bands.forEach(b => { cov[`+${b.k}s`] = cov[`-${b.k}s`] = b.cover; });
   const lvName = x => { const id = x.id; if (/^(put|call)_\d$/.test(id)) return `${id.startsWith('put') ? 'Put' : 'Call'} ${bd(nf0.format(x.k))} ${'(من GLD)'}`;
     return NM[id] || `${bd(id.replace('s', 'σ').replace('-', '−'))} <span class="muted">(${'يحوي'} ${bd(nf0.format(cov[id]) + '%')})</span>`; };
@@ -1778,7 +1780,7 @@ function filterHTML(){
   h += tr.scored ? `<p class="df-line">${`منذ ${fDay.format(toDate(tr.since))}: ${nf0.format(tr.scored)} جلسة مقيَّمة`} ·
       ${f.bands.map(b => `±${bd(nf1.format(b.k) + 'σ')}: ${pc(c[String(b.k)])} <span class="muted">(${'المتوقع'} ${pc(b.cover)})</span>`).join(' · ')}
       ${tr.edge_n ? ` · ${'ميزة Long أصابت'} ${pc(tr.edge_up1)} (${bd(nf0.format(tr.edge_n))})` : ''}</p>
-      ${tr.levels ? `<p class="df-line"><b>${'المستويات'}:</b> ${[['gex', 'GEX (Zero Gamma والـ Walls والـ Strikes)'], ['sigma', 'نطاقات σ'], ['prior', 'أعلى وأدنى سابق'], ['ma', 'MA50 / MA200']].filter(([k]) => tr.levels[k]).map(([k, n]) => { const x = tr.levels[k];
+      ${tr.levels ? `<p class="df-line"><b>${'المستويات'}:</b> ${[['gex', 'GEX (Zero Gamma والـ Walls والـ Strikes)'], ['sigma', 'نطاقات σ'], ['prior', 'أعلى وأدنى سابق'], ['ma', 'MA50 / MA200'], ['vp', 'Volume Profile (POC / VAH / VAL)']].filter(([k]) => tr.levels[k]).map(([k, n]) => { const x = tr.levels[k];
         return `${n}: ${x.touched ? `لُمست ${nf0.format(x.touched)} مرة، وصمدت ${nf0.format(x.held)}٪` : 'لم تُلمس بعد'}`; }).join(' · ')}</p>
       <p class="df-line muted">${'«صمد» = لمسه السعر ثم أغلقت الجلسة على جهته الأصلية. مستويات GEX تستحق وزنًا إن صمدت أكثر من المستويات العادية بفارق واضح.'}</p>` : ''}`
     : `<p class="empty">${'يبدأ التقييم بعد إغلاق الجلسة التالية: هل بقي الإغلاق داخل النطاقات؟ وهل صدقت الميزة حين ظهرت؟'}</p>`;
