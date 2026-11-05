@@ -71,6 +71,7 @@ FILES = [
     ("data/gex_history.json", "سجل GEX اليومي على GLD."),
     ("data/gld_lbma_pm.json", "سعر LBMA PM المشتق من أرشيف GLD (LBMA يحجب الجلب المباشر)."),
     ("data/weekly_brief.json", "خلاصة نشرة خبراء أسبوعية بصياغتنا (لا اقتباس ولا أرقام من النشرة)، تكتبها Routine كل اثنين ويقرؤها التقرير (المادة 15). **مشروط:** تظهر بعد أول تشغيل للـ Routine."),
+    ("data/gc_5m.csv", "شموع GC كل 5 دقائق بالحجم، تتراكم من Yahoo (آخر 60 يومًا ثم تُضاف كل يوم)، ومنها Volume Profile وTPO (المادة 3). **مشروط:** يُكتب في أول تشغيل."),
     ("data/gld_close.json", "إغلاق سهم GLD اليومي، لنسبة GC ÷ GLD التي تحوّل مستويات GEX إلى GC (المادة 10). **مشروط:** يُكتب في أول جلب لـ GLD."),
     ("data/gld_ozps.json", "أونصات الذهب لكل سهم GLD شهريًا."),
     ("data/oi_daily.json", "Open Interest والحجم اليومي لعقد GC من CME."),

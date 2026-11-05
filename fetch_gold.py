@@ -996,6 +996,156 @@ def yahoo_chart(symbol, rng, interval, period=None, ohlc=False):
     raise RuntimeError(f"Yahoo {symbol} {interval}: " + " | ".join(errors))
 
 
+# ---------------------------------------------------------------- Volume Profile وTPO من شموع GC كل 5 دقائق (Yahoo)
+# Yahoo يعطي شموع 5 دقائق لآخر 60 يومًا فقط، فنحفظها في data/gc_5m.csv ونضيف إليها كل يوم: السجل يطول مع الوقت.
+# Volume Profile تقريبي: حجم كل شمعة يُوزَّع بالتساوي على أسعار مداها، لا من الصفقات نفسها (تلك تحتاج بيانات tick).
+GC_5M = os.path.join("data", "gc_5m.csv")
+VP_BIN = 1.0                 # عرض خانة السعر بالدولار
+VP_VA = 0.70                 # منطقة القيمة: 70٪ من الحجم حول POC
+RTH = ((8, 20), (13, 30))    # جلسة COMEX النهارية بتوقيت نيويورك: منها يُبنى TPO والـ single prints
+
+
+def yahoo_5m(symbol="GC=F", rng="60d"):
+    errors = []
+    for host in ("query1", "query2"):
+        url = f"https://{host}.finance.yahoo.com/v8/finance/chart/{symbol}?range={rng}&interval=5m"
+        try:
+            res = browser_get(url, headers={"Accept": "application/json"}).json()["chart"]["result"][0]
+            q = res["indicators"]["quote"][0]
+            return [(int(t), float(o), float(h), float(lo), float(c), int(v or 0))
+                    for t, o, h, lo, c, v in zip(res["timestamp"], q["open"], q["high"], q["low"], q["close"], q["volume"])
+                    if c and h and lo and o]
+        except Exception as e:
+            errors.append(f"{host}: {str(e)[:80]}")
+    raise RuntimeError(f"Yahoo {symbol} 5m: " + " | ".join(errors))
+
+
+def _load_5m():
+    out = {}
+    try:
+        with open(GC_5M, encoding="utf-8") as f:
+            for row in csv.reader(f):
+                if row and row[0].isdigit():
+                    out[int(row[0])] = (int(row[0]), *map(float, row[1:5]), int(float(row[5])))
+    except OSError:
+        pass
+    return out
+
+
+def _save_5m(bars):
+    folder = os.path.dirname(GC_5M)
+    os.makedirs(folder, exist_ok=True)
+    with open(GC_5M, "w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["ts", "open", "high", "low", "close", "volume"])
+        for b in sorted(bars.values()):
+            w.writerow([b[0], f"{b[1]:.1f}", f"{b[2]:.1f}", f"{b[3]:.1f}", f"{b[4]:.1f}", b[5]])
+
+
+def _gc_session(ts):
+    """جلسة GC تبدأ 18:00 نيويورك وتنتهي 17:00 في اليوم التالي، وتُنسب إلى يوم انتهائها."""
+    ny = dt.datetime.fromtimestamp(ts, dt.timezone.utc).astimezone(NEW_YORK)
+    return (ny + dt.timedelta(hours=6)).date().isoformat(), ny
+
+
+def volume_profile(bars):
+    """POC وVAH وVAL من شموع تُوزَّع أحجامها على مداها بخانات VP_BIN."""
+    vol = {}
+    for _, o, h, lo, c, v in bars:
+        if v <= 0:
+            continue
+        a, b = int(math.floor(lo / VP_BIN)), int(math.floor(h / VP_BIN))
+        share = v / (b - a + 1)
+        for k in range(a, b + 1):
+            vol[k] = vol.get(k, 0.0) + share
+    if not vol:
+        return None
+    total = sum(vol.values())
+    keys = sorted(vol)
+    mid = (keys[0] + keys[-1]) / 2
+    poc = max(keys, key=lambda k: (vol[k], -abs(k - mid)))
+    lo_k = hi_k = poc
+    acc = vol[poc]
+    while acc < VP_VA * total and (lo_k > keys[0] or hi_k < keys[-1]):
+        up = vol.get(hi_k + 1, 0.0) + vol.get(hi_k + 2, 0.0) if hi_k < keys[-1] else -1
+        dn = vol.get(lo_k - 1, 0.0) + vol.get(lo_k - 2, 0.0) if lo_k > keys[0] else -1
+        if up >= dn:
+            for k in (hi_k + 1, hi_k + 2):
+                if k <= keys[-1]:
+                    acc += vol.get(k, 0.0)
+                    hi_k = k
+        else:
+            for k in (lo_k - 1, lo_k - 2):
+                if k >= keys[0]:
+                    acc += vol.get(k, 0.0)
+                    lo_k = k
+    c = lambda k: round((k + 0.5) * VP_BIN, 1)
+    return {"poc": c(poc), "vah": round((hi_k + 1) * VP_BIN, 1), "val": round(lo_k * VP_BIN, 1),
+            "volume": int(total), "high": round((keys[-1] + 1) * VP_BIN, 1), "low": round(keys[0] * VP_BIN, 1)}
+
+
+def single_prints(rth_bars, min_bins=3):
+    """TPO من فترات 30 دقيقة في الجلسة النهارية: أسعار لمستها فترة واحدة فقط، في وسط المدى لا عند طرفيه (تلك ذيول)."""
+    periods = {}
+    for b in rth_bars:
+        periods.setdefault(b[0] // 1800, []).append(b)
+    count = {}
+    for ps in periods.values():
+        lo, h = min(x[3] for x in ps), max(x[2] for x in ps)
+        for k in range(int(math.floor(lo / VP_BIN)), int(math.floor(h / VP_BIN)) + 1):
+            count[k] = count.get(k, 0) + 1
+    if len(periods) < 4 or not count:
+        return []
+    keys = sorted(count)
+    runs, cur = [], []
+    for k in keys:
+        if count[k] == 1 and (not cur or k == cur[-1] + 1):
+            cur.append(k)
+        else:
+            if len(cur) >= min_bins:
+                runs.append(cur)
+            cur = [k] if count[k] == 1 else []
+    if len(cur) >= min_bins:
+        runs.append(cur)
+    inner = [r for r in runs if r[0] > keys[0] and r[-1] < keys[-1]]       # الذيول عند الطرفين ليست single prints
+    inner.sort(key=len, reverse=True)
+    return [{"lo": round(r[0] * VP_BIN, 1), "hi": round((r[-1] + 1) * VP_BIN, 1)} for r in inner[:2]]
+
+
+def fetch_vp(now=None):
+    now = now or dt.datetime.now(dt.timezone.utc)
+    stored = _load_5m()
+    new = yahoo_5m()
+    for b in new:
+        stored[b[0]] = b
+    _save_5m(stored)
+    by_sess, rth = {}, {}
+    for b in stored.values():
+        s, ny = _gc_session(b[0])
+        by_sess.setdefault(s, []).append(b)
+        if RTH[0] <= (ny.hour, ny.minute) < RTH[1]:
+            rth.setdefault(s, []).append(b)
+    today = _gc_session(int(now.timestamp()))[0]
+    done = sorted(s for s in by_sess if s < today and not _weekend(s) and len(by_sess[s]) >= 120)
+    if not done:
+        raise RuntimeError("VP: no complete GC session in the 5-minute bars")
+    sessions = []
+    for s in done[-10:]:
+        p = volume_profile(by_sess[s])
+        if p:
+            sessions.append({"session": s, **p, "singles": single_prints(rth.get(s, []))})
+    last = dt.date.fromisoformat(done[-1])
+    wk_end = last if last.weekday() >= 4 else last - dt.timedelta(days=last.weekday() + 3)
+    wk = [b for s in done if wk_end - dt.timedelta(days=6) <= dt.date.fromisoformat(s) <= wk_end for b in by_sess[s]]
+    week = volume_profile(wk) if wk else None
+    log(f"VP ok: {len(stored)} bars stored ({len(new)} fetched), last session {done[-1]} POC {sessions[-1]['poc']} "
+        f"VA {sessions[-1]['val']}-{sessions[-1]['vah']}, singles {sessions[-1]['singles']}")
+    return {"vp": {"asof": now.replace(microsecond=0).isoformat(), "sessions": sessions,
+                   "week": {"end": wk_end.isoformat(), **week} if week else None,
+                   "bars_stored": len(stored), "first_bar": min(stored), "method": "approx-5m"}}
+
+
+
 def _weekend(day):
     """جلسة GC التي تفتح مساء الأحد تخص الاثنين؛ Yahoo يؤرّخها أحيانًا بالأحد فتظهر جلسة وهمية قصيرة."""
     return dt.date.fromisoformat(day).weekday() >= 5
@@ -1272,7 +1422,7 @@ FILTER_ERAS = (("2008-01-01", "2019-12-31"), ("2020-01-01", "2099-12-31"))
 FILTER_SWING = (5, 10)                      # نطاقات السوينغ: أسبوع وأسبوعان
 LV_GROUPS = {"gex": ("zero_gamma", "call_wall", "put_wall", "put_2", "put_3", "call_2", "call_3"),
              "sigma": ("+1s", "-1s", "+1.5s", "-1.5s", "+2s", "-2s"), "prior": ("pdh", "pdl", "pwh", "pwl"),
-             "ma": ("ma50", "ma200")}
+             "ma": ("ma50", "ma200"), "vp": ("vp_poc", "vp_vah", "vp_val", "wk_poc", "sp")}
 SCORECARD = os.path.join("data", "scorecard.json")
 
 
@@ -1357,6 +1507,16 @@ def direction_filter(d, now=None):
     wk = [r for k, r in bars.items() if wk_end - dt.timedelta(days=6) <= dt.date.fromisoformat(k) <= wk_end]
     if len(wk) >= 3:
         levels += [{"id": "pwh", "v": max(r[2] for r in wk)}, {"id": "pwl", "v": min(r[3] for r in wk)}]
+    vp = d.get("vp") or {}
+    ses = {s["session"]: s for s in vp.get("sessions") or []}
+    if days[i] in ses:
+        s = ses[days[i]]
+        levels += [{"id": "vp_poc", "v": s["poc"]}, {"id": "vp_vah", "v": s["vah"]}, {"id": "vp_val", "v": s["val"]}]
+        if s.get("singles"):
+            sp = s["singles"][0]
+            levels += [{"id": "sp", "v": round((sp["lo"] + sp["hi"]) / 2, 1), "lo": sp["lo"], "hi": sp["hi"]}]
+    if (vp.get("week") or {}).get("end") and vp["week"]["end"] <= days[i]:
+        levels += [{"id": "wk_poc", "v": vp["week"]["poc"]}]
     g, gex = d.get("gex") or {}, None
     if g.get("zero_all") and g.get("gc_ratio") and g.get("spot"):
         r = g["gc_ratio"]
@@ -1405,7 +1565,8 @@ def direction_filter(d, now=None):
 
 TV_KEYS = {"zero_gamma": "ZG", "call_wall": "CW", "put_wall": "PW", "put_2": "P2", "put_3": "P3", "call_2": "C2",
            "call_3": "C3", "+1s": "U1", "-1s": "D1", "+1.5s": "U15", "-1.5s": "D15", "+2s": "U2", "-2s": "D2",
-           "pdh": "PDH", "pdl": "PDL", "pwh": "PWH", "pwl": "PWL", "ma50": "MA50", "ma200": "MA200"}
+           "pdh": "PDH", "pdl": "PDL", "pwh": "PWH", "pwl": "PWL", "ma50": "MA50", "ma200": "MA200",
+           "vp_poc": "POC", "vp_vah": "VAH", "vp_val": "VAL", "wk_poc": "WPOC", "sp": "SP"}
 
 
 ZONE_WIDTH_SIGMA = 0.6                        # عرض نافذة منطقة التجمّع بـ σ
@@ -3229,6 +3390,16 @@ def ai_digest(d):
                      "historical 5- and 10-session up rates at each stage (descriptive base rates, not an edge); "
                      "bands = next-close range from 20-session "
                      "volatility with historical coverage; the GEX regime is not historically tested yet")}
+    vp = d.get("vp") or {}
+    if vp.get("sessions"):
+        g["volume_profile"] = {"sessions": vp["sessions"][-3:], "week": vp.get("week"),
+                               "note": ("GC Volume Profile per Globex session (18:00-17:00 New York) and the prior week, "
+                                        "APPROXIMATE: built from 5-minute bars with each bar's volume spread over its range, "
+                                        "not from trades; single prints from 30-minute TPO in the day session (8:20-13:30 NY). "
+                                        "POC, VAH, VAL, the weekly POC and the largest single print are also levels in "
+                                        "statistical_direction_filter (vp_poc, vp_vah, vp_val, wk_poc, sp); they are NOT tested "
+                                        "yet, weight 1 like any untested level. Say when a zone also holds a VP level, but do "
+                                        "not call it stronger for that until the level scoring shows VP levels hold")}
     lq = d.get("liquidation") or {}
     if lq.get("today"):
         g["forced_selling_monitor"] = {"today": lq["today"], "thresholds": lq.get("params"),
@@ -3990,6 +4161,10 @@ def check_data(name, d):
             for k in ("cpi", "core"):
                 if f.get(k) and not -5 <= f[k]["yoy"] <= 25:
                     p.append(f"{k} YoY {f[k]['yoy']} out of range")
+    elif name == "vp":
+        for s in (d.get("vp") or {}).get("sessions") or []:
+            if not (s["val"] <= s["poc"] <= s["vah"] and 500 < s["poc"] < 30000):
+                p.append(f"VP {s['session']}: POC {s['poc']} outside VA {s['val']}-{s['vah']}")
     elif name == "oi_daily":
         p += series_issues("CME daily OI", [r[:2] for r in d.get("oi_daily") or []], 100_000, 2_000_000, jump=0.15, max_gap=7)
     elif name == "gex":
@@ -4141,6 +4316,7 @@ SECTIONS = {
     "macro": (fetch_macro, ("macro", "liquidation")),
     "gex": (fetch_gex, ("gex",)),
     "oi_daily": (fetch_oi_daily, ("oi_daily",)),
+    "vp": (fetch_vp, ("vp",)),
     "calendar": (fetch_calendar, ("calendar",)),
 }
 CHECK_KEYS = {"comex": ("comex",), "deliveries": ("deliveries",)}     # مفاتيح تُبنى من ملفات السجل لا من دالة الجلب
@@ -4176,6 +4352,8 @@ def latest_of(name, d):
             return d["gex"]["asof"][:10]
         if name == "oi_daily":
             return d["oi_daily"][-1][0]
+        if name == "vp":
+            return d["vp"]["sessions"][-1]["session"]
     except Exception:
         return None
     return None
@@ -4202,7 +4380,7 @@ def is_due(name, st, prev):
         # ونستمر كل ساعة حتى يظهر التقرير (يتأخر أحيانًا إلى الاثنين بسبب العطل الرسمية).
         expected = dt.datetime.fromisoformat(last).replace(tzinfo=dt.timezone.utc) + dt.timedelta(days=10, hours=19)
         return now >= expected
-    if name in ("deliveries", "comex", "etf", "etf2", "physical", "macro", "gex", "oi_daily"):
+    if name in ("deliveries", "comex", "etf", "etf2", "physical", "macro", "gex", "oi_daily", "vp"):
         return now.weekday() != 6 and hours_since(st.get("checked")) >= 2.8      # تقارير يومية: كل 3 ساعات
     if name == "calendar":
         return hours_since(st.get("checked")) >= 5.5

@@ -19,6 +19,7 @@ showGex   = input.bool(true, "  · GEX: Zero Gamma, Walls, Strikes")
 showSig   = input.bool(false, "  · σ bands")
 showPrior = input.bool(true, "  · Previous day / week high-low")
 showMa    = input.bool(true, "  · MA50 / MA200")
+showVp    = input.bool(true, "  · Volume Profile: POC / VAH / VAL / single prints")
 cSup      = input.color(color.new(#4C7DD9, 0), "Support zone color")
 cRes      = input.color(color.new(#D9534F, 0), "Resistance zone color")
 cPiv      = input.color(color.new(#FF9800, 0), "Pivot zone color")
@@ -32,6 +33,7 @@ cGex   = input.color(color.new(#A970FF, 0), "GEX color")
 cSig   = input.color(color.new(#9AA4B2, 0), "σ color")
 cPrior = input.color(color.new(#E0B44C, 0), "Prior high/low color")
 cMa    = input.color(color.new(#4C9AFF, 0), "MA color")
+cVp    = input.color(color.new(#26C6DA, 0), "Volume Profile color")
 
 // الفرق يُحسب من إغلاق الأمس للرمزين، فيبقى ثابتًا طوال الجلسة. (الحساب اللحظي كان يجعل المستويات تتحرك مع السعر،
 // لأن بيانات GC1! في TradingView مؤجلة غالبًا بينما XAUUSD لحظي، فيتغير الفرق مع كل حركة.)
@@ -48,6 +50,8 @@ grp(string k) =>
         g := "prior"
     if str.startswith(k, "MA")
         g := "ma"
+    if k == "POC" or k == "VAH" or k == "VAL" or k == "WPOC" or k == "SP"
+        g := "vp"
     g
 
 nameOf(string k) =>
@@ -69,6 +73,8 @@ nameOf(string k) =>
         "PDL" => "PDL"
         "PWH" => "PWH"
         "PWL" => "PWL"
+        "WPOC" => "Weekly POC"
+        "SP"  => "Single prints"
         => k
 
 var array<line>  lns = array.new<line>()
@@ -133,10 +139,10 @@ if barstate.islast
                 else if map.contains(zoneOf, k)
                     zid := map.get(zoneOf, k)
                 string g = grp(k)
-                bool show = g == "gex" ? showGex : g == "sig" ? showSig : g == "prior" ? showPrior : showMa
+                bool show = g == "gex" ? showGex : g == "sig" ? showSig : g == "prior" ? showPrior : g == "vp" ? showVp : showMa
                 if show and not na(v)
                     float y = v - basis
-                    color c = g == "gex" ? cGex : g == "sig" ? cSig : g == "prior" ? cPrior : cMa
+                    color c = g == "gex" ? cGex : g == "sig" ? cSig : g == "prior" ? cPrior : g == "vp" ? cVp : cMa
                     string sty = g == "sig" ? line.style_dotted : g == "ma" ? line.style_dashed : line.style_solid
                     int w = k == "ZG" or k == "CW" or k == "PW" ? 2 : 1
                     string lab = nameOf(k) + "  " + str.tostring(y, "#.0") + "  · " + zid
