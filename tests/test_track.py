@@ -12,6 +12,8 @@
 3) قبل 13 نافذة لا متوسطات ولا beats_guessing (null)، في الإجمالي ولكل نموذج ولكل نسخة تعليمات.
 4) سجل الأداء يصل النموذج من مرآة الأداء وحدها بعد 10 توقعات مقيَّمة: 1 و9 → لا شيء، 10 → المرآة.
 5) brier_base وbrier_paired والمهارة تطابق حسابًا مستقلًا وحالة يدوية.
+5ب) fable_direction: قبل 13 نافذة حاسمة not_yet وmetrics_withheld وكل المتوسطات فارغة؛ عند 13 و26 تظهر وتطابق حسابًا
+   مستقلًا، والحكم يتبع القاعدة المكتوبة كما هي (المهارة إن حُسبت، وإلا إصابة > 50% وBrier < 0.25).
 6) قواعد التقييم وأفقها ونطاقها وعتباتها كما هي، وبصمة القفل مطابقة للدستور.
 """
 import json
@@ -49,18 +51,18 @@ def setup():
     return tmp, F, G
 
 
-def session_days():
-    """جلسات GC من 2025-10-01 إلى 2026-10-15: كلها قابلة للتقييم على الإغلاقات الحقيقية في prices.json."""
-    return [d for d, v in json.load(open("prices.json"))["daily"] if v and "2025-10-01" <= d <= "2026-10-15"]
+def session_days(start="2025-10-01"):
+    """جلسات GC من start إلى 2026-10-15: كلها قابلة للتقييم على الإغلاقات الحقيقية في prices.json."""
+    return [d for d, v in json.load(open("prices.json"))["daily"] if v and start <= d <= "2026-10-15"]
 
 
-def synthetic(n=None, varied=False, base=True, base_from=None):
+def synthetic(n=None, varied=False, base=True, base_from=None, start="2025-10-01"):
     """توقع لكل جلسة. base=False: بلا base_rates (كتوقعات ما قبل 1 نوفمبر). base_from: المعدل التاريخي من هذا التاريخ فقط."""
     px = dict((d, v) for d, v in json.load(open("prices.json"))["daily"] if v)
     ps = [[40, 30, 30], [20, 55, 25], [50, 30, 20], [34, 33, 33], [15, 25, 60]]
     brs = [{"up": 33, "flat": 47, "down": 21}, {"up": 28, "flat": 47, "down": 25}, {"up": 32, "flat": 51, "down": 17}]
     out = []
-    for i, d in enumerate(session_days()[:n]):
+    for i, d in enumerate(session_days(start)[:n]):
         e = {"id": f"{d}T14:00:00+00:00", "date": d, "model": "claude-opus-5-5", "bias": "neutral",
              "p": ps[i % len(ps)] if varied else [40, 30, 30], "dirs": ["flat", "up", "down"],
              "base": {"date": d, "price": px[d]}}
@@ -84,7 +86,9 @@ def run(F, log_):
     tr = F.score_outlooks()
     d = json.load(open("data.json"))
     d["outlook_track"] = tr
-    return tr, F.scorecard(d)["fable"], d
+    full = F.scorecard(d)
+    run.last = full                       # scorecard كاملًا (fable_direction) لآخر تشغيل
+    return tr, full["fable"], d
 
 
 def no_aggregates(summary, sc, tag):
@@ -154,6 +158,7 @@ def test_small_samples(F):
         tr, sc, data = run(F, synthetic(k, varied=True))
         check(sc.get("verdict") == "not_yet" and sc.get("scored") == k, f"{k} scored: verdict not_yet")
         no_aggregates(tr["summary"], sc, f"{k} scored")
+        direction_withheld(run.last["fable_direction"], tr["summary"], f"{k} scored")
         g = F.ai_digest(data)
         sent, mirror = g.get("your_track_record"), F.performance_mirror()
         if k < F.MIRROR_MIN:
@@ -161,6 +166,80 @@ def test_small_samples(F):
         else:
             check(sent is not None and sent == mirror and "independent_14d_windows" in sent and "n" not in sent,
                   f"{k} scored: the model gets performance_mirror(), not the summary")
+
+
+DIR_FIELDS = ("lean_hit_pct", "brier", "brier_coin", "brier_base_rate", "skill_vs_base_pct")
+DIR_START = "2024-01-02"                  # من 2025-10 لا تتجاوز النوافذ الحاسمة 25، فيحتاج اختبار 26 تاريخًا أطول
+
+
+def direction_withheld(D, summary, tag):
+    """قبل 13 نافذة حاسمة: not_yet، وmetrics_withheld، وكل المتوسطات فارغة، والملخص يحمل أعدادًا فقط."""
+    check(D.get("verdict") == "not_yet" and D.get("metrics_withheld") is True,
+          f"{tag}: fable_direction not_yet with metrics_withheld ({D.get('verdict')}, {D.get('metrics_withheld')})")
+    check(all(D.get(k) is None for k in DIR_FIELDS), f"{tag}: fable_direction {', '.join(DIR_FIELDS)} are null")
+    check(set(summary.get("direction") or {}) <= {"n", "n_lean", "windows"}, f"{tag}: summary.direction carries counts only")
+
+
+def lean_stats(entries):
+    """حساب مستقل لقراءة الاتجاه: الإصابة بين التوقعات المائلة، وBrier الثنائي لحصة الصعود، وBrier المعدل التاريخي."""
+    hits, br, brb = [], [], []
+    for e in entries:
+        if not e.get("result") or e["result"]["outcome"] == "flat":
+            continue
+        p = dict(zip(e["dirs"], e["p"]))
+        up = e["result"]["outcome"] == "up"
+        if p["up"] != p["down"]:
+            hits.append((p["up"] > p["down"]) == up)
+        br.append(((p["up"] / (p["up"] + p["down"]) if p["up"] + p["down"] else 0.5) - up) ** 2)
+        b = e.get("base_rates") or {}
+        if b.get("up", 0) + b.get("down", 0):
+            brb.append((b["up"] / (b["up"] + b["down"]) - up) ** 2)
+    return hits, br, brb
+
+
+def first_n_with_dir_windows(F, k):
+    """أقل عدد من التوقعات (من DIR_START) يعطي k نافذة حاسمة مستقلة بالضبط. النتائج من التقييم الفعلي."""
+    json.dump(synthetic(varied=True, start=DIR_START), open(F.OUTLOOK_LOG, "w"))
+    F.score_outlooks()
+    scored = json.load(open(F.OUTLOOK_LOG))
+    for n in range(1, len(scored) + 1):
+        if F._windows([e["base"]["date"] for e in scored[:n] if e.get("result") and e["result"]["outcome"] != "flat"]) == k:
+            return n
+    raise AssertionError(f"no prefix gives {k} decisive windows")
+
+
+def test_direction(F):
+    need, fin = F.SC_RULES["fable_direction"]["prelim_windows"], F.SC_RULES["fable_direction"]["min_windows"]
+    for k in (12, need, fin):
+        n = first_n_with_dir_windows(F, k)
+        for base in (True, False):
+            tr, _, _ = run(F, synthetic(n, varied=True, base=base, start=DIR_START))
+            D, s = run.last["fable_direction"], tr["summary"]
+            tag = f"{k} decisive windows {'with' if base else 'without'} base rates ({n} forecasts)"
+            check(D.get("independent_windows") == k, f"{tag}: independent_windows = {D.get('independent_windows')}")
+            if k < need:
+                direction_withheld(D, s, tag)
+                continue
+            hits, br, brb = lean_stats(json.load(open(F.OUTLOOK_LOG)))
+            hit, brier = round(sum(hits) / len(hits) * 100), round(sum(br) / len(br), 3)
+            check(D.get("metrics_withheld") is False and D.get("lean_hit_pct") == hit and D.get("brier") == brier
+                  and D.get("brier_coin") == 0.25, f"{tag}: lean hit {D.get('lean_hit_pct')}% and Brier {D.get('brier')} == independent {hit}%, {brier}; coin 0.25")
+            if base:
+                bb = sum(brb) / len(brb)
+                # outlook_direction تحسب المهارة من Brier بعد تقريبه إلى 3 منازل (كما هي، لا يغيّرها هذا الـ PR)؛
+                # الفرق عن القيمة الكاملة أقل من ربع نقطة مئوية هنا، ويجب ألا يقلب الإشارة
+                sk_code, sk_exact = round((1 - brier / bb) * 100, 1), (1 - (sum(br) / len(br)) / bb) * 100
+                check(D.get("brier_base_rate") == round(bb, 3) and D.get("skill_vs_base_pct") == sk_code,
+                      f"{tag}: base-rate Brier {D.get('brier_base_rate')} and skill {D.get('skill_vs_base_pct')}% match "
+                      f"(from the rounded Brier; exact {sk_exact:.2f}%)")
+                check((sk_code > 0) == (sk_exact > 0), f"{tag}: rounding does not flip the skill sign")
+            else:
+                check(D.get("brier_base_rate") is None and D.get("skill_vs_base_pct") is None, f"{tag}: no base-rate comparison")
+            # القاعدة المكتوبة (المادة 19) كما هي: المهارة > 0 إن حُسبت، وإلا إصابة > 50% وBrier < 0.25
+            sk = D.get("skill_vs_base_pct")
+            good = sk > 0 if sk is not None else (D["lean_hit_pct"] > 50 and D["brier"] < 0.25)
+            want = ("preliminary_positive" if good else "preliminary_negative") if k < fin else ("pass" if good else "fail")
+            check(D.get("verdict") == want, f"{tag}: verdict {D.get('verdict')} follows the written rule ({want})")
 
 
 def test_real_log(F):
@@ -174,6 +253,9 @@ def test_real_log(F):
     check(sc.get("independent_windows") == full, f"real log ({len(scored)} scored): scorecard windows == full-log windows ({full})")
     if full < 13:
         no_aggregates(tr["summary"], sc, "real log")
+    D = F.scorecard(d)["fable_direction"]
+    if D.get("independent_windows", 0) < 13:
+        direction_withheld(D, tr["summary"], "real log")
 
 
 def brier(p, out):
@@ -247,6 +329,7 @@ if __name__ == "__main__":
         test_thresholds(F)
         test_few_base(F)
         test_small_samples(F)
+        test_direction(F)
         test_real_log(F)
         test_brier_base(F)
         test_rules_and_lock(F, G)
