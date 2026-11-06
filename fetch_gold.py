@@ -3730,6 +3730,8 @@ platform can learn which outside information each section needs:
  "research_map": [{"section": "macro|gex|countries|cb|banks|noncomm|signals|f13|comex|etf|physical|general",
                    "need": "what information was missing from the platform data", "queries": ["..."],
                    "sources": ["domain.com"], "found": "the key fact or number you used, or 'nothing useful'"}]
+research_map and your search queries are saved in a public log: never put a number, name or measure from
+hidden_correlations or hidden_nowcasts in them.
 summary: 4 to 6 short points. sections: 4 to 6 (central banks and countries, banks and COT positioning, ETFs and institutions,
 physical market and vaults, and anything else notable). events: 2 to 5. watch: 2 to 4 things to watch next."""
 
@@ -3924,10 +3926,12 @@ def _audit_line(rep):
     return f"{len(a)} item(s), {st.count('fixed')} fixed, {st.count('open')} open"
 
 
-def validate_report(rep, outlook, digest):
+def validate_report(rep, outlook, digest, queries=None):
     """فحوص آلية للتقرير قبل نشره، بلا tokens. hard: ما لا يصلحه الكود ويمسّ النشر أو التقييم أو المادة 26؛
-    soft: ما يُسجَّل للمراجعة فقط. الرسائل لا تحمل أي قيمة من الطبقة المخفية (سجل Actions علني)."""
-    hard, soft = [], []
+    soft: ما يُسجَّل للمراجعة فقط. فحص الطبقة المخفية يشمل كل نص يكتبه النموذج ويمكن أن يُحفظ في ملف عام (ar
+    وfocus_zones وresearch_map ونصوص البحث queries وأي حقل آخر)، لا ar وحده؛ audit لا يُحفظ أبدًا فلا يُفحص.
+    leak_fields: الحقول التي وُجد فيها تسريب، بأسمائها فقط. الرسائل لا تحمل أي قيمة مخفية (سجل Actions علني)."""
+    hard, soft, leak_fields = [], [], set()
     ar = rep.get("ar") if isinstance(rep.get("ar"), dict) else {}
     # 1) شكل التقرير العربي الذي تعرضه الصفحة
     if not str(ar.get("headline") or "").strip():
@@ -3956,22 +3960,28 @@ def validate_report(rep, outlook, digest):
         if {"bullish": "up", "bearish": "down", "neutral": "flat"}[outlook["bias"]] != top:
             note = str(((ar.get("outlook") or {}).get("bias_note")) or "").strip()
             soft.append(("bias_not_top", "bias differs from the most likely scenario" + ("" if note else " and bias_note is empty")))
-    # 3) المادة 26: لا رقم مميَّز ولا اسم من الطبقة المخفية في نص التقرير
+    # 3) المادة 26: لا رقم مميَّز ولا اسم من الطبقة المخفية في أي نص يكتبه النموذج ويمكن أن يُحفظ
     text = "\n".join(_texts(ar))
-    low = text.lower()
-    if any(k in low for k in HIDDEN_PACKS):
-        hard.append(("hidden_leak", "a private pack is named in the report"))
     public = {k: v for k, v in (digest or {}).items() if k not in HIDDEN_PACKS}
     pub_nums = {_fmt(x) for x in _leaves(public)} | {n for t in _texts(public) for n in _text_numbers(t)}
     hidden = {_fmt(x) for k in HIDDEN_PACKS for x in _leaves((digest or {}).get(k))
               if (isinstance(x, float) and x != int(x)) or abs(x) >= 1000} - pub_nums
     sig = lambda v: len(v.lstrip("-").replace(".", "").lstrip("0"))
-    found = hidden & _text_numbers(text)
-    # رقم مميَّز (3 خانات معنوية أو أكثر، أو 1000 فأكثر) حاسم؛ رقم بمنزلتين مثل 0.37 قد يتطابق صدفةً مع نص عادي فهو إرشادي
-    if any(sig(v) >= 3 for v in found):
-        hard.append(("hidden_leak", "a distinctive number from a private pack appears in the report text"))
-    elif found:
-        soft.append(("hidden_maybe", f"{len(found)} short number(s) also found in a private pack (may be chance)"))
+    fields = {k: v for k, v in rep.items() if k != "audit"}
+    if queries:
+        fields["queries"] = list(queries)
+    for name in sorted(fields):
+        ftext = "\n".join(_texts(fields[name]))
+        if any(k in ftext.lower() for k in HIDDEN_PACKS):
+            hard.append(("hidden_leak", f"a private pack is named in {name}"))
+            leak_fields.add(name)
+        found = hidden & _text_numbers(ftext)
+        # رقم مميَّز (3 خانات معنوية أو أكثر، أو 1000 فأكثر) حاسم؛ رقم بمنزلتين مثل 0.37 قد يتطابق صدفةً مع نص عادي فهو إرشادي
+        if any(sig(v) >= 3 for v in found):
+            hard.append(("hidden_leak", f"a distinctive number from a private pack appears in {name}"))
+            leak_fields.add(name)
+        elif found:
+            soft.append(("hidden_maybe", f"{len(found)} short number(s) in {name} also found in a private pack (may be chance)"))
     # 4) إرشادية: مناطق التركيز، والأحداث، ومصدر الأرقام، والصياغة السببية، والتدقيق
     zones = {z.get("id") for z in ((digest or {}).get("statistical_direction_filter") or {}).get("zones") or []}
     for z in rep.get("focus_zones") or []:
@@ -3996,7 +4006,7 @@ def validate_report(rep, outlook, digest):
         opened = sum(1 for a in audit if isinstance(a, dict) and str(a.get("status")).lower() == "open")
         if opened:
             soft.append(("audit_open", f"{opened} audit item(s) left open"))
-    return {"hard": hard, "soft": soft}
+    return {"hard": hard, "soft": soft, "leak_fields": sorted(leak_fields)}
 
 
 def _findings_line(f):
@@ -4158,9 +4168,9 @@ def ai_report(data, prev, new_major, releases):
     # الفحص الآلي (بلا tokens). AI_REPAIR=off (الافتراضي): يُسجَّل فقط والنشر كما كان. on: جولة إصلاح واحدة تُلحَق بالمحادثة
     # نفسها (الأدوات والتعليمات والـ effort نفسها، فتُقرأ البادئة من التخزين المؤقت)؛ إن بقي فشل حاسم يُحجب الجديد
     try:
-        findings = validate_report(rep, outlook, digest_obj)
+        findings = validate_report(rep, outlook, digest_obj, queries)
     except Exception as e:
-        findings = {"hard": [], "soft": []}
+        findings = {"hard": [], "soft": [], "leak_fields": []}
         log("AI check FAILED:", repr(e)[:160])
     log(f"AI check: {_findings_line(findings)}; audit {_audit_line(rep)}; repair {AI_REPAIR}")
     if findings["hard"] and AI_REPAIR == "on":
@@ -4173,14 +4183,25 @@ def ai_report(data, prev, new_major, releases):
         try:
             rep2 = _parse_report(resp)
             outlook2 = _outlook(rep2)
-            again = validate_report(rep2, outlook2, digest_obj)
+            again = validate_report(rep2, outlook2, digest_obj, queries)
         except Exception as e:
-            again = {"hard": [("repair_parse", str(e)[:120])], "soft": []}
+            again = {"hard": [("repair_parse", str(e)[:120])], "soft": [], "leak_fields": []}
         log(f"AI repair check: {_findings_line(again)}")
         if again["hard"]:
             raise _AIWithheld(_findings_line(again))
-        rep, outlook = rep2, outlook2
+        rep, outlook, findings = rep2, outlook2, again
     rep.pop("audit", None)                           # تدقيق النموذج لا يُنشر في أي ملف
+    # حقول التشخيص التي فيها تسريب من الطبقة المخفية لا تُحفظ أبدًا (والإصلاح مطفأ أو لم يُصلحها): research_map ونصوص البحث
+    # في سجل البحث العام، وسبب منطقة التركيز. نص التقرير (ar) يبقى كما كان حين AI_REPAIR=off، والفشل مسجّل
+    leak = set(findings.get("leak_fields") or ())
+    withheld = sorted(leak & {"research_map", "queries", "focus_zones"})
+    if withheld:
+        log("AI check: not saved because of private-pack content:", ", ".join(withheld))
+        for k in ("research_map", "focus_zones"):
+            if k in leak:
+                rep.pop(k, None)
+        if "queries" in leak:
+            queries = []
     u = _usage_sum(spent)
     model = resp.get("model", AI_MODEL)
     # من كتب التقرير فعلًا: كتلة fallback تحدد نقطة التحويل، وusage.iterations يذكر كل محاولة ونموذجها
@@ -4223,7 +4244,8 @@ def ai_report(data, prev, new_major, releases):
     save(AI_HIST, hist)
     rlog = load(AI_RESEARCH_LOG, [])
     rlog.append({"generated_utc": latest["generated_utc"], "model": model, "trigger": list((new_major or {}).keys()) or ["manual"],
-                 "queries": queries, "results": sources[:40], "research_map": rep.get("research_map") or []})
+                 "queries": queries, "results": sources[:40], "research_map": rep.get("research_map") or [],
+                 **({"withheld": withheld} if withheld else {})})
     save(AI_RESEARCH_LOG, rlog[-30:])
     log(f"AI report ok: {today}, model {latest['model']}, {u['calls']} calls, {u['input_tokens']} in / {u['output_tokens']} out tokens, "
         f"cache {u['cache_creation_input_tokens']} written / {u['cache_read_input_tokens']} read{'' if use_cache else ' (caching off)'}, "
@@ -4242,7 +4264,7 @@ def ai_report(data, prev, new_major, releases):
 EXP_DIR = os.path.join("data", "experiments")
 
 
-def haiku_experiment(data, model, effort="xhigh"):
+def haiku_experiment(data, model, effort="xhigh", out_dir=None):
     """مراجعة يدوية فقط (مدخل experiment في التشغيل اليدوي: haiku أو fable): نموذج ثانٍ يقرأ تقرير Opus المنشور اليوم أولًا،
     ثم يكتب تقريره هو. لا يمسّ سجل الانحياز ولا التقرير المعروض ولا يُقيَّم، ويُحفظ في data/experiments.
     التكلفة تُكتب في سجل Actions فقط."""
@@ -4252,8 +4274,8 @@ def haiku_experiment(data, model, effort="xhigh"):
         return None
     now = dt.datetime.now(dt.timezone.utc)
     today = now.date().isoformat()
-    tag = model.split("-")[1]                        # haiku
-    path = os.path.join(EXP_DIR, f"{tag}_{today}.json")
+    tag = model.split("-")[1]                        # haiku أو fable
+    path = os.path.join(out_dir or EXP_DIR, f"{tag}_{today}.json")
     if os.path.exists(path):
         log("experiment: already done today:", path)
         return None
@@ -4261,7 +4283,8 @@ def haiku_experiment(data, model, effort="xhigh"):
     if not isinstance(opus.get("ar"), dict):
         log("experiment: no published report to read first")
         return None
-    digest = json.dumps(ai_digest(data), ensure_ascii=False, separators=(",", ":"))
+    digest_obj = ai_digest(data)
+    digest = json.dumps(digest_obj, ensure_ascii=False, separators=(",", ":"))
     user = (f"Date (UTC): {today}.\nPlatform data (JSON; t = tonnes, contracts = COMEX GC 100-oz contracts):\n{digest}\n\n"
             "Another analyst (Claude Opus 5.5) wrote the report below today, before the US morning releases. "
             "Read it first. Then write your own report from the platform data: say openly where you agree and where "
@@ -4321,10 +4344,29 @@ def haiku_experiment(data, model, effort="xhigh"):
     if not isinstance(rep.get("ar"), dict):
         raise RuntimeError("experiment: report has no ar block")
     outlook = _outlook(rep)
+    # الفحص نفسه قبل الحفظ: إن وُجد في الرد رقم أو اسم من الطبقة المخفية لا يُحفظ محتواه، بل سطر يذكر الحقول وحدها
+    found = validate_report(rep, outlook, digest_obj, queries)
+    log(f"EXPERIMENT check: {_findings_line(found)}")
+    if found.get("leak_fields"):
+        save(path, {"date": today, "generated_utc": now.replace(microsecond=0).isoformat(), "model": model,
+                    "withheld": "private-pack content", "fields": found["leak_fields"]})
+        return path
     save(path, {"date": today, "generated_utc": now.replace(microsecond=0).isoformat(), "model": model, "effort": effort,
                 "outlook": outlook, "ar": rep["ar"], "research_map": rep.get("research_map") or [], "queries": queries,
                 "opus": {"generated_utc": opus.get("generated_utc"), "model": opus.get("model"),
                          "outlook": opus.get("outlook"), "headline": (opus.get("ar") or {}).get("headline")}})
+    return path
+
+
+def review_main(model, out_dir):
+    """مراجعة يدوية معزولة (سير العمل review.yml): تقرأ data.json المحفوظ فقط، ولا تجلب مصادر المنصة ولا تحدّثها، ولا تشغّل
+    التقرير اليومي، ولا تكتب أي ملف في المستودع. النتيجة في out_dir وحده (artifact مؤقت في Actions)."""
+    if model not in ("claude-fable-5-1", "claude-haiku-5-5"):
+        raise SystemExit(f"review: unknown model {model!r}")
+    os.makedirs(out_dir, exist_ok=True)
+    data = load(OUT, {})
+    path = haiku_experiment(data, model, out_dir=out_dir)
+    log("review:", f"saved {os.path.basename(path)}" if path else "nothing saved")
     return path
 
 
@@ -5023,5 +5065,8 @@ if __name__ == "__main__":
     import sys
     if "--news" in sys.argv[1:]:          # تحديث الأخبار وحدها بين التحديثات الكاملة (run_loop.sh كل 10 دقائق)
         publish_news()
+    elif "--review" in sys.argv[1:]:      # مراجعة يدوية معزولة: python fetch_gold.py --review <model> <out_dir>
+        i = sys.argv.index("--review")
+        review_main(sys.argv[i + 1], sys.argv[i + 2])
     else:
         main()

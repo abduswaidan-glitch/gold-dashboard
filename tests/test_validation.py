@@ -134,6 +134,26 @@ def test_validate(F):
     check("hidden_leak" not in codes(F.validate_report(r, F._outlook(r), dig), "hard"), "a public number is not a leak")
     msgs = " ".join(m for f2 in (F.validate_report(report(), None, dig),) for _, m in f2["hard"] + f2["soft"])
     check(not any(v in msgs for v in ("0.37", "1.248", "12345", "0.412")), "finding messages never carry a hidden value")
+    # كل حقل يكتبه النموذج ويمكن أن يُحفظ، لا ar وحده
+    for field, rep_over, q, label in (
+            ("research_map", {"research_map": [{"section": "macro", "need": "n", "queries": ["q"], "sources": ["x.com"],
+                                                 "found": "beta -1.248 vs yields"}]}, None, "a distinctive number in research_map"),
+            ("research_map", {"research_map": [{"section": "macro", "need": "from hidden_correlations", "found": "x"}]}, None,
+             "a pack name in research_map"),
+            ("focus_zones", {"focus_zones": [{"zone": "Z1", "why": "r2 0.412 هنا"}]}, None, "a distinctive number in a focus reason"),
+            ("queries", {}, ["gold nowcast 12,345 contracts"], "a distinctive number in a search query"),
+            ("queries", {}, ["hidden_nowcasts cot"], "a pack name in a search query")):
+        r = report(**rep_over)
+        f = F.validate_report(r, F._outlook(r), dig, q)
+        check("hidden_leak" in codes(f, "hard") and field in f["leak_fields"] and f["leak_fields"] == [field],
+              f"leak detected in {field}: {label} (fields {f['leak_fields']})")
+    r = report(audit=[{"check": "f", "status": "fixed", "note": "removed beta -1.248 and hidden_correlations"}])
+    check(not F.validate_report(r, F._outlook(r), dig)["leak_fields"], "the audit itself is not scanned (it is never saved)")
+    every = [F.validate_report(report(research_map=[{"found": "beta -1.248, net 12345, hidden_nowcasts"}],
+                                      focus_zones=[{"zone": "Z1", "why": "0.412"}]), F._outlook(report()), dig, ["0.37 hidden_correlations"])]
+    msgs = " ".join(m for f2 in every for _, m in f2["hard"] + f2["soft"])
+    check(not any(v in msgs for v in ("1.248", "12345", "0.412", "0.37", "hidden_nowcasts", "hidden_correlations")),
+          "no finding message carries a hidden value or a pack name, whatever the field")
     r = report(focus_zones=[{"zone": "4050", "why": "x"}, {"zone": "Z9", "why": "y"}])
     f = F.validate_report(r, F._outlook(r), dig)
     check(not f["hard"] and {"focus_not_id", "focus_unknown"} <= codes(f, "soft"), "bad focus zones -> soft (the code drops them)")
@@ -170,8 +190,12 @@ class FakeAPI:
     def __call__(self, payload, key, beta=None, idle=300):
         self.calls.append(copy.deepcopy(payload))
         rep = self.replies.pop(0)
+        extra = []
+        if isinstance(rep, tuple):
+            rep, extra = rep
         return {"model": payload["model"], "stop_reason": "end_turn",
-                "content": [{"type": "thinking", "thinking": "", "signature": "sig"}, {"type": "text", "text": json.dumps(rep, ensure_ascii=False)}],
+                "content": [{"type": "thinking", "thinking": "", "signature": "sig"}, *extra,
+                            {"type": "text", "text": json.dumps(rep, ensure_ascii=False)}],
                 "usage": {"input_tokens": 10, "output_tokens": 20, "cache_read_input_tokens": 30, "cache_creation_input_tokens": 40,
                           "iterations": [{"type": "message", "input_tokens": 10, "output_tokens": 20}]}}
 
@@ -238,31 +262,129 @@ def test_repair(F):
     F.AI_REPAIR = "off"
 
 
-def test_manual_review(F):
-    wf = open(".github/workflows/update.yml", encoding="utf-8").read()
-    check("experiment == 'fable' && 'claude-fable-5-1'" in wf, "the manual experiment input accepts fable -> claude-fable-5-1")
-    check("github.event_name == 'schedule' && '325'" in wf and "EXPERIMENT_MODEL: ${{ github.event.inputs.experiment" in wf,
-          "scheduled runs carry no experiment input, so no review runs on its own")
+HIDDEN_CP = {"drivers": {"real_yield": {"r60": 0.37, "beta": -1.248}}, "fair_value_20d": {"model_r2": 0.412}}
+HIDDEN_NC = {"cot": {"net_est": 12345}}
+HIDDEN_STRINGS = ("1.248", "12345", "12,345", "0.412", "hidden_correlations", "hidden_nowcasts")
+
+
+def capture_logs(F):
+    lines = []
+    F.log = lambda *a, **k: lines.append(" ".join(str(x) for x in a))
+    return lines
+
+
+def test_publication_leaks(F):
+    """تقرير يسرّب في research_map ونصوص البحث وسبب منطقة: لا قيمة مخفية في أي ملف منشور ولا في سجل Actions."""
+    F.correlation_pack = lambda d: copy.deepcopy(HIDDEN_CP)
+    F.nowcast_pack = lambda d: copy.deepcopy(HIDDEN_NC)
+    lines = capture_logs(F)
+    leaky = report(research_map=[{"section": "macro", "need": "n", "queries": ["q"], "sources": ["x.com"],
+                                  "found": "beta -1.248 from hidden_correlations"}],
+                   focus_zones=[{"zone": "Z1", "why": "صافي 12,345 عقد"}])
+    query = [{"type": "server_tool_use", "id": "s1", "name": "web_search", "input": {"query": "hidden_nowcasts cot 12345"}}]
+    fake, out, err, before, after = run_report(F, [(leaky, query)], "off")
+    check(err is None and len(fake.calls) == 1 and out and out[1] is True, "AI_REPAIR=off: one request, the report itself is published as before")
+    pub = "\n".join(after.values()) + json.dumps(out[0] if out else {}, ensure_ascii=False)
+    check(not any(v in pub for v in HIDDEN_STRINGS), "no hidden value or pack name in ai_history, the research log, outlook_log or the returned report")
+    last = json.load(open("data/ai_research_log.json"))[-1]
+    check(last.get("withheld") == ["focus_zones", "queries", "research_map"] and not last["research_map"] and not last["queries"],
+          f"the research log withholds the leaking fields by name ({last.get('withheld')})")
+    check("focus" not in (out[0]["latest"] if out else {}), "a leaking focus reason is not published (no star from it)")
+    check(all('"audit"' not in v for v in after.values()), "audit is not saved anywhere")
+    logs = "\n".join(lines)
+    check(not any(v in logs for v in HIDDEN_STRINGS), "the Actions log carries no hidden value and no pack name")
+    check("not saved because of private-pack content: focus_zones, queries, research_map" in logs, "the log names the withheld fields only")
+    # تسريب في نص التقرير نفسه والإصلاح مطفأ: يُسجَّل حاسمًا، والسلوك كما وافق عليه صاحب المنصة (لا تعديل للنص)
+    lines.clear()
+    bad_ar = report(); bad_ar["ar"]["sections"][0]["body"] = "بيتا -1.248"
+    fake, out, err, before, after = run_report(F, [bad_ar], "off")
+    check(err is None and "hard: hidden_leak" in "\n".join(lines) and not any(v in "\n".join(lines) for v in HIDDEN_STRINGS),
+          "a leak in ar with AI_REPAIR=off is logged as hard, without the value (the report text is not edited by code)")
+    F.log = lambda *a, **k: None
+    F.correlation_pack = lambda d: None
+    F.nowcast_pack = lambda d: None
+
+
+def snapshot(root, skip):
+    import hashlib
+    out = {}
+    for d, _, files in os.walk(root):
+        if os.path.abspath(d).startswith(os.path.abspath(skip)) or "__pycache__" in d:
+            continue
+        for f in files:
+            p = os.path.join(d, f)
+            out[os.path.relpath(p, root)] = hashlib.sha256(open(p, "rb").read()).hexdigest()
+    return out
+
+
+def test_review_isolation(F, tmp):
+    """المراجعة اليدوية المعزولة: لا تغيّر أي ملف في المستودع، ولا تشغّل التحديث ولا التقرير اليومي، والنتيجة في out_dir وحده."""
     data = json.load(open("data.json"))
     data.setdefault("ai", {}).setdefault("latest", {})
     data["ai"]["latest"].update({"ar": report()["ar"], "outlook": {"bias": "neutral", "p": [45, 30, 25], "dirs": ["flat", "up", "down"]},
                                  "model": "claude-opus-5-5", "generated_utc": "2026-11-06T14:16:10+00:00"})
-    fake = FakeAPI([report()])
-    F._claude_stream = fake
-    before = published_files()
-    today = dt.datetime.now(dt.timezone.utc).date().isoformat()
-    path = os.path.join(F.EXP_DIR, f"fable_{today}.json")
-    if os.path.exists(path):
-        os.remove(path)
-    got = F.haiku_experiment(data, "claude-fable-5-1")
-    saved = json.load(open(got)) if got else {}
-    check(got == path and len(fake.calls) == 1 and fake.calls[0]["model"] == "claude-fable-5-1",
-          "a manual Fable review makes one request and is saved in data/experiments")
-    check(not ({"audit", "usage", "cost", "cost_30d"} & set(saved)), f"the review file has no audit, usage or cost keys ({sorted(saved)})")
-    check(before == published_files(), "the review leaves ai_history, research log and outlook_log untouched")
-    log_ = json.load(open(F.OUTLOOK_LOG))
-    check(all(e.get("model") != "claude-fable-5-1" or e.get("id") != saved.get("generated_utc") for e in log_),
-          "the review is not in the official outlook log, so it is never scored")
+    json.dump(data, open("data.json", "w"), ensure_ascii=False)       # تقرير Opus منشور تقرؤه المراجعة (نسخة الاختبار فقط)
+    out_dir = tempfile.mkdtemp(prefix="gold-review-out-")
+    F.correlation_pack = lambda d: copy.deepcopy(HIDDEN_CP)
+    F.nowcast_pack = lambda d: copy.deepcopy(HIDDEN_NC)
+    calls = {"ai_report": 0, "main": 0}
+    real_ai, real_main = F.ai_report, F.main
+    F.ai_report = lambda *a, **k: calls.__setitem__("ai_report", calls["ai_report"] + 1)
+    F.main = lambda *a, **k: calls.__setitem__("main", calls["main"] + 1)
+    try:
+        before = snapshot(tmp, out_dir)
+        fake = FakeAPI([report()])
+        F._claude_stream = fake
+        got = F.review_main("claude-fable-5-1", out_dir)
+        after = snapshot(tmp, out_dir)
+        saved = json.load(open(got)) if got else {}
+        check(len(fake.calls) == 1 and fake.calls[0]["model"] == "claude-fable-5-1", "the Fable review makes exactly one request, to claude-fable-5-1")
+        check(calls == {"ai_report": 0, "main": 0}, "the review never runs the daily report or the full update")
+        check(before == after, f"no repository file changes ({len(before)} files hashed before and after)")
+        check(got and os.path.dirname(got) == out_dir and os.listdir(out_dir) == [os.path.basename(got)],
+              "the only output is one file in the review directory (the artifact)")
+        check(not ({"audit", "usage", "cost", "cost_30d"} & set(saved)) and saved.get("model") == "claude-fable-5-1",
+              f"the review file has no audit, usage or cost keys ({sorted(saved)})")
+        log_ = json.load(open(F.OUTLOOK_LOG))
+        check(not any(e.get("model") == "claude-fable-5-1" and e.get("date") == saved.get("date") for e in log_),
+              "the review is not in the official outlook log, so it is never scored")
+        # رد مراجعة يسرّب: لا يُحفظ محتواه
+        for f in os.listdir(out_dir):
+            os.remove(os.path.join(out_dir, f))
+        leaky = report(research_map=[{"found": "beta -1.248"}])
+        F._claude_stream = FakeAPI([leaky])
+        got = F.review_main("claude-fable-5-1", out_dir)
+        txt = open(got, encoding="utf-8").read()
+        check('"withheld"' in txt and not any(v in txt for v in HIDDEN_STRINGS), "a leaking review saves only the withheld field names")
+        try:
+            F.review_main("claude-opus-5-5", out_dir)
+            check(False, "an unknown review model is refused")
+        except SystemExit:
+            check(True, "an unknown review model is refused")
+    finally:
+        F.ai_report, F.main = real_ai, real_main
+        F.correlation_pack = lambda d: None
+        F.nowcast_pack = lambda d: None
+        shutil.rmtree(out_dir, ignore_errors=True)
+    src = open("fetch_gold.py", encoding="utf-8").read()
+    tail = src[src.index('if __name__ == "__main__":'):]
+    check(tail.index('"--review" in sys.argv[1:]') < tail.index("main()"), "python fetch_gold.py --review routes to review_main, never to main()")
+
+
+def test_review_workflow():
+    wf = open(".github/workflows/review.yml", encoding="utf-8").read()
+    on = wf[wf.index("\non:"):wf.index("\npermissions:")]
+    check("workflow_dispatch" in on and not any(t in on for t in ("schedule", "push", "pull_request", "workflow_run")),
+          "review.yml runs only when the owner presses Run workflow")
+    check("contents: read" in wf and "contents: write" not in wf and "persist-credentials: false" in wf,
+          "review.yml is read-only: contents: read, and git keeps no token")
+    for bad in ("git push", "git commit", "run_loop", "gh workflow run", "update.yml", "AI_FORCE"):
+        check(bad not in wf, f"review.yml never does «{bad}»")
+    check("group: gold-review" in wf and "gold-data" not in wf, "review.yml uses its own concurrency group, not the live loop's")
+    check("fetch_gold.py --review" in wf and "upload-artifact" in wf and "retention-days: 7" in wf,
+          "review.yml runs the review entry point and keeps the result as a 7-day artifact")
+    up = open(".github/workflows/update.yml", encoding="utf-8").read()
+    check("fable" not in up, "the production update workflow has no Fable option")
 
 
 def test_guard_private_key(G):
@@ -279,7 +401,9 @@ if __name__ == "__main__":
         test_validate(F)
         test_history_false_positives(F)
         test_repair(F)
-        test_manual_review(F)
+        test_publication_leaks(F)
+        test_review_isolation(F, tmp)
+        test_review_workflow()
         test_guard_private_key(G)
     finally:
         os.chdir(ROOT)
