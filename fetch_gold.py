@@ -3014,6 +3014,17 @@ VIENNA = ZoneInfo("Europe/Vienna")
 DAILY_REPORT_NY = (9, 0)
 
 
+AI_REPAIR = os.environ.get("AI_REPAIR", "off").strip().lower()   # on = جولة إصلاح واحدة بعد فشل فحص حاسم؛ off (الافتراضي) = تسجيل فقط
+
+
+class _AIWithheld(Exception):
+    """فشل فحص حاسم بعد جولة الإصلاح: لا يُنشر التقرير الجديد، ويبقى السابق، ولا يُعاد آليًا في اليوم نفسه."""
+
+
+def _withheld_today(state, ny_date):
+    return ((state or {}).get("ai_withheld") or {}).get("date") == ny_date
+
+
 class _AIWait(Exception):
     pass
 AI_URL = "https://api.anthropic.com/v1/messages"
@@ -3141,9 +3152,10 @@ def correlation_pack(d):
             out["fair_value_20d"] = {"window": f"{rdates[-S]} to {rdates[-1]}", "gold_actual_pct": round(act, 2), "explained_by_real_yield_and_dollar_pct": round(expl, 2),
                                      "unexplained_pct": round(act - expl, 2), "model_r2": round(last[2], 2),
                                      "gold_pct_per_1pp_real_yield": round(last[0], 1), "gold_pct_per_1pct_dollar": round(last[1], 2),
-                                     "reading": ("positive unexplained = gold stronger than yields and the dollar justify "
-                                                 "(official buying, haven, Asian demand); negative = weaker (positioning "
-                                                 "liquidation, forced selling); low r2 = yields and the dollar are not driving gold now")}
+                                     "reading": ("positive unexplained = gold rose more than its usual co-movement with yields "
+                                                 "and the dollar implies; negative = less. This measure does not identify the "
+                                                 "cause, which needs independent evidence; low r2 = gold is not co-moving with "
+                                                 "yields and the dollar now")}
     # ٣) اتساع المعادن: فضة + بلاتين، وزن كل منهما عكس تذبذبه في آخر 60 جلسة
     if "silver" in fac and "platinum" in fac:
         ag, pt = fac["silver"][0], fac["platinum"][0]
@@ -3161,8 +3173,8 @@ def correlation_pack(d):
                                          "gold_20d_pct": round(sum(g[-20:]), 2), "metals_20d_pct": round(sum(met[-20:]), 2),
                                          "gold_minus_metals_20d_pct": round(sum(g[-20:]) - sum(met[-20:]), 2),
                                          "corr_60d": _corr(g[-60:], met[-60:]),
-                                         "reading": ("gold up while metals lag = gold-specific demand (central banks, haven); "
-                                                     "all up together = broad speculative metals move")}
+                                         "reading": ("gold up while metals lag = a gold-specific move; all up together = a "
+                                                     "broad metals move; neither identifies the buyer or the cause")}
     return out
 
 
@@ -3615,7 +3627,7 @@ Rules:
 - Start your three probabilities from gold_trend_and_base_rates (the historical frequency of each outcome in similar
   conditions) and move them as far as your evidence justifies, naming the reasons. Read the trend (moving averages, distance
   from the 52-week high, down-day streaks, realized volatility) as well as the fundamentals.
-- Use futures_positioning to say who is moving price: whether open interest shows fresh shorts or longs or exits, whether
+- Use futures_positioning to say who is changing positions while price moves: whether open interest shows fresh shorts or longs or exits, whether
   the largest traders are concentrating on one side, and whether Managed Money is selling at a profit or a loss versus its
   estimated average cost. Do not call a drop profit-taking unless this data supports it. Read it in layers: lead with the
   CME daily read (oi_daily_reads, freshest), then use the COT weekly 'who' to say which group moved; if they disagree, say
@@ -3624,7 +3636,7 @@ Rules:
   cuts or hikes, CPI and core CPI (YoY, last month, 3-month annualized for acceleration) and the real Fed rate.
 - When gold has fallen in recent sessions, judge whether the drop looks like forced selling to meet margin calls elsewhere
   (gold falling together with equities, VIX jumping, real yields not rising, the dollar bid) or a fundamental repricing
-  (real yields or the dollar driving it). Use the forced_selling_monitor and its historical base rates, plus physical demand
+  (a move consistent with real yields or the dollar). Use the forced_selling_monitor and its historical base rates, plus physical demand
   (Shanghai premium, EFP, ETF flows, central banks), and state how confident you are. A base rate is not a forecast.
 - research_memory lists what changed in the platform data since the previous report, what that report already found by
   search, and when the next releases are due. Do not re-search known facts unless a newer release is due or you have a
@@ -3636,9 +3648,10 @@ Rules:
   next COT report, central-bank months the IMF has not reported, the next WGC global ETF flow figure, CPI). Use them to judge what is probably happening now,
   weighted by their stated error and track record; fill the central-bank and CPI gaps by searching the sources they name.
   Never present an estimate as an official figure, and never name these models or quote their numbers.
-- hidden_correlations is private context: use its conclusions (which drivers are moving gold now, whether a usual link
-  is broken, how much of the move yields and the dollar explain, whether other metals confirm), but never name these
-  measures or quote their numbers in the report.
+- hidden_correlations is private context: use its conclusions only to test whether your reading is consistent with
+  measured co-movement (which usual links hold or are broken, how much of the move co-moves with yields and the dollar,
+  whether other metals move with gold), never as evidence of what caused a move; never name these measures or quote
+  their numbers in the report.
 - statistical_direction_filter is shown publicly under your bias: a trend regime, a tested edge (or none), volatility bands
   and a levels map. Explain in one or two sentences how today's news and data fit it. If your 14-day bias points the other
   way from the regime, or you see an edge where it says none, say why. Its numbers may be quoted.
@@ -3684,8 +3697,27 @@ Rules:
   Each scenario gets one short line on why, grounded in the data or events.
 - Write the report in Arabic only, in correct Modern Standard Arabic (فصحى). Keep technical terms in English
   (COT, EFP, ETF, Long, Short, GEX, Gamma, Open Interest).
+- Work in three passes inside this one answer, in this order.
+  1) Analyst: establish each input's date and source tier; separate official figures, early estimates and your own
+     inferences; for two sources that disagree, first decide whether they measure the same thing over the same period.
+  2) Scenario architect: start the three probabilities from gold_trend_and_base_rates, move them only by named
+     evidence, and tie each scenario to an event and/or a zone.
+  3) Critic: before you write the final JSON, check the draft against this list and fix what fails:
+     (a) every number comes from the platform data or a cited source;
+     (b) every event has a date and a source, and news more than two days old is treated as priced in;
+     (c) every move of a probability away from the base rate has a named reason;
+     (d) no causal claim without independent evidence (a dated event before the move, a known mechanism, a
+         proportionate size); correlations only test consistency;
+     (e) source conflicts are named and explained, and a difference of scope is not called a conflict;
+     (f) no number, name or measure from hidden_correlations or hidden_nowcasts;
+     (g) the bias, the probabilities and the most likely scenario are consistent, or bias_note says why they differ;
+     (h) the 14-day horizon and the +/-2% band are used as defined.
+  Report the check in "audit": at most 8 short English items, {"check": "a".."h", "status": "ok|fixed|open",
+  "note": "..."}. "audit" is read by the platform's own checks and is never published; it must not contain any number
+  from hidden_correlations or hidden_nowcasts.
 Return ONLY one JSON object, no markdown fences, with exactly this shape:
-{"outlook": {"bias": "bullish|bearish|neutral", "scenarios": [{"dir": "up|flat|down", "p": 45}, {"dir": "...", "p": 30}, {"dir": "...", "p": 25}]},
+{"audit": [{"check": "a", "status": "ok", "note": "..."}],
+ "outlook": {"bias": "bullish|bearish|neutral", "scenarios": [{"dir": "up|flat|down", "p": 45}, {"dir": "...", "p": 30}, {"dir": "...", "p": 25}]},
  "ar": {"headline": "...", "tone": "إيجابي|سلبي|محايد|متباين", "summary": ["...", "..."],
         "sections": [{"title": "...", "body": "..."}], "events": [{"title": "...", "impact": "...", "source": "https://...", "date": "YYYY-MM-DD"}],
         "watch": ["..."], "risks": "...",
@@ -3831,6 +3863,154 @@ def _outlook(rep):
     return {"bias": o["bias"], "p": p, **({"dirs": dirs} if dirs else {})}
 
 
+# ---------------------------------------------------------------- automated checks of the report (no tokens)
+HIDDEN_PACKS = ("hidden_correlations", "hidden_nowcasts")
+_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩٫٬", "0123456789.,")
+_NUM_RE = re.compile(r"(?<![\w.])-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?")
+_CAUSAL_AR = ("بسبب", "نتيجة ل", "أدى إلى", "أدّى إلى", "دفع الذهب", "دفعت الذهب", "يقود الذهب", "قاد الذهب")
+
+
+def _texts(o):
+    if isinstance(o, str):
+        yield o
+    elif isinstance(o, dict):
+        for v in o.values():
+            yield from _texts(v)
+    elif isinstance(o, list):
+        for v in o:
+            yield from _texts(v)
+
+
+def _leaves(o):
+    if isinstance(o, bool):
+        return
+    if isinstance(o, (int, float)):
+        yield o
+    elif isinstance(o, dict):
+        for v in o.values():
+            yield from _leaves(v)
+    elif isinstance(o, list):
+        for v in o:
+            yield from _leaves(v)
+
+
+def _fmt(x):
+    """تمثيل نصي ثابت لرقم كما يُكتب عادة: 0.37، 1.92، 12345."""
+    return f"{x:.4f}".rstrip("0").rstrip(".") if isinstance(x, float) else str(x)
+
+
+def _text_numbers(t):
+    return {m.group(0).replace(",", "") for m in _NUM_RE.finditer(t.translate(_DIGITS))}
+
+
+def _parse_report(resp):
+    """JSON التقرير من كتل النص في الرد؛ فشل التحليل خطأ تقني (يُعاد بعد مهلة كما كان)."""
+    text = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
+    i, j = text.find("{"), text.rfind("}")
+    try:
+        rep = json.loads(text[i:j + 1])
+        if not isinstance(rep.get("ar"), dict):
+            raise ValueError("missing ar")
+    except Exception as e:
+        raise RuntimeError(f"AI report: could not parse JSON ({e}); first chars: {text[:120]!r}")
+    return rep
+
+
+def _audit_line(rep):
+    a = rep.get("audit")
+    if not isinstance(a, list) or not a:
+        return "missing"
+    st = [str((x or {}).get("status", "")).lower() for x in a if isinstance(x, dict)]
+    return f"{len(a)} item(s), {st.count('fixed')} fixed, {st.count('open')} open"
+
+
+def validate_report(rep, outlook, digest):
+    """فحوص آلية للتقرير قبل نشره، بلا tokens. hard: ما لا يصلحه الكود ويمسّ النشر أو التقييم أو المادة 26؛
+    soft: ما يُسجَّل للمراجعة فقط. الرسائل لا تحمل أي قيمة من الطبقة المخفية (سجل Actions علني)."""
+    hard, soft = [], []
+    ar = rep.get("ar") if isinstance(rep.get("ar"), dict) else {}
+    # 1) شكل التقرير العربي الذي تعرضه الصفحة
+    if not str(ar.get("headline") or "").strip():
+        hard.append(("ar_shape", "headline is missing"))
+    if not (isinstance(ar.get("summary"), list) and any(str(x).strip() for x in ar["summary"])):
+        hard.append(("ar_shape", "summary is missing"))
+    secs = ar.get("sections")
+    if not (isinstance(secs, list) and secs and all(isinstance(x, dict) and x.get("title") and x.get("body") for x in secs)):
+        hard.append(("ar_shape", "sections are missing or have no title/body"))
+    # 2) الانحياز والاحتمالات: بدونها لا يُسجَّل توقع ولا يُقيَّم
+    if not outlook:
+        hard.append(("outlook_invalid", "bias or the three scenarios are missing or malformed"))
+    elif not outlook.get("dirs"):
+        hard.append(("outlook_invalid", "the scenarios do not cover up, flat and down exactly once"))
+    raw = [x.get("p") for x in ((rep.get("outlook") or {}).get("scenarios") or []) if isinstance(x, dict)]
+    if outlook and raw:
+        try:
+            if round(sum(float(x) for x in raw)) != 100:
+                soft.append(("p_sum", "probabilities did not sum to 100 (normalised by the code)"))
+            if [float(x) for x in raw] != sorted((float(x) for x in raw), reverse=True):
+                soft.append(("p_order", "scenarios are not listed most likely first"))
+        except (TypeError, ValueError):
+            pass
+    if outlook and outlook.get("dirs"):
+        top = outlook["dirs"][outlook["p"].index(max(outlook["p"]))]
+        if {"bullish": "up", "bearish": "down", "neutral": "flat"}[outlook["bias"]] != top:
+            note = str(((ar.get("outlook") or {}).get("bias_note")) or "").strip()
+            soft.append(("bias_not_top", "bias differs from the most likely scenario" + ("" if note else " and bias_note is empty")))
+    # 3) المادة 26: لا رقم مميَّز ولا اسم من الطبقة المخفية في نص التقرير
+    text = "\n".join(_texts(ar))
+    low = text.lower()
+    if any(k in low for k in HIDDEN_PACKS):
+        hard.append(("hidden_leak", "a private pack is named in the report"))
+    public = {k: v for k, v in (digest or {}).items() if k not in HIDDEN_PACKS}
+    pub_nums = {_fmt(x) for x in _leaves(public)} | {n for t in _texts(public) for n in _text_numbers(t)}
+    hidden = {_fmt(x) for k in HIDDEN_PACKS for x in _leaves((digest or {}).get(k))
+              if (isinstance(x, float) and x != int(x)) or abs(x) >= 1000} - pub_nums
+    sig = lambda v: len(v.lstrip("-").replace(".", "").lstrip("0"))
+    found = hidden & _text_numbers(text)
+    # رقم مميَّز (3 خانات معنوية أو أكثر، أو 1000 فأكثر) حاسم؛ رقم بمنزلتين مثل 0.37 قد يتطابق صدفةً مع نص عادي فهو إرشادي
+    if any(sig(v) >= 3 for v in found):
+        hard.append(("hidden_leak", "a distinctive number from a private pack appears in the report text"))
+    elif found:
+        soft.append(("hidden_maybe", f"{len(found)} short number(s) also found in a private pack (may be chance)"))
+    # 4) إرشادية: مناطق التركيز، والأحداث، ومصدر الأرقام، والصياغة السببية، والتدقيق
+    zones = {z.get("id") for z in ((digest or {}).get("statistical_direction_filter") or {}).get("zones") or []}
+    for z in rep.get("focus_zones") or []:
+        zid = str((z or {}).get("zone", "")) if isinstance(z, dict) else ""
+        if not re.fullmatch(r"Z\d+", zid):
+            soft.append(("focus_not_id", "a focus zone is not a zone id (dropped by the code)"))
+        elif zones and zid not in zones:
+            soft.append(("focus_unknown", f"focus zone {zid} is not in today's zones (dropped by the code)"))
+    for e in ar.get("events") or []:
+        if not str((e or {}).get("source", "")).startswith("https://"):
+            soft.append(("event_source", "an event has no https source"))
+    unsourced = _text_numbers(text) - pub_nums - {_fmt(x) for x in range(0, 101)}
+    if unsourced:
+        soft.append(("unsourced_numbers", f"{len(unsourced)} number(s) not found in the platform data"))
+    causal = sum(text.count(w) for w in _CAUSAL_AR)
+    if causal:
+        soft.append(("causal_wording", f"{causal} causal phrase(s) to review against rule 13"))
+    audit = rep.get("audit")
+    if not isinstance(audit, list) or not audit:
+        soft.append(("audit_missing", "the critic pass returned no audit"))
+    else:
+        opened = sum(1 for a in audit if isinstance(a, dict) and str(a.get("status")).lower() == "open")
+        if opened:
+            soft.append(("audit_open", f"{opened} audit item(s) left open"))
+    return {"hard": hard, "soft": soft}
+
+
+def _findings_line(f):
+    codes = lambda xs: ", ".join(sorted({c for c, _ in xs})) or "none"
+    return f"hard: {codes(f['hard'])}; soft: {codes(f['soft'])}"
+
+
+def _repair_message(hard):
+    items = "\n".join(f"- {c}: {m}" for c, m in hard)
+    return ("The platform's automated check failed on these points:\n" + items + "\n\nFix only these points and return "
+            "the full corrected JSON report in exactly the same shape. Do not search again and do not change anything "
+            "that passed.")
+
+
 def prompt_fingerprint():
     """بصمة التعليمات المرسلة إلى النموذج: قالب AI_SYSTEM (قبل وضع عدد البحث) ونص prompts/fable.md كما يُرسل.
     تُحفظ مع كل توقع في سجل الانحياز، فيُقسَّم الأداء حسب نسخة التعليمات ويُعرف أي تعديل أثّر. لا تلتقط تغيّر
@@ -3971,19 +4151,36 @@ def ai_report(data, prev, new_major, releases):
                     if u.startswith("https://") and u not in [x["url"] for x in sources]:
                         sources.append({"url": u, "title": (it.get("title") or "")[:140],
                                         **({"age": str(it["page_age"])[:40]} if it.get("page_age") else {})})
-    for b in resp.get("content", []):
-        if b.get("type") == "text":
-            text += b.get("text", "")
-    i, j = text.find("{"), text.rfind("}")
-    try:
-        rep = json.loads(text[i:j + 1])
-        if not isinstance(rep.get("ar"), dict):
-            raise ValueError("missing ar")
-    except Exception as e:
-        raise RuntimeError(f"AI report: could not parse JSON ({e}); first chars: {text[:120]!r}")
+    rep = _parse_report(resp)
     outlook = _outlook(rep)
     if not outlook:
         log("AI report: bias/scenarios missing or malformed; report kept without them")
+    # الفحص الآلي (بلا tokens). AI_REPAIR=off (الافتراضي): يُسجَّل فقط والنشر كما كان. on: جولة إصلاح واحدة تُلحَق بالمحادثة
+    # نفسها (الأدوات والتعليمات والـ effort نفسها، فتُقرأ البادئة من التخزين المؤقت)؛ إن بقي فشل حاسم يُحجب الجديد
+    try:
+        findings = validate_report(rep, outlook, digest_obj)
+    except Exception as e:
+        findings = {"hard": [], "soft": []}
+        log("AI check FAILED:", repr(e)[:160])
+    log(f"AI check: {_findings_line(findings)}; audit {_audit_line(rep)}; repair {AI_REPAIR}")
+    if findings["hard"] and AI_REPAIR == "on":
+        log("AI repair: one turn for", ", ".join(sorted({c for c, _ in findings["hard"]})))
+        payload["messages"] = payload["messages"] + [{"role": "assistant", "content": resp["content"]},
+                                                     {"role": "user", "content": _repair_message(findings["hard"])}]
+        resp = _claude_stream(payload, key, beta)
+        spent.append(resp.get("usage") or {})
+        turns.append(resp)
+        try:
+            rep2 = _parse_report(resp)
+            outlook2 = _outlook(rep2)
+            again = validate_report(rep2, outlook2, digest_obj)
+        except Exception as e:
+            again = {"hard": [("repair_parse", str(e)[:120])], "soft": []}
+        log(f"AI repair check: {_findings_line(again)}")
+        if again["hard"]:
+            raise _AIWithheld(_findings_line(again))
+        rep, outlook = rep2, outlook2
+    rep.pop("audit", None)                           # تدقيق النموذج لا يُنشر في أي ملف
     u = _usage_sum(spent)
     model = resp.get("model", AI_MODEL)
     # من كتب التقرير فعلًا: كتلة fallback تحدد نقطة التحويل، وusage.iterations يذكر كل محاولة ونموذجها
@@ -3995,6 +4192,10 @@ def ai_report(data, prev, new_major, releases):
         its = (t.get("usage") or {}).get("iterations") or []
         if its:
             log("AI served-by:", ", ".join(f"{i.get('type')}:{i.get('model', '?')}" for i in its))
+            ks = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+            log("AI iterations:", "; ".join(f"{n + 1}:" + "/".join(str(i.get(k) or 0) for k in ks) for n, i in enumerate(its)),
+                "| sum", "/".join(str(sum(i.get(k) or 0 for i in its)) for k in ks),
+                "| top-level", "/".join(str((t.get("usage") or {}).get(k) or 0) for k in ks), "(in/out/cache write/cache read)")
     cost = _cost(model, u)
     langs = {k: rep[k] for k in AI_LANGS if isinstance(rep.get(k), dict)}  # it/es اختياريتان: الواجهة تعرض الإنجليزية إن غابتا
     latest = {"date": today, "generated_utc": now.replace(microsecond=0).isoformat(), "model": model,
@@ -4042,8 +4243,9 @@ EXP_DIR = os.path.join("data", "experiments")
 
 
 def haiku_experiment(data, model, effort="xhigh"):
-    """تجربة مؤقتة ليوم واحد: نموذج ثانٍ يقرأ تقرير Opus المنشور اليوم أولًا، ثم يكتب تقريره هو.
-    لا يمسّ سجل الانحياز ولا التقرير المعروض، ويُحفظ في data/experiments. التكلفة تُكتب في سجل Actions فقط."""
+    """مراجعة يدوية فقط (مدخل experiment في التشغيل اليدوي: haiku أو fable): نموذج ثانٍ يقرأ تقرير Opus المنشور اليوم أولًا،
+    ثم يكتب تقريره هو. لا يمسّ سجل الانحياز ولا التقرير المعروض ولا يُقيَّم، ويُحفظ في data/experiments.
+    التكلفة تُكتب في سجل Actions فقط."""
     key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if not key:
         log("experiment skipped: no ANTHROPIC_API_KEY")
@@ -4733,12 +4935,16 @@ def main():
             if new_major:
                 log("AI report: held for the next daily report (9:00 New York):", ", ".join(new_major))
             raise _AIWait()
+        if new_major and not forced and _withheld_today(state, ny.date().isoformat()):
+            log("AI report: withheld today after a failed check; the previous report stays until tomorrow")
+            raise _AIWait()
         if new_major and wait_until and now_d.isoformat() < wait_until:
             # بعد فشل طلب مكلف لا نعيده كل نصف ساعة: ننتظر AI_RETRY_HOURS ثم نحاول مرة أخرى
             log(f"AI report: last attempt failed; next try after {wait_until}")
             raise _AIWait()
         ai, wrote = ai_report(data, prev, new_major, releases)
         state.pop("ai_fail", None)
+        state.pop("ai_withheld", None)
         if wrote and active:
             disc["reports"] = disc.get("reports", 0) + 1
             if ("cot" in new_major or "cot_legacy" in new_major) and today_s >= DISCOVERY_COT_FROM:
@@ -4753,6 +4959,13 @@ def main():
         status["sources"]["ai"] = {"ok": True, "checked": now, "wrote": wrote, "off": not bool(ai)}
     except _AIWait:
         state["ai_pending"] = new_major
+        if prev.get("ai"):
+            data["ai"] = _no_cost(prev["ai"])
+    except _AIWithheld as e:
+        log("AI report withheld:", str(e)[:200])
+        state["ai_withheld"] = {"date": ny.date().isoformat(), "reason": str(e)[:200]}
+        state["ai_pending"] = new_major
+        status["sources"]["ai"] = {"ok": False, "checked": now, "error": "withheld after a failed check: " + str(e)[:200]}
         if prev.get("ai"):
             data["ai"] = _no_cost(prev["ai"])
     except Exception as e:

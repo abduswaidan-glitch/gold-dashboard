@@ -58,6 +58,7 @@ FILES = [
     (".github/workflows/update.yml", "التشغيل الحي في GitHub Actions."),
     (".github/workflows/constitution.yml", "فحص الدستور واختبارات سجل الأداء على كل PR وكل دفع إلى main."),
     ("tests/test_track.py", "اختبارات انحدار لسجل الأداء: النوافذ المستقلة من السجل كاملًا، ومرآة الأداء بعد 10 توقعات، وBrier مقابل المعدل التاريخي، وثبات قفل التقييم (المادتان 19 و20)."),
+    ("tests/test_validation.py", "اختبارات الفحص الآلي للتقرير وجولة الإصلاح (بنسخ وهمية بلا API)، وفصل المراجعة اليدوية عن سجل الأداء (المادة 15)."),
     ("tests/track_ui.js", "اختبار واجهة سجل الأداء عند 390 و1280 بكسل (Playwright، يُشغَّل محليًا لا في CI)."),
     ("prompts/fable.md", "تعليمات صاحب المنصة للنموذج. يُعدَّل من GitHub مباشرة."),
     ("tradingview/gold_levels.pine", "مؤشر TradingView (المادة 23)."),
@@ -284,6 +285,7 @@ def tracked():
 COST_KEYS = {"usage", "cost", "cost_30d", "cost_usd", "input_tokens", "output_tokens",
              "cache_read_input_tokens", "cache_creation_input_tokens"}
 HIDDEN_KEYS = {"hidden_correlations", "hidden_nowcasts", "_wire", "live_wire"}
+PRIVATE_KEYS = {"audit"}        # تدقيق النموذج لنفسه (مرحلة الناقد): للفحص الآلي فقط، لا يُنشر (المادة 15)
 COST_TEXT = re.compile(r"(?:كلّف|كلفة|تكلفة|تكلّف|\bcost\b)[^\n|]{0,40}?(?:\$\s?\d|\d[\d.,]*\s?(?:دولار|USD))", re.I)
 
 
@@ -315,6 +317,9 @@ def check(values, C, ci=False):
                 if k in HIDDEN_KEYS and ("hidden", p) not in seen:
                     seen.add(("hidden", p))
                     V.append(("hidden", "26", f"حزمة مخفية منشورة: {f} {p}"))
+                if k in PRIVATE_KEYS and ("private", p) not in seen:
+                    seen.add(("private", p))
+                    V.append(("private", "15", f"تدقيق النموذج منشور: {f} {p}"))
             low = rd(f, "").lower()
             for vendor in ("menthorq", "gexbot"):
                 if vendor in low:
