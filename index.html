@@ -1643,11 +1643,15 @@ ABOUT.gex = () => [
   ['كيف تقرؤه؟', 'Positive GEX: المتعاملون يبيعون الصعود ويشترون الهبوط، فتُكبح الحركة. Negative GEX: يطاردون الحركة فتتضخم. وموقع السعر من مستويي Zero Gamma يحدد أحد الأرباع الأربعة في الأعلى. Call Wall مقاومة، وPut Wall دعم، ما لم يُكسرا بتدفق قوي.'],
   ['الحدود', 'Open Interest يتحدث مرة يوميًا، فلا يرى هذا القسم تدفقات الحجم خلال الجلسة ولا 0DTE لحظيًا كما في الاشتراكات المدفوعة. افتراض مراكز المتعاملين قد يكون خاطئًا. GLD يتبع الذهب الفوري، والمعادل على GC تقريبي. نعرض المستويات المحسوبة فقط لا بيانات Cboe الخام. التحديث كل 3 ساعات تقريبًا في أيام العمل.'],
 ];
+/* GLD market time of the snapshot's inputs (gex.market), not the fetch time: in session its time, otherwise the session close */
+const gexMk = g => { const m = (g || {}).market;
+  if (m && m.session) return m.phase === 'rth' ? fStamp.format(new Date(m.utc)) : `${'إغلاق جلسة'} ${fDay.format(toDate(m.session))}`;
+  return g && g.asof ? `${'وقت الجلب'} ${fStamp.format(new Date(g.asof))}` : ''; };
 R.gex = () => {
   const g = DATA.gex;
   let h = head('GEX على GLD: مستويات Gamma',
     'أين يكبح المتعاملون حركة الذهب وأين يضخّمونها.',
-    ['Cboe، مؤجل 15 دقيقة', g && g.asof ? `${'آخر تحديث'}: ${fStamp.format(new Date(g.asof))}` : ''], 'gex', g && g.asof ? fresh(g.asof.slice(0, 10), 4) : '');
+    ['Cboe، مؤجل 15 دقيقة', g && g.asof ? `${'بيانات السوق'}: ${gexMk(g)}` : ''], 'gex', g && g.asof ? fresh((g.market || {}).session || g.asof.slice(0, 10), 4) : '');
   h += about('gex', ABOUT.gex());
   if (!g || !g.spot) return h + noData();
   const r = g.gc_ratio, lvl = v => v == null ? '—' : `${r ? USD(v * r) : USD(v)}`, gld = v => v == null ? '' : `GLD ${bd(nf2.format(v))}`;
@@ -1657,7 +1661,7 @@ R.gex = () => {
   const fig = (label, v, sub, c = '') => `<div class="fig"><h3>${label}</h3><div class="v ${c}">${v}</div><div class="sub">${sub}</div></div>`;
   h += `<div class="figs">
     ${liveT != null ? fig('Net GEX عند سعر GC الحي', mUSD(liveT), `${liveT >= 0 ? 'موجب: تخميد' : 'سالب: تضخيم'} · GC ${bd(nf1.format(lv.price_gc))} · ${tm(lv.utc)}`, cls(liveT)) : ''}
-    ${fig('Net GEX (لقطة GLD)', mUSD(g.total_m), `${'عند سعر GLD'} ${bd(nf2.format(g.spot))} · ${tm(g.asof)}`, cls(g.total_m))}
+    ${fig('Net GEX (لقطة GLD)', mUSD(g.total_m), `${'عند سعر GLD'} ${bd(nf2.format(g.spot))} · ${gexMk(g)}`, cls(g.total_m))}
     ${fig('السعر الحالي ≈ GC', lv.price_gc ? USD(lv.price_gc) : lvl(g.spot), lv.s_gld ? `GLD ≈ ${bd(nf2.format(lv.s_gld))}` : gld(g.spot))}
     ${fig('Zero Gamma (كل الاستحقاقات)', lvl(g.zero_all), g.zero_all == null ? 'لا يوجد انقلاب قريب' : gld(g.zero_all))}
     ${fig(`${'Zero Gamma (أقرب استحقاق)'}`, lvl(g.zero_near), `${g.zero_near == null ? 'لا يوجد انقلاب قريب' : gld(g.zero_near)} · ${fDay.format(toDate(g.near_exp))}`)}
@@ -2031,7 +2035,7 @@ function digestText(){
   const gq = DATA.gex;
   if (gq && gq.spot){ const f = x => x == null ? '-' : `GLD ${nf2.format(x)}${gq.gc_ratio ? ` (≈GC ${nf0.format(x * gq.gc_ratio)})` : ''}`;
     const lq = gq.live || {};
-    out.push('', `## GEX GLD (${fStamp.format(new Date(gq.asof))})`, `${lq.total_m != null ? `Net GEX live (GC ${nf1.format(lq.price_gc)}, ${fStamp.format(new Date(lq.utc))}) ${sg(lq.total_m)}$${nf0.format(Math.abs(lq.total_m))}M / 1% | ` : ''}Net GEX snapshot ${sg(gq.total_m)}$${nf0.format(Math.abs(gq.total_m))}M / 1% | ${QUAD()[gexQuad(gq)][0]}`,
+    out.push('', `## GEX GLD (${gexMk(gq)})`, `${lq.total_m != null ? `Net GEX live (GC ${nf1.format(lq.price_gc)}, ${fStamp.format(new Date(lq.utc))}) ${sg(lq.total_m)}$${nf0.format(Math.abs(lq.total_m))}M / 1% | ` : ''}Net GEX snapshot ${sg(gq.total_m)}$${nf0.format(Math.abs(gq.total_m))}M / 1% | ${QUAD()[gexQuad(gq)][0]}`,
       `Zero Gamma ${f(gq.zero_all)} | ${'أقرب استحقاق'} ${f(gq.zero_near)} | Put Wall ${f(gq.put_wall)} | Call Wall ${f(gq.call_wall)}`); }
   const ai = DATA.ai && DATA.ai.latest, rep = ai && aiRep(ai);
   if (rep){ out.push('', `## ${'تقرير الذكاء الاصطناعي'} (${fDay.format(toDate(ai.date))})`, rep.headline || '', ...(rep.summary || []).map(s => `- ${s}`));

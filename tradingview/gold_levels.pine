@@ -204,15 +204,16 @@ if barstate.islast
             table.cell(tb, 1, 4, gm == "pos" ? "موجبة" : gm == "neg" ? "سالبة" : "—", text_color = color.white, text_size = size.small)
             table.cell(tb, 0, 5, "الإزاحة", text_color = color.gray, text_size = size.small)
             table.cell(tb, 1, 5, str.tostring(basis, "#.0"), text_color = color.white, text_size = size.small)
-            // من 6 نوفمبر: وقت السطر ووقت لقطة GEX وأساس GEX (حقول بعد المناطق؛ السطر القديم بلا هذه الحقول)
+            // من 6 نوفمبر: وقت السطر ووقت سوق GEX (وقت مدخلات اللقطة في GLD لا وقت الجلب) وأساس GEX (حقول بعد المناطق؛ السطر القديم بلا هذه الحقول)
             string lt = array.size(parts) >= 8 ? array.get(parts, 7) : ""
             string gt = array.size(parts) >= 9 ? array.get(parts, 8) : ""
             string gb = array.size(parts) >= 10 ? array.get(parts, 9) : ""
             string ltShow = str.length(lt) >= 16 ? str.replace_all(str.substring(lt, 5, 16), "T", " ") + " UTC" : "—"
-            string gtShow = str.length(gt) >= 16 ? str.replace_all(str.substring(gt, 5, 16), "T", " ") + " UTC" : "—"
+            // وقت سوق GEX: «YYYY-MM-DDclose» خارج الجلسة، أو وقت UTC داخلها (والسطر القديم وقت الجلب بالصيغة نفسها)
+            string gtShow = str.contains(gt, "close") and str.length(gt) >= 10 ? "إغلاق جلسة " + str.substring(gt, 5, 10) : str.length(gt) >= 16 ? str.replace_all(str.substring(gt, 5, 16), "T", " ") + " UTC" : "—"
             table.cell(tb, 0, 6, "وقت السطر", text_color = color.gray, text_size = size.small)
             table.cell(tb, 1, 6, ltShow, text_color = color.white, text_size = size.small)
-            table.cell(tb, 0, 7, "لقطة GEX", text_color = color.gray, text_size = size.small)
+            table.cell(tb, 0, 7, "سوق GEX", text_color = color.gray, text_size = size.small)
             table.cell(tb, 1, 7, gtShow, text_color = color.white, text_size = size.small)
             table.cell(tb, 0, 8, "أساس GEX", text_color = color.gray, text_size = size.small)
             table.cell(tb, 1, 8, gb == "live" ? "GC حي" : gb == "snap" ? "لقطة GLD" : "—", text_color = color.white, text_size = size.small)

@@ -1538,7 +1538,7 @@ def direction_filter(d, now=None):
         gex = {"regime": lv.get("regime") or ("positive" if g["spot"] >= g["zero_all"] else "negative"),
                "total_m": lv["total_m"] if lv.get("total_m") is not None else g.get("total_m"),
                "basis": "live" if lv.get("regime") else "snapshot", "live_utc": lv.get("utc"), "price_gc": lv.get("price_gc"),
-               "asof": g.get("asof"), "snapshot_total_m": g.get("total_m"),
+               "asof": g.get("asof"), "market": g.get("market") or gex_market(g), "snapshot_total_m": g.get("total_m"),
                "zero": round(g["zero_all"] * r, 1), "call_wall": round((g.get("call_wall") or 0) * r, 1) or None,
                "put_wall": round((g.get("put_wall") or 0) * r, 1) or None}
         levels += [{"id": "zero_gamma", "v": gex["zero"]}]
@@ -1629,11 +1629,16 @@ def level_zones(levels, close, su, max_zones=6):
     return out
 
 
+ZONE_ANCHORS = ("call_wall", "put_wall", "zero_gamma")
+
+
 def stable_zone_ids(df, state):
     """معرّفات ثابتة داخل الجلسة نفسها (asof نفسه): كل إعادة بناء كانت ترقّم Z1…Zn من جديد، فتتبدل المعرّفات حين
     تتغير مستويات GEX خلال اليوم، ويشير التقرير والنجمة والشارت إلى منطقة أخرى. المنطقة التي تتداخل مع منطقة محفوظة
-    ترث معرّفها (الأكبر تداخلًا، واحد لواحد)، وغيرها يأخذ رقمًا لم يُستعمل قط في هذه الجلسة؛ لا يُعاد معرّف متقاعد.
-    الترتيب بالسعر دائمًا، لا بالرقم. يُصفَّر حين يتغير asof."""
+    ترث معرّفها (الأكبر تداخلًا، واحد لواحد). ثم المرساة: منطقة بلا تطابق ترث معرّف منطقة محفوظة بلا تطابق تشترك معها
+    في مرساة GEX نفسها (Call Wall أو Put Wall أو Zero Gamma)، واحد لواحد؛ عرض منطقة الجدار نحو 10 نقاط وStrike واحد
+    في GLD نحو 11 نقطة على GC، فكل انتقال للجدار يعطي تداخلًا صفريًا. غير ذلك رقم لم يُستعمل قط في هذه الجلسة؛
+    لا يُعاد معرّف متقاعد. النجمة مربوطة بالمعرّف فتتبعه. الترتيب بالسعر دائمًا، لا بالرقم. يُصفَّر حين يتغير asof."""
     zones, asof = df.get("zones") or [], df.get("asof")
     mem = state.get("zone_ids") or {}
     if mem.get("asof") != asof:
@@ -1649,6 +1654,18 @@ def stable_zone_ids(df, state):
             continue
         got[i] = old[j]["id"]
         taken.add(j)
+    anc = lambda z: {m for m in z.get("members") or [] if m in ZONE_ANCHORS}
+    cand = sorted((-len(anc(z) & set(o.get("anchors") or [])), abs(z["lo"] + z["hi"] - o["lo"] - o["hi"]), i, j)
+                  for i, z in enumerate(zones) if i not in got for j, o in enumerate(old) if j not in taken)
+    for neg, _, i, j in cand:
+        if neg == 0:
+            break
+        if i in got or j in taken:
+            continue
+        got[i] = old[j]["id"]
+        taken.add(j)
+        log(f"zone ids: {got[i]} kept by its GEX anchor ({'+'.join(sorted(anc(zones[i]) & set(old[j]['anchors'])))}): "
+            f"{old[j]['lo']}-{old[j]['hi']} -> {zones[i]['lo']}-{zones[i]['hi']}")
     used = set(mem.get("used") or []) | {o["id"] for o in old}
     n = max([int(x[1:]) for x in used if x[1:].isdigit()] + [0])
     for i, z in enumerate(zones):
@@ -1658,7 +1675,7 @@ def stable_zone_ids(df, state):
             n += 1
             z["id"] = f"Z{n}"
         used.add(z["id"])
-    mem["zones"] = [{"id": z["id"], "lo": z["lo"], "hi": z["hi"]} for z in zones]
+    mem["zones"] = [{"id": z["id"], "lo": z["lo"], "hi": z["hi"], "anchors": sorted(anc(z))} for z in zones]
     mem["used"] = sorted(used, key=lambda x: int(x[1:]) if x[1:].isdigit() else 0)
     state["zone_ids"] = mem
     return zones
@@ -1823,7 +1840,8 @@ def _utc_stamp(iso):
 
 def tv_code(df, ai, now=None):
     """سطر واحد يُلصق في مؤشر TradingView:
-    GFL2|التاريخ|النظام|الميزة|Gamma|KEY=price;…|lo-hi:الوزن:الدور:Fable:Zn+الأعضاء,…|وقت السطر|وقت لقطة GEX|أساس GEX
+    GFL2|التاريخ|النظام|الميزة|Gamma|KEY=price;…|lo-hi:الوزن:الدور:Fable:Zn+الأعضاء,…|وقت السطر|وقت سوق GEX|أساس GEX
+    وقت سوق GEX = وقت مدخلات اللقطة في GLD لا وقت الجلب: YYYY-MM-DDTHH:MMZ داخل الجلسة، وYYYY-MM-DDclose خارجها.
     الحقول الثلاثة الأخيرة (من 6 نوفمبر) بعد المناطق، فالمؤشر القديم يقرأ السطر كما كان ويتجاهلها.
     مناطق Fable تُعلَّم فقط إن بُنيت على مستويات الجلسة نفسها، وبمعرّف ما زال موجودًا."""
     now = now or dt.datetime.now(dt.timezone.utc)
@@ -1838,8 +1856,9 @@ def tv_code(df, ai, now=None):
     edge = "long" if df.get("signal") == "long_edge" else "none"
     picked = [{**z, "why": fz[z["id"]]} for z in df.get("zones") or [] if z["id"] in fz]
     gq = df.get("gex") or {}
-    stamp = f"{_utc_stamp(now.isoformat())}|{_utc_stamp(gq.get('asof')) if gq.get('asof') else 'na'}|" \
-            f"{'live' if gq.get('basis') == 'live' else 'snap' if gq else 'na'}"
+    mk = gq.get("market") or {}       # وقت السوق لمدخلات اللقطة: داخل الجلسة وقتها UTC، وخارجها «YYYY-MM-DDclose»
+    gt = (_utc_stamp(mk["utc"]) if mk.get("phase") == "rth" else f"{mk['session']}close") if mk.get("session") else "na"
+    stamp = f"{_utc_stamp(now.isoformat())}|{gt}|{'live' if gq.get('basis') == 'live' else 'snap' if gq else 'na'}"
     return f"GFL2|{df.get('asof')}|{df.get('regime')}|{edge}|{gx}|{lv}|{zs}|{stamp}", picked
 
 
@@ -2449,6 +2468,49 @@ def gex_live(g, gc_price, now=None):
             "regime": regime, "basis": basis, "utc": now.replace(microsecond=0).isoformat()}
 
 
+CBOE_DELAY = dt.timedelta(minutes=15)
+
+
+def gex_market(g):
+    """وقت السوق لمدخلات لقطة GEX، لا وقت الجلب: last_trade_time من Cboe (توقيت نيويورك) إن وُجد، وإلا timestamp
+    الملف (UTC، يطابق وقت الجلب أثناء الجلسة ويتجمد خارجها) ناقص تأخير Cboe المعلن 15 دقيقة. داخل 09:30-16:00 نيويورك
+    في يوم عمل: phase rth بوقته. خارجها: phase close وsession آخر جلسة انتهت؛ قبل 09:30 تُقرأ الجلسة السابقة
+    (الـ Open Interest من نهاية اليوم، وسعر ما قبل الافتتاح ليس جلسة). العطل الأمريكية غير محسوبة (يوم العمل السابق)."""
+    g = g or {}
+    t, src = None, None
+    raw = g.get("cboe_last_trade")
+    if raw:
+        try:
+            t = dt.datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            t, src = (t.replace(tzinfo=NEW_YORK) if t.tzinfo is None else t), "last_trade"
+        except ValueError:
+            t = None
+    if t is None and g.get("cboe_ts"):
+        try:
+            t = dt.datetime.fromisoformat(str(g["cboe_ts"])).replace(tzinfo=dt.timezone.utc) - CBOE_DELAY
+            src = "timestamp-15m"
+        except ValueError:
+            return None
+    if t is None:
+        return None
+    ny = t.astimezone(NEW_YORK)
+    d, hm = ny.date(), (ny.hour, ny.minute)
+    try:                                       # جُلبت بعد 16:15 من يوم الجلسة: آخر صفقة 15:59 هي الإغلاق، لا جلسة جارية
+        late = dt.datetime.fromisoformat(str(g.get("asof"))) >= dt.datetime.combine(d, dt.time(16, 15), NEW_YORK)
+    except (TypeError, ValueError):
+        late = False
+    if d.weekday() < 5 and (9, 30) <= hm < (16, 0) and not late:
+        phase = "rth"
+    else:
+        phase = "close"
+        if d.weekday() >= 5 or hm < (9, 30):
+            d -= dt.timedelta(days=1)
+            while d.weekday() >= 5:
+                d -= dt.timedelta(days=1)
+    return {"session": d.isoformat(), "phase": phase, "utc": t.astimezone(dt.timezone.utc).replace(microsecond=0).isoformat(),
+            "src": src}
+
+
 def fetch_gex():
     """مستويات Gamma لصندوق GLD من بيانات Cboe المؤجلة 15 دقيقة. نحفظ المستويات المحسوبة فقط، لا الأسعار الخام."""
     j = browser_get(CBOE_URL.format("GLD"), headers={"Accept": "application/json"}).json()
@@ -2460,6 +2522,10 @@ def fetch_gex():
     g = gex_from_chain(d.get("options") or [], S, now)
     g["asof"] = now.replace(microsecond=0).isoformat()          # لحظة الجلب (UTC)؛ توقيت Cboe الخام بلا منطقة زمنية
     g["cboe_ts"] = str(j.get("timestamp") or "")
+    g["cboe_last_trade"] = str(d.get("last_trade_time") or "")
+    g["market"] = gex_market(g)
+    log(f"GEX market time: {g['market']} (raw timestamp {g['cboe_ts'] or 'absent'}, "
+        f"last_trade_time {g['cboe_last_trade'] or 'absent'})")
     gc = (load(PRICES_OUT, {}).get("last") or {}).get("price")
     live = round(gc / S, 4) if gc else None
     g["gc_ratio"] = gc_gld_ratio() or live                          # مستوى GLD × النسبة ≈ مستوى عقد الذهب GC
@@ -3500,10 +3566,13 @@ def ai_digest(d):
         g["gld_options_gamma"] = {k: gx.get(k) for k in ("asof", "spot", "total_m", "zero_all", "zero_near", "near_exp",
                                                          "call_wall", "put_wall", "gc_ratio")}
         g["gld_options_gamma"]["live"] = gx.get("live")
+        g["gld_options_gamma"]["market"] = gx.get("market")
         g["gld_options_gamma"]["note"] = ("GLD levels; multiply by gc_ratio for COMEX gold (GC) equivalents. live = Net GEX "
                                           "(USD millions per 1% move) and the gamma regime at the LIVE GC price, read from "
                                           "this snapshot's profile; use live for the current regime. total_m is the GLD "
-                                          "snapshot at asof: outside US hours GLD does not trade, so it lags GC")
+                                          "snapshot; asof is only the fetch time. market gives the GLD market time of the "
+                                          "snapshot's inputs: phase rth = in session at market.utc; phase close = the close "
+                                          "of market.session (before 09:30 New York that is the previous session)")
     tr = (d.get("outlook_track") or {}).get("summary")
     if tr and tr.get("n"):
         g["your_track_record"] = tr
@@ -4548,9 +4617,10 @@ def main():
         lvp = (load(PRICES_OUT, {}).get("last") or {}).get("price")
         live = gex_live(data.get("gex"), lvp)
         if live:
-            data["gex"] = {**data["gex"], "live": live}          # نسخة جديدة: data نسخة سطحية من prev
+            # نسخة جديدة: data نسخة سطحية من prev. وقت السوق يُعاد من حقول Cboe المحفوظة كل تحديث (اللقطات القديمة أيضًا)
+            data["gex"] = {**data["gex"], "live": live, "market": gex_market(data["gex"])}
             log(f"GEX live: GC {live['price_gc']} -> GLD {live['s_gld']}, net {live['total_m']}M ({live['regime']}, "
-                f"{live['basis']}); snapshot {data['gex'].get('total_m')}M at {data['gex'].get('asof')}")
+                f"{live['basis']}); snapshot {data['gex'].get('total_m')}M, market {data['gex'].get('market')}")
     except Exception as e:
         log("GEX live FAILED:", repr(e)[:200])
     try:
