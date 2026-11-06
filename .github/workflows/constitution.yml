@@ -27,3 +27,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python constitution_guard.py --ci
+
+      - name: اختبارات سجل الأداء
+        run: python tests/test_track.py

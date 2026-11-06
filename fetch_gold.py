@@ -1969,7 +1969,9 @@ def scorecard(data, now=None):
     ot = data.get("outlook_track") or {}
     s = ot.get("summary") or {}
     scored = [e for e in ot.get("rows") or [] if e.get("result")]
-    w = _windows([e["base"]["date"] for e in scored if e.get("base")])
+    # النوافذ المستقلة من السجل المقيَّم كاملًا (score_outlooks)، لا من rows: rows آخر 30 سطرًا فقط، فكانت النوافذ
+    # لا تتجاوز 3 أو 4 مهما طال السجل، ولا يبلغ الحكم عتبة 13 أبدًا (أُصلح 6 نوفمبر؛ القواعد والعتبات كما هي)
+    w = s.get("windows", 0)
     skill = s.get("skill")
     beat_guess = s.get("brier") is not None and s["brier"] < s.get("brier_naive", 0.667)
     if w < R["fable"]["prelim_windows"]:
@@ -3574,9 +3576,8 @@ def ai_digest(d):
                                           "snapshot; asof is only the fetch time. market gives the GLD market time of the "
                                           "snapshot's inputs: phase rth = in session at market.utc; phase close = the close "
                                           "of market.session (before 09:30 New York that is the previous session)")
-    tr = (d.get("outlook_track") or {}).get("summary")
-    if tr and tr.get("n"):
-        g["your_track_record"] = tr
+    # your_track_record = performance_mirror() أعلاه وحده (من التقييم العاشر). كان الملخص الخام يُكتب هنا فوقها متى وُجد
+    # توقع مقيَّم واحد، فوصل النموذج «إصابة 100%» من توقع واحد ولم تصله المرآة قط (أُصلح 6 نوفمبر)
     f = d.get("f13") or {}
     if f.get("periods"):
         q = f["periods"][-1]
@@ -4386,7 +4387,9 @@ def score_outlooks():
     if changed:
         save(OUTLOOK_LOG, log_)
     done = [e["result"] for e in log_ if e.get("result")]
-    summ = {"n": len(done), "pending": len(log_) - len(done)}
+    summ = {"n": len(done), "pending": len(log_) - len(done),
+            "windows": _windows([e["base"]["date"] for e in log_ if e.get("result") and e.get("base")]),
+            "windows_prelim": SC_RULES["fable"]["prelim_windows"], "windows_final": SC_RULES["fable"]["min_windows"]}
     if done:
         summ.update(hit=round(sum(r["bias_hit"] for r in done) / len(done) * 100),
                     brier=round(sum(r["brier"] for r in done) / len(done), 3), brier_naive=0.667,
@@ -4394,7 +4397,9 @@ def score_outlooks():
     based = [r for r in done if "brier_base" in r]
     if based:
         b, bb = sum(r["brier"] for r in based) / len(based), sum(r["brier_base"] for r in based) / len(based)
-        summ.update(brier_base=round(bb, 3), skill=round((1 - b / bb) * 100, 1) if bb else None, n_base=len(based))
+        # brier_paired: Brier النموذج على التوقعات نفسها التي لها معدل تاريخي، فتُقارن بـ brier_base زوجًا بزوج
+        summ.update(brier_base=round(bb, 3), brier_paired=round(b, 3), skill=round((1 - b / bb) * 100, 1) if bb else None,
+                    n_base=len(based))
     dr = outlook_direction(log_)
     if dr:
         summ["direction"] = dr

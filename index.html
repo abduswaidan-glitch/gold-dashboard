@@ -1802,15 +1802,22 @@ function trackHTML(){
   const t = DATA.outlook_track, rows = t ? t.rows.slice().reverse() : [];
   const D = DIRS(), B = BIAS();
   let h = `<section class="ai-card track"><h3>${'سجل أداء الانحياز'}</h3>
-    <p class="explain">${'كل انحياز يُقارن بعد 14 يومًا بإغلاق الذهب (GC): صعود إن زاد أكثر من 2٪، وهبوط إن نقص أكثر من 2٪، وإلا عرضي. مقياس Brier من 0 (مثالي) إلى 2؛ من يعطي كل اتجاه الثلث يحصل على 0.667، فالأقل منه أفضل من التخمين.'}</p>`;
+    <p class="explain">${'كل انحياز يُقارن بعد 14 يومًا بإغلاق الذهب (GC): صعود إن زاد أكثر من 2٪، وهبوط إن نقص أكثر من 2٪، وإلا عرضي. مقياس Brier من 0 (مثالي) إلى 2، والأقل أفضل. التوقعات اليومية تتداخل في أفق 14 يومًا، فالعيّنة الفعلية هي عدد النوافذ المستقلة لا عدد التوقعات: لا تُعرض المتوسطات قبل 13 نافذة (حكم أولي)، والحكم النهائي عند 26.'}</p>`;
   if (!rows.length) return h + `<p class="empty">${'يبدأ السجل مع أول تقرير جديد، ويظهر أول تقييم بعد 14 يومًا منه.'}</p></section>`;
   const s = t.summary;
-  if (s.n) h += `<div class="figs">
-    <div class="fig"><h3>${'توقعات مُقيَّمة'}</h3><div class="v">${bd(nf0.format(s.n))}</div><div class="sub">${'بانتظار التقييم'}: ${bd(nf0.format(s.pending))}</div></div>
-    <div class="fig"><h3>${'الانحياز أصاب'}</h3><div class="v">${bd(nf0.format(s.hit) + '%')}</div><div class="sub">${'التخمين ≈ 33٪'}</div></div>
-    <div class="fig"><h3>${'متوسط Brier'}</h3><div class="v ${s.brier < s.brier_naive ? 'up' : 'down'}">${bd(nf2.format(s.brier))}</div><div class="sub">${'التخمين'}: ${bd(nf2.format(s.brier_naive))}</div></div>
-    <div class="fig"><h3>${'احتمال النتيجة الفعلية'}</h3><div class="v">${bd(nf0.format(s.p_outcome) + '%')}</div><div class="sub">${'التخمين ≈ 33٪'}</div></div>
-    ${s.direction && s.direction.n ? `<div class="fig"><h3>${'الميل حين تحرّك السعر أكثر من 2٪'}</h3><div class="v">${s.direction.hit == null ? '—' : bd(nf0.format(s.direction.hit) + '%')}</div><div class="sub">${`من ${nf0.format(s.direction.n_lean)} نافذة · العملة = 50٪`}</div></div>` : ''}</div>`;
+  /* the sample is the number of independent 14-day windows, not the number of overlapping daily forecasts: below the
+     preliminary threshold no average (hit rate, Brier) is shown, and no figure is coloured or compared with a "guess" */
+  const w = s.windows || 0, need = s.windows_prelim || 13, fin = s.windows_final || 26, ready = w >= need;
+  const dw = (s.direction || {}).windows || 0;
+  if (s.n || s.pending) h += `<div class="figs">
+    <div class="fig"><h3>${'توقعات مُقيَّمة'}</h3><div class="v">${bd(nf0.format(s.n || 0))}</div><div class="sub">${'بانتظار التقييم'}: ${bd(nf0.format(s.pending || 0))}</div></div>
+    <div class="fig"><h3>${'النوافذ المستقلة'}</h3><div class="v">${bd(nf0.format(w))}</div><div class="sub">${`الحكم الأولي عند ${nf0.format(need)} والنهائي عند ${nf0.format(fin)}`}</div></div>
+    ${ready ? `<div class="fig"><h3>${'الانحياز أصاب'}</h3><div class="v">${bd(nf0.format(s.hit) + '%')}</div><div class="sub">${`من ${nf0.format(s.n)} توقعًا متداخلًا؛ خط الأساس قيد المراجعة`}</div></div>
+    <div class="fig"><h3>${'متوسط Brier'}</h3><div class="v">${s.brier_base != null && s.brier_paired != null ? bd(nf2.format(s.brier_paired)) : bd(nf2.format(s.brier))}</div><div class="sub">${s.brier_base != null && s.brier_paired != null ? `${'المعدل التاريخي'}: ${bd(nf2.format(s.brier_base))} · ${`على ${nf0.format(s.n_base)} توقعًا لها معدل تاريخي`}` : 'لا مقارنة بالمعدل التاريخي بعد'}</div></div>
+    <div class="fig"><h3>${'احتمال النتيجة الفعلية'}</h3><div class="v">${bd(nf0.format(s.p_outcome) + '%')}</div><div class="sub">${'متوسط ما أعطاه النموذج للنتيجة التي وقعت'}</div></div>` : ''}
+    ${ready && dw >= need && s.direction.n ? `<div class="fig"><h3>${'الميل حين تحرّك السعر أكثر من 2٪'}</h3><div class="v">${s.direction.hit == null ? '—' : bd(nf0.format(s.direction.hit) + '%')}</div><div class="sub">${`من ${nf0.format(s.direction.n_lean)} توقعًا في ${nf0.format(dw)} نافذة مستقلة`}</div></div>` : ''}</div>
+    ${ready ? `<p class="muted">${w < fin ? `مؤشر أولي (${nf0.format(w)} من ${nf0.format(fin)} نافذة). لا تلوين ولا حكم بالمهارة قبل حساب فاصل الثقة.` : `بلغت العيّنة عتبة الحكم النهائي (${nf0.format(w)} نافذة).`}</p>`
+      : `<p class="muted">${`عيّنة غير كافية للحكم: ${nf0.format(w)} من ${nf0.format(need)} نوافذ مستقلة. نسبة الإصابة ومتوسط Brier لا يُعرضان قبل ذلك، لأن قلة النوافذ تجعل أي نسبة مضلِّلة. نتيجة كل توقع في الجدول أدناه.`}</p>`}`;
   h += `<div class="tablebox"><table data-hm="3"><thead><tr><th>${'التاريخ'}</th><th>${'الانحياز'}</th><th>${bd(`${D.up[0]} / ${D.flat[0]} / ${D.down[0]}`)}</th><th class="n">${'سعر البداية'}</th><th class="n">${'بعد 14 يومًا'}</th><th>${'النتيجة'}</th><th class="n">Brier</th></tr></thead><tbody>
     ${rows.map(e => { const p = Object.fromEntries(e.dirs.map((d, i) => [d, e.p[i]])), r = e.result;
       const due = new Date(toDate(e.base.date).getTime() + t.days * 864e5);
