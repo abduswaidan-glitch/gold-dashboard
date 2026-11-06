@@ -1994,8 +1994,10 @@ def scorecard(data, now=None):
                     "beats_guessing": (s["brier"] < s["brier_naive"]) if enough else None,
                     "brier_paired": s.get("brier_paired") if skill is not None else None,
                     "brier_base_rate": s.get("brier_base") if skill is not None else None, "skill_vs_base_pct": skill,
+                    # model: من سجل التوقع نفسه، لا من model_now (التوقعات القديمة كتبها نموذج آخر)
                     "scored_this_week": [{"date": e["date"], "bias": e["bias"], "p": dict(zip(e["dirs"], e["p"])),
-                                          "outcome": e["result"]["outcome"], "ret": e["result"]["ret"], "brier": e["result"]["brier"]}
+                                          "outcome": e["result"]["outcome"], "ret": e["result"]["ret"], "brier": e["result"]["brier"],
+                                          "model": e.get("model")}
                                          for e in scored if e["result"]["date"] >= week_ago]}
     # 3ب) اتجاه Fable وحده (النوافذ الحاسمة فقط): تحتاج نحو سنتين لـ 26 نافذة مستقلة. قاعدة الحكم كما هي (المادة 19)؛
     # المتوسطات تغيب قبل العتبة الأولية (الملخص لا يحملها أصلًا قبلها)

@@ -12,10 +12,12 @@
 3) قبل 13 نافذة لا متوسطات ولا beats_guessing (null)، في الإجمالي ولكل نموذج ولكل نسخة تعليمات.
 4) سجل الأداء يصل النموذج من مرآة الأداء وحدها بعد 10 توقعات مقيَّمة: 1 و9 → لا شيء، 10 → المرآة.
 5) brier_base وbrier_paired والمهارة تطابق حسابًا مستقلًا وحالة يدوية.
+5أ) كل سجل فردي في fable.scored_this_week يحمل نموذج ذلك التوقع من السجل نفسه، لا model_now.
 5ب) fable_direction: قبل 13 نافذة حاسمة not_yet وmetrics_withheld وكل المتوسطات فارغة؛ عند 13 و26 تظهر وتطابق حسابًا
    مستقلًا، والحكم يتبع القاعدة المكتوبة كما هي (المهارة إن حُسبت، وإلا إصابة > 50% وBrier < 0.25).
 6) قواعد التقييم وأفقها ونطاقها وعتباتها كما هي، وبصمة القفل مطابقة للدستور.
 """
+import datetime as dt
 import json
 import os
 import re
@@ -242,6 +244,35 @@ def test_direction(F):
             check(D.get("verdict") == want, f"{tag}: verdict {D.get('verdict')} follows the written rule ({want})")
 
 
+def test_scored_this_week_model(F):
+    """كل سجل في fable.scored_this_week يحمل النموذج الذي كتب التوقع نفسه، لا model_now."""
+    log_ = synthetic(60, varied=True)
+    models = ["claude-fable-5-1", "claude-opus-5-5", None]
+    for i, e in enumerate(log_):
+        m = models[i % 3]
+        if m is None:
+            e.pop("model", None)          # توقع قديم بلا حقل model
+        else:
+            e["model"] = m
+    by_date = {e["date"]: e.get("model") for e in log_}
+    json.dump(log_, open(F.OUTLOOK_LOG, "w"))
+    tr = F.score_outlooks()
+    d = json.load(open("data.json"))
+    d["outlook_track"] = tr
+    last_result = max(e["result"]["date"] for e in tr["rows"] if e.get("result"))
+    now = dt.datetime.fromisoformat(last_result + "T12:00:00+00:00")     # أسبوع ينتهي عند آخر تقييم
+    week = F.scorecard(d, now=now)["fable"]["scored_this_week"]
+    keys = {"date", "bias", "p", "outcome", "ret", "brier", "model"}
+    check(len(week) > 0, f"scored_this_week has records for the week ending {last_result} ({len(week)})")
+    check(all(set(r) == keys for r in week), f"each record has exactly {sorted(keys)}")
+    check(all(r["model"] == by_date[r["date"]] for r in week), "each record's model is the model of that forecast")
+    fable = [r for r in week if by_date[r["date"]] == "claude-fable-5-1"]
+    none = [r for r in week if by_date[r["date"]] is None]
+    check(fable and all(r["model"] == "claude-fable-5-1" != F.AI_MODEL for r in fable),
+          f"a Fable forecast stays Fable, not model_now {F.AI_MODEL} ({len(fable)} records)")
+    check(none and all(r["model"] is None for r in none), f"a forecast with no model gives null, not model_now ({len(none)} records)")
+
+
 def test_real_log(F):
     shutil.copy(os.path.join(ROOT, "data", "outlook_log.json"), F.OUTLOOK_LOG)
     tr = F.score_outlooks()
@@ -253,6 +284,9 @@ def test_real_log(F):
     check(sc.get("independent_windows") == full, f"real log ({len(scored)} scored): scorecard windows == full-log windows ({full})")
     if full < 13:
         no_aggregates(tr["summary"], sc, "real log")
+    log_models = {e["date"]: e.get("model") for e in json.load(open(F.OUTLOOK_LOG))}
+    wk = F.scorecard(d)["fable"].get("scored_this_week") or []
+    check(all(r.get("model") == log_models.get(r["date"]) for r in wk), f"real log: scored_this_week models match the log ({len(wk)} records)")
     D = F.scorecard(d)["fable_direction"]
     if D.get("independent_windows", 0) < 13:
         direction_withheld(D, tr["summary"], "real log")
@@ -330,6 +364,7 @@ if __name__ == "__main__":
         test_few_base(F)
         test_small_samples(F)
         test_direction(F)
+        test_scored_this_week_model(F)
         test_real_log(F)
         test_brier_base(F)
         test_rules_and_lock(F, G)
