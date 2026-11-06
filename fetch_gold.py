@@ -1969,24 +1969,38 @@ def scorecard(data, now=None):
     ot = data.get("outlook_track") or {}
     s = ot.get("summary") or {}
     scored = [e for e in ot.get("rows") or [] if e.get("result")]
-    w = _windows([e["base"]["date"] for e in scored if e.get("base")])
-    skill = s.get("skill")
-    beat_guess = s.get("brier") is not None and s["brier"] < s.get("brier_naive", 0.667)
-    if w < R["fable"]["prelim_windows"]:
+    # النوافذ المستقلة من السجل المقيَّم كاملًا (score_outlooks)، لا من rows: rows آخر 30 سطرًا فقط، فكانت النوافذ
+    # لا تتجاوز 3 أو 4 مهما طال السجل، ولا يبلغ الحكم عتبة 13 أبدًا (أُصلح 6 نوفمبر؛ القواعد والعتبات كما هي)
+    need, fin = R["fable"]["prelim_windows"], R["fable"]["min_windows"]
+    w, wb = s.get("windows", 0), s.get("windows_base", 0)
+    # معيار النجاح مهارة Brier مقابل المعدل التاريخي، فالحكم يُعدّ على النوافذ التي فيها هذه المقارنة فعلًا (توقع مقيَّم
+    # له معدل تاريخي). قبل 13 منها، أو بلا مهارة محسوبة، يبقى «لم يكتمل»: غياب الدليل ليس حكمًا سلبيًا (أُصلح 6 نوفمبر)
+    skill = s.get("skill") if wb >= need else None
+    if skill is None:
         v = "not_yet"
-    elif w < R["fable"]["min_windows"]:
-        v = "preliminary_positive" if (skill or 0) > 0 else "preliminary_negative"
+    elif wb < fin:
+        v = "preliminary_positive" if skill > 0 else "preliminary_negative"
     else:
-        v = "pass" if (skill or 0) > 0 else "fail"
+        v = "pass" if skill > 0 else "fail"
+    enough = w >= need and s.get("brier") is not None     # المتوسطات (الإصابة وBrier) بعد 13 نافذة مستقلة فقط
     week_ago = (now - dt.timedelta(days=7)).date().isoformat()
-    out["fable"] = {"verdict": v, "model_now": AI_MODEL, "by_model": s.get("by_model") or {}, "scored": s.get("n", 0), "pending": s.get("pending", 0), "independent_windows": w,
-                    "need": R["fable"]["min_windows"], "hit_pct": s.get("hit"), "brier": s.get("brier"),
-                    "brier_guess": s.get("brier_naive", 0.667), "brier_base_rate": s.get("brier_base"), "skill_vs_base_pct": skill,
-                    "beats_guessing": beat_guess,
+    out["fable"] = {"verdict": v, "model_now": AI_MODEL, "by_model": s.get("by_model") or {}, "scored": s.get("n", 0),
+                    "pending": s.get("pending", 0), "independent_windows": w, "windows_with_base_rate": wb,
+                    "progress": {"windows": wb, "need_prelim": need, "need_final": fin,
+                                 "counted_on": "scored forecasts that carry a historical base rate"},
+                    "need": fin, "metrics_withheld": not enough,
+                    "hit_pct": s.get("hit") if enough else None, "brier": s.get("brier") if enough else None,
+                    "brier_guess": s.get("brier_naive") if enough else None,
+                    "beats_guessing": (s["brier"] < s["brier_naive"]) if enough else None,
+                    "brier_paired": s.get("brier_paired") if skill is not None else None,
+                    "brier_base_rate": s.get("brier_base") if skill is not None else None, "skill_vs_base_pct": skill,
+                    # model: من سجل التوقع نفسه، لا من model_now (التوقعات القديمة كتبها نموذج آخر)
                     "scored_this_week": [{"date": e["date"], "bias": e["bias"], "p": dict(zip(e["dirs"], e["p"])),
-                                          "outcome": e["result"]["outcome"], "ret": e["result"]["ret"], "brier": e["result"]["brier"]}
+                                          "outcome": e["result"]["outcome"], "ret": e["result"]["ret"], "brier": e["result"]["brier"],
+                                          "model": e.get("model")}
                                          for e in scored if e["result"]["date"] >= week_ago]}
-    # 3ب) اتجاه Fable وحده (النوافذ الحاسمة فقط): تحتاج نحو سنتين لـ 26 نافذة مستقلة
+    # 3ب) اتجاه Fable وحده (النوافذ الحاسمة فقط): تحتاج نحو سنتين لـ 26 نافذة مستقلة. قاعدة الحكم كما هي (المادة 19)؛
+    # المتوسطات تغيب قبل العتبة الأولية (الملخص لا يحملها أصلًا قبلها)
     dr = s.get("direction") or {}
     w = dr.get("windows", 0)
     good = (dr.get("skill") or 0) > 0 if dr.get("skill") is not None else ((dr.get("hit") or 0) > 50 and (dr.get("brier") or 1) < 0.25)
@@ -1996,10 +2010,13 @@ def scorecard(data, now=None):
         v = "preliminary_positive" if good else "preliminary_negative"
     else:
         v = "pass" if good else "fail"
+    dok = w >= R["fable_direction"]["prelim_windows"]
     out["fable_direction"] = {"verdict": v, "decisive": dr.get("n", 0), "independent_windows": w,
-                              "need": R["fable_direction"]["min_windows"], "lean_hit_pct": dr.get("hit"), "n_lean": dr.get("n_lean", 0),
-                              "brier": dr.get("brier"), "brier_coin": 0.25, "brier_base_rate": dr.get("brier_base"),
-                              "skill_vs_base_pct": dr.get("skill")}
+                              "need": R["fable_direction"]["min_windows"], "metrics_withheld": not dok,
+                              "lean_hit_pct": dr.get("hit") if dok else None, "n_lean": dr.get("n_lean", 0),
+                              "brier": dr.get("brier") if dok else None, "brier_coin": 0.25 if dok else None,
+                              "brier_base_rate": dr.get("brier_base") if dok else None,
+                              "skill_vs_base_pct": dr.get("skill") if dok else None}
     # 4) المستويات: GEX مقابل المستويات العادية (σ وأعلى/أدنى سابق)
     lv = tr.get("levels") or {}
     gx = lv.get("gex") or {}
@@ -3574,9 +3591,8 @@ def ai_digest(d):
                                           "snapshot; asof is only the fetch time. market gives the GLD market time of the "
                                           "snapshot's inputs: phase rth = in session at market.utc; phase close = the close "
                                           "of market.session (before 09:30 New York that is the previous session)")
-    tr = (d.get("outlook_track") or {}).get("summary")
-    if tr and tr.get("n"):
-        g["your_track_record"] = tr
+    # your_track_record = performance_mirror() أعلاه وحده (من التقييم العاشر). كان الملخص الخام يُكتب هنا فوقها متى وُجد
+    # توقع مقيَّم واحد، فوصل النموذج «إصابة 100%» من توقع واحد ولم تصله المرآة قط (أُصلح 6 نوفمبر)
     f = d.get("f13") or {}
     if f.get("periods"):
         q = f["periods"][-1]
@@ -4385,41 +4401,43 @@ def score_outlooks():
         changed = True
     if changed:
         save(OUTLOOK_LOG, log_)
-    done = [e["result"] for e in log_ if e.get("result")]
-    summ = {"n": len(done), "pending": len(log_) - len(done)}
-    if done:
-        summ.update(hit=round(sum(r["bias_hit"] for r in done) / len(done) * 100),
-                    brier=round(sum(r["brier"] for r in done) / len(done), 3), brier_naive=0.667,
-                    p_outcome=round(sum(r["p_outcome"] for r in done) / len(done)))
-    based = [r for r in done if "brier_base" in r]
-    if based:
-        b, bb = sum(r["brier"] for r in based) / len(based), sum(r["brier_base"] for r in based) / len(based)
-        summ.update(brier_base=round(bb, 3), skill=round((1 - b / bb) * 100, 1) if bb else None, n_base=len(based))
+    need = SC_RULES["fable"]["prelim_windows"]
+    summ = {**_track_stats(log_, need), "windows_prelim": need, "windows_final": SC_RULES["fable"]["min_windows"]}
+    summ["metrics_withheld"] = "hit" not in summ          # الصفحة والبريد يقرآن هذا الملخص: لا متوسطات قبل العتبة
     dr = outlook_direction(log_)
     if dr:
-        summ["direction"] = dr
-    # كل نموذج على حدة، كي لا يختلط سجل نموذج بآخر عند التبديل
-    byx = {}
+        dneed = SC_RULES["fable_direction"]["prelim_windows"]
+        summ["direction"] = dr if dr["windows"] >= dneed else {k: dr[k] for k in ("n", "n_lean", "windows") if k in dr}
+    # كل نموذج على حدة، وكل نسخة تعليمات على حدة (بصمة AI_SYSTEM وprompts/fable.md؛ ما قبل 6 نوفمبر بلا بصمة)،
+    # بالقاعدة نفسها: الأعداد دائمًا، والمتوسطات بعد عتبة النوافذ في المجموعة نفسها
+    byx, byp = {}, {}
     for e in log_:
-        if e.get("result"):
-            byx.setdefault(e.get("model") or "?", []).append(e["result"])
-    summ["by_model"] = {m: {"n": len(rs), "hit": round(sum(r["bias_hit"] for r in rs) / len(rs) * 100),
-                            "brier": round(sum(r["brier"] for r in rs) / len(rs), 3),
-                            **({"brier_base": round(sum(r["brier_base"] for r in rs) / len(rs), 3)} if all("brier_base" in r for r in rs) else {})}
-                        for m, rs in byx.items()}
-    # كل نسخة تعليمات على حدة (بصمة AI_SYSTEM وprompts/fable.md)، كي يُعرف أثر كل تعديل؛ ما قبل 6 نوفمبر بلا بصمة
-    byp = {}
-    for e in log_:
-        x = byp.setdefault(e.get("prompt") or "unrecorded", {"since": e.get("date"), "rs": [], "pending": 0})
-        if e.get("result"):
-            x["rs"].append(e["result"])
-        else:
-            x["pending"] += 1
-    summ["by_prompt"] = {k: {"since": v["since"], "n": len(v["rs"]), "pending": v["pending"],
-                             **({"hit": round(sum(r["bias_hit"] for r in v["rs"]) / len(v["rs"]) * 100),
-                                 "brier": round(sum(r["brier"] for r in v["rs"]) / len(v["rs"]), 3)} if v["rs"] else {})}
-                         for k, v in byp.items()}
+        byx.setdefault(e.get("model") or "?", []).append(e)
+        byp.setdefault(e.get("prompt") or "unrecorded", []).append(e)
+    summ["by_model"] = {m: _track_stats(es, need) for m, es in byx.items()}
+    summ["by_prompt"] = {k: {"since": es[0].get("date"), **_track_stats(es, need)} for k, es in byp.items()}
     return {"summary": summ, "days": OUTLOOK_DAYS, "band": OUTLOOK_BAND * 100, "rows": log_[-30:]}
+
+
+def _track_stats(es, need):
+    """إحصاءات مجموعة توقعات (المادة 20): الأعداد والنوافذ المستقلة دائمًا. نسبة الإصابة ومتوسط Brier واحتمال النتيجة
+    بعد `need` نافذة مستقلة من التوقعات المقيَّمة فقط. والمقارنة بالمعدل التاريخي (brier_base وbrier_paired وskill)
+    بعد `need` نافذة من التوقعات المقيَّمة التي لها معدل تاريخي فقط. قبل ذلك تغيب، فلا يُقرأ غياب الدليل صفرًا."""
+    scored = [e for e in es if e.get("result")]
+    based = [e for e in scored if "brier_base" in e["result"]]
+    dates = lambda xs: [e["base"]["date"] for e in xs if e.get("base")]
+    out = {"n": len(scored), "pending": len(es) - len(scored), "windows": _windows(dates(scored)),
+           "n_base": len(based), "windows_base": _windows(dates(based))}
+    rs = [e["result"] for e in scored]
+    if rs and out["windows"] >= need:
+        out.update(hit=round(sum(r["bias_hit"] for r in rs) / len(rs) * 100), brier=round(sum(r["brier"] for r in rs) / len(rs), 3),
+                   brier_naive=0.667, p_outcome=round(sum(r["p_outcome"] for r in rs) / len(rs)))
+    if based and out["windows_base"] >= need:
+        b = sum(e["result"]["brier"] for e in based) / len(based)
+        bb = sum(e["result"]["brier_base"] for e in based) / len(based)
+        # brier_paired: Brier النموذج على التوقعات نفسها التي لها معدل تاريخي، فتُقارن بـ brier_base زوجًا بزوج
+        out.update(brier_base=round(bb, 3), brier_paired=round(b, 3), skill=round((1 - b / bb) * 100, 1) if bb else None)
+    return out
 
 
 def outlook_direction(log_):
