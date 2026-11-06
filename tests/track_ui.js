@@ -2,7 +2,7 @@
 //   python tests/test_track.py --fixtures /tmp/fx && node tests/track_ui.js /tmp/fx
 // يخدم المستودع على منفذ محلي، ويستبدل data.json بكل ملف من ملفات الاختبار، ولا يكتب في المستودع شيئًا.
 // يثبت: لا أخطاء JS، ولا تمرير أفقي، ولا تلوين للأرقام، ولا «تخمين» ولا 33٪ ولا 0.667، ولا متوسطات قبل 13 نافذة،
-// وبعدها Brier مقابل المعدل التاريخي.
+// والمقارنة بالمعدل التاريخي فقط بعد 13 نافذة لها معدل تاريخي، و«لا حكم بالمهارة» قبلها حتى لو اكتملت النوافذ.
 const {chromium} = require('playwright');
 const {spawn} = require('child_process');
 const path = require('path');
@@ -21,7 +21,7 @@ const check = (ok, msg) => { console.log((ok ? 'PASS ' : 'FAIL ') + msg); if (!o
   await new Promise(r => setTimeout(r, 800));
   const b = await chromium.launch();
   try {
-    for (const name of ['real', 'n10', 'old', 'prelim', 'final']) {
+    for (const name of ['real', 'n10', 'old', 'prelim', 'final', 'nobase', 'fewbase']) {
       for (const width of [390, 1280]) {
         const p = await b.newPage({viewport: {width, height: 900}});
         const errs = []; p.on('pageerror', e => errs.push(e.message));
@@ -49,8 +49,12 @@ const check = (ok, msg) => { console.log((ok ? 'PASS ' : 'FAIL ') + msg); if (!o
           check(!r.heads.some(h => /أصاب|Brier|احتمال النتيجة|الميل/.test(h)), `${tag}: no averages below 13 windows (${r.heads.join(' | ')})`);
           check(!r.vals.some(v => v.includes('%')), `${tag}: no percentage shown (${r.vals.join(' | ')})`);
           check(r.text.includes('عيّنة غير كافية'), `${tag}: says the sample is not enough`);
+        } else if (name === 'nobase' || name === 'fewbase') {
+          check(r.heads.includes('متوسط Brier'), `${tag}: descriptive averages shown after 13 windows`);
+          check(!/المعدل التاريخي:\s*\d/.test(r.outside) && r.outside.includes('لا مقارنة بالمعدل التاريخي'), `${tag}: no comparison with the base rate`);
+          check(r.outside.includes('لا حكم بالمهارة بعد') && !/مؤشر أولي|عتبة الحكم النهائي/.test(r.outside), `${tag}: says there is no skill verdict yet`);
         } else {
-          check(r.heads.includes('متوسط Brier') && r.text.includes('المعدل التاريخي'), `${tag}: Brier shown against the historical base rate`);
+          check(r.heads.includes('متوسط Brier') && /المعدل التاريخي:\s*\d/.test(r.outside), `${tag}: Brier shown against the historical base rate`);
           check(r.text.includes(name === 'prelim' ? 'مؤشر أولي' : 'عتبة الحكم النهائي'), `${tag}: labelled ${name === 'prelim' ? 'preliminary' : 'final threshold'}`);
         }
         await p.close();
