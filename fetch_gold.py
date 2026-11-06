@@ -15,6 +15,7 @@ fetch_gold.py
 """
 import bisect
 import csv
+import hashlib
 import datetime as dt
 import io
 import json
@@ -3814,6 +3815,13 @@ def _outlook(rep):
     return {"bias": o["bias"], "p": p, **({"dirs": dirs} if dirs else {})}
 
 
+def prompt_fingerprint():
+    """بصمة التعليمات المرسلة إلى النموذج: قالب AI_SYSTEM (قبل وضع عدد البحث) ونص prompts/fable.md كما يُرسل.
+    تُحفظ مع كل توقع في سجل الانحياز، فيُقسَّم الأداء حسب نسخة التعليمات ويُعرف أي تعديل أثّر. لا تلتقط تغيّر
+    ملاحظات البيانات داخل الملخص (digest) ولا تغيّر النموذج (يُحفظ في model)."""
+    return hashlib.sha256((AI_SYSTEM + "\n--owner--\n" + _owner_prompt()).encode("utf-8")).hexdigest()[:10]
+
+
 def _owner_prompt():
     """نص prompts/fable.md بدون تعليقات HTML، أو فارغ إن لم يوجد الملف."""
     try:
@@ -3987,7 +3995,8 @@ def ai_report(data, prev, new_major, releases):
         olog = load(OUTLOOK_LOG, [])
         br = (digest_obj.get("gold_trend_and_base_rates") or {}).get("base_rates_10_sessions") or {}
         br = br.get("same_week_bucket_and_ma200_side") or next(iter(br.values()), None)
-        olog.append({"id": latest["generated_utc"], "date": today, "model": model, "bias": outlook["bias"], "p": outlook["p"],
+        olog.append({"id": latest["generated_utc"], "date": today, "model": model, "prompt": prompt_fingerprint(),
+                     "bias": outlook["bias"], "p": outlook["p"],
                      "dirs": outlook["dirs"], "base": {"date": str(last_price.get("time") or today)[:10], "price": last_price["price"]},
                      **({"base_rates": {k: br[k] for k in ("up", "flat", "down")}} if br else {})})
         save(OUTLOOK_LOG, olog[-300:])
@@ -4398,6 +4407,18 @@ def score_outlooks():
                             "brier": round(sum(r["brier"] for r in rs) / len(rs), 3),
                             **({"brier_base": round(sum(r["brier_base"] for r in rs) / len(rs), 3)} if all("brier_base" in r for r in rs) else {})}
                         for m, rs in byx.items()}
+    # كل نسخة تعليمات على حدة (بصمة AI_SYSTEM وprompts/fable.md)، كي يُعرف أثر كل تعديل؛ ما قبل 6 نوفمبر بلا بصمة
+    byp = {}
+    for e in log_:
+        x = byp.setdefault(e.get("prompt") or "unrecorded", {"since": e.get("date"), "rs": [], "pending": 0})
+        if e.get("result"):
+            x["rs"].append(e["result"])
+        else:
+            x["pending"] += 1
+    summ["by_prompt"] = {k: {"since": v["since"], "n": len(v["rs"]), "pending": v["pending"],
+                             **({"hit": round(sum(r["bias_hit"] for r in v["rs"]) / len(v["rs"]) * 100),
+                                 "brier": round(sum(r["brier"] for r in v["rs"]) / len(v["rs"]), 3)} if v["rs"] else {})}
+                         for k, v in byp.items()}
     return {"summary": summ, "days": OUTLOOK_DAYS, "band": OUTLOOK_BAND * 100, "rows": log_[-30:]}
 
 
