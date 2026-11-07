@@ -28,7 +28,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python constitution_guard.py --ci
 
-      - name: اختبارات سجل الأداء
+      - name: اختبارات سجل الأداء والأخبار
         run: |
           pip install requests          # fetch_gold.py يستوردها في أعلاه؛ الاختبار نفسه لا يتصل بالشبكة
           python tests/test_track.py
+          python tests/test_news.py
