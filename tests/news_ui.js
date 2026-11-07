@@ -14,7 +14,10 @@ const MAC = {updated: iso(1), items: [
   {id: 2, utc: iso(5), title_en: 'Gold climbs as Treasury yields fall', title_ar: 'الذهب يرتفع', labels: []},
   {id: 3, utc: iso(7), title_en: 'Apple unveils new phone', title_ar: 'أبل تكشف هاتفًا', labels: []},
   {id: 4, utc: iso(9), title_en: 'OPEC+ agrees deeper output cut, Iran warns', title_ar: 'أوبك+ تعمّق الخفض', labels: []},
-  {id: 5, utc: iso(11), title_en: 'Soybean oilseed exports rise', title_ar: 'صادرات البذور الزيتية', labels: []}]};
+  {id: 5, utc: iso(11), title_en: 'Soybean oilseed exports rise', title_ar: 'صادرات البذور الزيتية', labels: []},
+  {id: 6, utc: iso(13), title_en: 'US and Iran near peace deal to reopen the Strait of Hormuz', title_ar: 'اتفاق سلام قريب لفتح هرمز', labels: []},
+  {id: 7, utc: iso(15), title_en: 'Taiwan Strait drills unsettle markets', title_ar: 'مناورات مضيق تايوان', labels: []},
+  {id: 8, utc: iso(17), title_en: 'Trade war fears weigh on stocks', title_ar: 'مخاوف الحرب التجارية', labels: []}]};
 const fails = [];
 const check = (ok, msg) => { console.log((ok ? 'PASS ' : 'FAIL ') + msg); if (!ok) fails.push(msg); };
 
@@ -39,18 +42,19 @@ const check = (ok, msg) => { console.log((ok ? 'PASS ' : 'FAIL ') + msg); if (!o
       let r = await read();
       check(r.chips.length === 3, `${tag}: three filter chips (${r.chips.map(c => c[1]).join(' | ')})`);
       const count = f => Number(((r.chips.find(c => c[0] === f) || [])[1] || '').replace(/[^\d]/g, ''));
-      // الذهب 3: عنوان برنت يذكر attack وعنوان أوبك يذكر Iran، فيلتقطهما فلتر الذهب القائم أيضًا (سلوكه لم يتغير)
-      check(count('all') === 5 && count('gold') === 3 && count('oil') === 2, `${tag}: counts all 5, gold 3, oil 2`);
-      check(r.rows.length === 5 && r.oilTags === 2, `${tag}: "all" shows 5 rows with 2 oil tags`);
+      // الذهب 5: فلتر الذهب القائم يلتقط attack وIran وyields وwar (سلوكه لم يتغير). النفط 3: برنت وأوبك واتفاق هرمز،
+      // لا مضيق تايوان ولا الحرب التجارية ولا البذور الزيتية
+      check(count('all') === 8 && count('gold') === 5 && count('oil') === 3, `${tag}: counts all 8, gold 5, oil 3`);
+      check(r.rows.length === 8 && r.oilTags === 3, `${tag}: "all" shows 8 rows with 3 oil tags`);
       check(r.over <= 0, `${tag}: no horizontal overflow (${r.over})`);
       await p.click('section.news [data-news-f="oil"]');
       r = await read();
-      check(r.rows.length === 2 && r.rows.every(t => /برنت|أوبك/.test(t)), `${tag}: oil filter shows only the 2 oil headlines (${r.rows.join(' | ')})`);
+      check(r.rows.length === 3 && r.rows.every(t => /برنت|أوبك|هرمز/.test(t)), `${tag}: oil filter shows only the 3 oil headlines (${r.rows.join(' | ')})`);
       check(r.chips.find(c => c[0] === 'oil')[2] === 'true' && r.oilTags === 0, `${tag}: oil chip pressed, no redundant tag`);
       check(r.over <= 0, `${tag}: no horizontal overflow on the oil filter (${r.over})`);
       await p.click('section.news [data-news-f="gold"]');
       r = await read();
-      check(r.rows.length === 3 && r.rows.some(t => t.includes('الذهب')) && !r.rows.some(t => /أبل|البذور/.test(t)), `${tag}: gold filter unchanged (${r.rows.join(' | ')})`);
+      check(r.rows.length === 5 && r.rows.some(t => t.includes('الذهب')) && !r.rows.some(t => /أبل|البذور|تايوان/.test(t)), `${tag}: gold filter unchanged (${r.rows.join(' | ')})`);
       check(errs.length === 0, `${tag}: no JS errors ${errs.length ? errs[0] : ''}`);
       if (width === 390) await p.screenshot({path: path.join(process.env.SHOT_DIR || '/tmp', 'news_oil_390.png'), fullPage: false});
       await p.close();

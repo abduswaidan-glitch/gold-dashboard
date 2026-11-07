@@ -2160,10 +2160,21 @@ FJ_HOT = re.compile(r"\b(gold|xau|bullion|silver|fed|fomc|powell|treasur|yield|d
                     r"war|missile|strike|attack|ceasefire|central bank|rate cut|rate hike|bond|auction|shutdown|debt)", re.I)
 # النفط والطاقة: فلتر مستقل في تبويب الأخبار وعلامة في مدخل التقرير. الذهب يتأثر بصدمة النفط عبر ردّ العوائد عليها
 # (قياس 2011–2026 على شموع الدقيقة)، وكلمات FJ_HOT لا تلتقط عنوانًا نفطيًا إلا إن ذكر حربًا أو إيران.
-# الجذور بلا \b في آخرها عمدًا (refiner تلتقط refinery، وbarrel تلتقط barrels)، والكلمات القصيرة محصورة (spr لا تلتقط spread).
-# نفس النمط حرفيًا في index.html (NEWS_OIL)، واختبار tests/test_news.py يفشل إن اختلفا.
-FJ_OIL = re.compile(r"\b(oil(?!seed)|crude|brent|wti\b|opec|hormuz|tanker|refiner|gasoline|diesel|petrol|barrel|bpd\b|aramco|"
-                    r"red sea|houthi|shale|rig count|spr\b|lng\b|natural gas|nat ?gas|eia\b)", re.I)
+# وبطلب صاحب المنصة (7 نوفمبر) يشمل إيران وهرمز وإغلاق المضيق أو فتحه وأي حرب أو اتفاق سلام أو هدنة.
+# الجذور بلا \b في آخرها عمدًا (refiner تلتقط refinery، وbarrel تلتقط barrels)، والكلمات القصيرة محصورة (spr لا تلتقط
+# spread، وwar لا تلتقط warn ولا Warsh). عبارات تشبه الحرب أو المضيق وليست منهما (trade war، Taiwan Strait) تُحذف من النص
+# قبل الفحص بـ FJ_OIL_SKIP، لا بـ lookbehind: الصفحة تستعمل النمط نفسه، وSafari قبل 16.4 يرفض lookbehind فيتعطل السكربت كله.
+# نفس النمطين حرفيًا في index.html (NEWS_OIL وNEWS_OIL_SKIP)، واختبار tests/test_news.py يفشل إن اختلفا.
+FJ_OIL = re.compile(r"\b(oil(?!seed)|crude|brent|wti\b|opec|hormuz|strait|tanker|refiner|gasoline|diesel|petrol|barrel|bpd\b|"
+                    r"aramco|red sea|houthi|shale|rig count|spr\b|lng\b|natural gas|nat ?gas|eia\b|iran|tehran|irgc|khamenei|"
+                    r"persian gulf|gulf of oman|wars?\b|ceasefire|cease-fire|truce|peace\b|armistice|missile|air ?strike|drone|"
+                    r"nuclear|blockade)", re.I)
+FJ_OIL_SKIP = re.compile(r"\b(taiwan strait|(trade|price|currency|tariff|bidding) wars?)\b", re.I)
+
+
+def is_oil(text):
+    """عنوان نفط وطاقة، أو إيران وهرمز، أو حرب وسلام؟ العبارات المشابهة في FJ_OIL_SKIP تُحذف أولًا."""
+    return bool(FJ_OIL.search(FJ_OIL_SKIP.sub(" ", text or "")))
 
 
 def fj_read():
@@ -2265,7 +2276,7 @@ def publish_news(fj=None):
         row = {"id": i, "kind": "news", "utc": t.replace(microsecond=0).isoformat(), "en": title[:300],
                "labels": (it.get("labels") or [])[:5],
                "gold": bool(FJ_HOT.search(title + " " + " ".join(it.get("labels") or []))),
-               "oil": bool(FJ_OIL.search(title + " " + " ".join(it.get("labels") or []))),
+               "oil": is_oil(title + " " + " ".join(it.get("labels") or [])),
                **({"breaking": True} if it.get("breaking") else {}),
                **({"link": it["link"]} if str(it.get("link") or "").startswith("https://") else {})}
         if old.get("ar") and old.get("en") == row["en"]:
@@ -2284,7 +2295,7 @@ def publish_news(fj=None):
         old = items.get(i) or {}
         row = {"id": i, "kind": "data", "utc": t.replace(microsecond=0).isoformat(), "en": (e.get("title") or "").strip()[:200],
                "country": e.get("country"), "impact": e.get("impact"), "gold": us,
-               "oil": bool(FJ_OIL.search(e.get("title") or "")),
+               "oil": is_oil(e.get("title")),
                **{k: (str(e[k]).strip() if e.get(k) not in (None, "") else None) for k in ("actual", "forecast", "previous")}}
         if old.get("ar") and old.get("en") == row["en"]:
             row["ar"] = old["ar"]
@@ -2371,7 +2382,7 @@ def fj_pack(fj, unmatched, via_macro=False):
         if not title:
             continue
         text = title + " " + " ".join(it.get("labels") or [])
-        hot, oil = bool(FJ_HOT.search(text)), bool(FJ_OIL.search(text))
+        hot, oil = bool(FJ_HOT.search(text)), is_oil(text)
         items.append((hot or oil or bool(it.get("breaking")), t, {
             "utc": t.strftime("%Y-%m-%d %H:%M"), "title": title[:220], "labels": (it.get("labels") or [])[:5],
             **({"oil": True} if oil else {}),
@@ -2391,7 +2402,8 @@ def fj_pack(fj, unmatched, via_macro=False):
                      "every 10 minutes and carries headlines only, no released figures" if via_macro else "") +
                      "), times in UTC, delivered about 10 minutes after publication. "
                      "released_us_data are US figures already out that the calendar above does not list. oil=true marks "
-                     "crude and energy headlines (supply, OPEC, Hormuz, inventories), matched by keywords, not by judgement. "
+                     "crude and energy headlines (supply, OPEC, inventories) and Iran, the Strait of Hormuz, war, ceasefire and peace "
+                     "headlines, matched by keywords, not by judgement. "
                      "Coverage starts when the current run started, so an empty or short list does not mean nothing happened")}
 
 
