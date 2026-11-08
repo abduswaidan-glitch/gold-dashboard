@@ -32,3 +32,4 @@ jobs:
         run: |
           pip install requests          # fetch_gold.py يستوردها في أعلاه؛ الاختبار نفسه لا يتصل بالشبكة
           python tests/test_track.py
+          python tests/test_validation.py

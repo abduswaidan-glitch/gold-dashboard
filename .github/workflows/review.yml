@@ -1,0 +1,49 @@
+name: مراجعة يدوية بنموذج ثانٍ
+
+# مسار معزول للقراءة فقط (المادة 15): يقرأ data.json المحفوظ، ولا يجلب مصادر المنصة ولا يحدّثها، ولا يشغّل التحديث
+# ولا التقرير اليومي، ولا يكتب في المستودع (صلاحية contents: read). النتيجة artifact مؤقت لسبعة أيام.
+# لا يعمل إلا بضغط Run workflow من صاحب المنصة؛ لا جدولة ولا تشغيل من PR أو دفع.
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "fable = Fable 5.1، haiku = Haiku 5.5 (يقرأ تقرير Opus المنشور ثم يكتب رأيه)"
+        required: true
+        default: "fable"
+        type: choice
+        options: [fable, haiku]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gold-review
+  cancel-in-progress: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: تثبيت المكتبات
+        run: pip install requests curl_cffi
+
+      - name: المراجعة (لا تكتب في المستودع)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          REVIEW_MODEL: ${{ inputs.model == 'haiku' && 'claude-haiku-5-5' || 'claude-fable-5-1' }}
+        run: python fetch_gold.py --review "$REVIEW_MODEL" "$RUNNER_TEMP/review"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: review-${{ inputs.model }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/review/
+          retention-days: 7
