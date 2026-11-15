@@ -315,6 +315,51 @@ def test_guard(tmp, F, G):
     check(bool(lock) and lock.group(1) == G.scoring_fingerprint(C), "guard: the scoring lock is untouched")
 
 
+def test_schema(tmp, F):
+    """الطلب يحمل مخطط التقرير، وإن رفضه الخادم يُعاد الطلب نفسه بدونه، والتقرير يُكتب في الحالتين."""
+    def walk(n, path="$"):
+        bad = []
+        if n.get("type") == "object":
+            if n.get("additionalProperties") is not False or sorted(n.get("required") or []) != sorted(n["properties"]):
+                bad.append(path)
+            for k, v in n["properties"].items():
+                bad += walk(v, f"{path}.{k}")
+        elif n.get("type") == "array":
+            bad += walk(n["items"], path + "[]")
+        return bad
+    S = F.AI_REPORT_SCHEMA
+    check(walk(S) == [], f"schema: every object lists all its fields as required and allows no extra field ({walk(S)})")
+    check(set(S["properties"]) == {"outlook", "ar", "focus_zones", "research_map"}, "schema: the four top-level fields of the prompt's shape")
+    check(all(('"' + k + '"') in F.AI_SYSTEM for k in ("headline", "tone", "summary", "sections", "events", "watch", "risks", "bias_note", "flip")),
+          "schema: its report fields are the ones the prompt names")
+    seen = []
+
+    def run_with(reject):
+        fresh(tmp)
+        CLOCK[0] = at(16, 14, 7)
+        del LOGS[:], seen[:]
+        os.environ.pop("AI_FORCE", None)
+
+        def stream(payload, key, beta=None, idle=300):
+            fmt = (payload.get("output_config") or {}).get("format")
+            seen.append(bool(fmt) and fmt.get("type") == "json_schema" and fmt.get("schema") == S)
+            if reject and fmt:
+                raise F.ClaudeHTTPError(400, json.dumps({"type": "error", "error": {"type": "invalid_request_error", "message": SECRET_API}}))
+            return copy.deepcopy(msg(good_text()))
+        F._claude_stream = stream
+        F.main()
+        return (json.load(open("status.json", encoding="utf-8")).get("sources") or {}).get("ai") or {}
+    ai = run_with(False)
+    check(seen == [True] and ai.get("ok") is True, f"schema: the report request carries the schema, one request (sent: {seen})")
+    check(any("structured output on" in l for l in LOGS), "schema: the log says structured output is on")
+    check(json.load(open("data.json", encoding="utf-8"))["ai"]["latest"].get("structured") is True, "schema: the report records that the schema was enforced")
+    ai = run_with(True)
+    check(seen == [True, False] and ai.get("ok") is True, f"schema: when the server rejects the schema, the same request is retried without it and the report is written (sent: {seen})")
+    check(any("structured output off" in l for l in LOGS) and not any(SECRET_API in l for l in LOGS),
+          "schema: the log says structured output is off, without the server's message")
+    check(json.load(open("data.json", encoding="utf-8"))["ai"]["latest"].get("structured") is False, "schema: the report records that it was written as free text")
+
+
 def main():
     tmp, F, G = setup()
     try:
@@ -324,6 +369,7 @@ def main():
         test_legacy_state(tmp, F)
         test_kinds_and_leaks(tmp, F)
         test_guard(tmp, F, G)
+        test_schema(tmp, F)
         check(NET == [], f"network: no HTTP request left the test ({len(NET)} attempted: {NET[:3]})")
     finally:
         os.chdir(ROOT)
