@@ -3031,6 +3031,14 @@ AI_SEARCHES = 4                          # عمليات البحث في التق
 AI_KEEP = 14                             # التقارير المحفوظة في الصفحة
 AI_RETRY_MINUTES = 25                    # بعد فشل التقرير: المحاولة في التحديث التالي (كل 30 دقيقة). 25 لا 30: بدء التحديث يتقدم أو يتأخر ثواني
 AI_RETRY_MAX = 2                         # محاولتان إضافيتان على الأكثر في يوم نيويورك؛ بعدهما لا طلب آخر في اليوم، ولا بـ AI_FORCE
+# بصمة الإعداد: ما يغيّر مدخل التقرير أو طريقة كتابته دون أن يغيّر نص التعليمات (فلا تلتقطه بصمة prompt). كل تعديل من هذا
+# النوع يضيف اسمه هنا، فيُحفظ مع كل توقع ويُقسَّم سجل الأداء حسبه (by_config) بدل فصل التعديلات بالأيام.
+AI_INPUT_FEATURES = ()
+
+
+def report_config(structured):
+    """وصف قصير للإعداد الذي كُتب به التقرير، مثل «schema» أو «schema+oil» أو «text»."""
+    return "+".join(("schema" if structured else "text",) + tuple(AI_INPUT_FEATURES))
 # التقرير اليومي: أيام العمل الساعة 9:00 نيويورك، أي قبل نصف ساعة من الافتتاح، بعد أن تكون بيانات الأمس كلها قد وصلت
 # (OI، ETF، COMEX...) وبعد إصدارات 8:30 نيويورك (NFP وCPI وغيرها). التوقيت بنيويورك لا بفيينا، لأن فارق الساعات بين
 # المدينتين يتغير مع توقيت الصيف في كل منهما؛ فيينا تبقى 15:00 في معظم السنة، لكنها 14:00 في فترة بين مارس وأبريل.
@@ -4103,13 +4111,14 @@ def ai_report(data, prev, new_major, releases):
     fz = _focus_zones(rep.get("focus_zones"), digest_obj.get("statistical_direction_filter"))
     if fz:
         latest["focus"] = fz  # الكلفة تُكتب في سجل Actions فقط، لا في الملفات المنشورة
+    latest["config"] = report_config(use_schema)
     latest["structured"] = use_schema                # هل فرض الـ API شكل التقرير (true) أم كُتب نصًّا حرًّا (false)
     last_price = load(PRICES_OUT, {}).get("last") or {}
     if outlook and outlook.get("dirs") and last_price.get("price"):
         olog = load(OUTLOOK_LOG, [])
         br = (digest_obj.get("gold_trend_and_base_rates") or {}).get("base_rates_10_sessions") or {}
         br = br.get("same_week_bucket_and_ma200_side") or next(iter(br.values()), None)
-        olog.append({"id": latest["generated_utc"], "date": today, "model": model, "prompt": prompt_fingerprint(),
+        olog.append({"id": latest["generated_utc"], "date": today, "model": model, "prompt": prompt_fingerprint(), "config": latest["config"],
                      "bias": outlook["bias"], "p": outlook["p"],
                      "dirs": outlook["dirs"], "base": {"date": str(last_price.get("time") or today)[:10], "price": last_price["price"]},
                      **({"base_rates": {k: br[k] for k in ("up", "flat", "down")}} if br else {})})
@@ -4508,12 +4517,14 @@ def score_outlooks():
         summ["direction"] = dr if dr["windows"] >= dneed else {k: dr[k] for k in ("n", "n_lean", "windows") if k in dr}
     # كل نموذج على حدة، وكل نسخة تعليمات على حدة (بصمة AI_SYSTEM وprompts/fable.md؛ ما قبل 6 نوفمبر بلا بصمة)،
     # بالقاعدة نفسها: الأعداد دائمًا، والمتوسطات بعد عتبة النوافذ في المجموعة نفسها
-    byx, byp = {}, {}
+    byx, byp, byc = {}, {}, {}
     for e in log_:
         byx.setdefault(e.get("model") or "?", []).append(e)
         byp.setdefault(e.get("prompt") or "unrecorded", []).append(e)
+        byc.setdefault(e.get("config") or "unrecorded", []).append(e)
     summ["by_model"] = {m: _track_stats(es, need) for m, es in byx.items()}
     summ["by_prompt"] = {k: {"since": es[0].get("date"), **_track_stats(es, need)} for k, es in byp.items()}
+    summ["by_config"] = {k: {"since": es[0].get("date"), **_track_stats(es, need)} for k, es in byc.items()}
     return {"summary": summ, "days": OUTLOOK_DAYS, "band": OUTLOOK_BAND * 100, "rows": log_[-30:]}
 
 
