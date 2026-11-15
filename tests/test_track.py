@@ -100,7 +100,7 @@ def no_aggregates(summary, sc, tag):
     check(all(sc.get(k) is None for k in ("hit_pct", "brier", "brier_guess", "beats_guessing", "brier_paired", "brier_base_rate",
                                        "skill_vs_base_pct")) and sc.get("metrics_withheld") is True,
           f"{tag}: scorecard hit/brier/brier_guess/beats_guessing/base comparison are null")
-    groups = list(summary.get("by_model", {}).values()) + list(summary.get("by_prompt", {}).values())
+    groups = list(summary.get("by_model", {}).values()) + list(summary.get("by_prompt", {}).values()) + list(summary.get("by_config", {}).values())
     check(groups and not any(k in g for g in groups for k in AGG), f"{tag}: no averages per model or per prompt version")
     check('"beats_guessing": true' not in json.dumps(sc), f"{tag}: the email file never says beats_guessing=true")
     check(set(summary.get("direction", {})) <= {"n", "n_lean", "windows"}, f"{tag}: direction carries counts only")
