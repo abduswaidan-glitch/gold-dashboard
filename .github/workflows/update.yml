@@ -35,7 +35,7 @@ permissions:
   actions: write
 
 concurrency:
-  group: gold-data
+  group: gold-data-test
   cancel-in-progress: false
 
 jobs:
