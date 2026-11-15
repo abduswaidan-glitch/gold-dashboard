@@ -23,6 +23,7 @@ import math
 import os
 import re
 import statistics
+import traceback
 import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
@@ -3005,7 +3006,8 @@ DISCOVERY_HOUR_UTC = 21
 DISCOVERY_SEARCHES = 8
 AI_SEARCHES = 4                          # عمليات البحث في التقرير اليومي بعد انتهاء مرحلة الاكتشاف
 AI_KEEP = 14                             # التقارير المحفوظة في الصفحة
-AI_RETRY_HOURS = 6
+AI_RETRY_MINUTES = 25                    # بعد فشل التقرير: المحاولة في التحديث التالي (كل 30 دقيقة). 25 لا 30: بدء التحديث يتقدم أو يتأخر ثواني
+AI_RETRY_MAX = 2                         # محاولتان إضافيتان على الأكثر في يوم نيويورك؛ بعدهما لا طلب آخر في اليوم، ولا بـ AI_FORCE
 # التقرير اليومي: أيام العمل الساعة 9:00 نيويورك، أي قبل نصف ساعة من الافتتاح، بعد أن تكون بيانات الأمس كلها قد وصلت
 # (OI، ETF، COMEX...) وبعد إصدارات 8:30 نيويورك (NFP وCPI وغيرها). التوقيت بنيويورك لا بفيينا، لأن فارق الساعات بين
 # المدينتين يتغير مع توقيت الصيف في كل منهما؛ فيينا تبقى 15:00 في معظم السنة، لكنها 14:00 في فترة بين مارس وأبريل.
@@ -3016,6 +3018,42 @@ DAILY_REPORT_NY = (9, 0)
 
 class _AIWait(Exception):
     pass
+
+
+class AIReportError(RuntimeError):
+    """فشل في التقرير بوصف آمن للنشر: النوع وتفاصيل بنيوية فقط (الموضع والطول والبصمة)، بلا أي حرف من ردّ النموذج."""
+    def __init__(self, kind, detail):
+        super().__init__(detail)
+        self.kind = kind
+
+
+def _reply_meta(text, resp):
+    """وصف ردّ النموذج دون محتواه: الطول، وسبب التوقف (قيمة من الـ API)، وبصمة تميّز ردًّا عن آخر."""
+    stop = re.sub(r"[^a-z_]", "", str((resp or {}).get("stop_reason")))[:20]
+    return f"len {len(text)}, stop {stop}, sha {hashlib.sha256(text.encode('utf-8')).hexdigest()[:12]}"
+
+
+def _ai_failure(e):
+    """(النوع، وصف آمن) لأي فشل في مسار التقرير. سجل Actions وstatus.json وstate.json عامة، فلا يدخلها نص من ردّ
+    النموذج ولا من مدخله (وفيه الحزم المخفية) ولا من جسم خطأ الخادم: اسم الخطأ وموضعه فقط."""
+    if isinstance(e, AIReportError):
+        return e.kind, str(e)
+    if isinstance(e, ClaudeHTTPError):
+        return "http", f"http: {e.status}" + (f" {e.etype}" if e.etype else "")
+    if isinstance(e, requests.RequestException):
+        return "network", f"network: {type(e).__name__}"
+    tb = traceback.extract_tb(e.__traceback__)
+    return "other", f"other: {type(e).__name__}" + (f" at {tb[-1].name}:{tb[-1].lineno}" if tb else "")
+
+
+def _ai_fail_status(fail, last_ok):
+    """حالة فشل التقرير كما تُنشر في status.json: في تشغيل الفشل وفي كل تشغيل بعده حتى ينجح تقرير.
+    retry_pending = ينتظر محاولة أخرى اليوم؛ report_failed = لا محاولة أخرى اليوم. last_ok = آخر تقرير ناجح، وهو المعروض."""
+    return {"ok": False, "state": "retry_pending" if fail.get("retry_after") else "report_failed",
+            "checked": fail.get("at"), "kind": fail.get("kind"), "attempts": fail.get("attempts"),
+            "max_attempts": 1 + AI_RETRY_MAX, "error": fail.get("error"),
+            "failed_since": fail.get("since") or fail.get("at"), "retry_after": fail.get("retry_after"),
+            **({"last_ok": last_ok} if last_ok else {})}
 AI_URL = "https://api.anthropic.com/v1/messages"
 AI_LANGS = ("ar",)                      # المنصة بالعربية فقط
 PRICES_PER_MTOK = (("claude-fable", 10, 50), ("claude-mythos", 10, 50), ("claude-opus-5-5", 4, 20), ("claude-opus", 5, 25),
@@ -3706,6 +3744,8 @@ class ClaudeHTTPError(RuntimeError):
     def __init__(self, status, text):
         super().__init__(f"Claude API HTTP {status}: {text[:200]}")
         self.status = status
+        m = re.search(r'"type"\s*:\s*"([a-z_]{1,40}_error)"', str(text))     # نوع الخطأ من الـ API (قيمة ثابتة)، لا رسالته
+        self.etype = m.group(1) if m else ""
 
 
 def _claude(payload, key, beta=None, timeout=300):
@@ -3952,14 +3992,15 @@ def ai_report(data, prev, new_major, releases):
             resp = None
             if use_cache and "cach" in str(e).lower():
                 use_cache = False                    # التخزين المؤقت مرفوض: نعيد نفس المحاولة بدونه
-                log("AI request: caching rejected, retrying without it:", str(e)[:160])
+                log("AI request: caching rejected, retrying without it:", _ai_failure(e)[1])
                 continue
-            log("AI request rejected" + (" (with web search)" if tools else "") + (" (with fallbacks)" if fallback else "") + ":", str(e)[:200])
+            log("AI request rejected" + (" (with web search)" if tools else "") + (" (with fallbacks)" if fallback else "") + ":", _ai_failure(e)[1])
             attempts.pop(0)
     if not resp:
-        raise RuntimeError("Claude API: all attempts failed")
+        raise AIReportError("http", "http: every request variant was rejected (4xx)")
     if resp.get("stop_reason") == "refusal":
-        raise RuntimeError(f"Claude API: request declined ({(resp.get('stop_details') or {}).get('category')})")
+        cat = re.sub(r"[^a-z_]", "", str((resp.get("stop_details") or {}).get("category")))[:40]
+        raise AIReportError("refusal", f"refusal: request declined ({cat})")
     queries = []
     for t in turns:                                  # كل الاستدعاءات، لا الأخير فقط: البحث قد يقع قبل pause_turn
         for b in t.get("content", []):
@@ -3975,12 +4016,14 @@ def ai_report(data, prev, new_major, releases):
         if b.get("type") == "text":
             text += b.get("text", "")
     i, j = text.find("{"), text.rfind("}")
+    meta = _reply_meta(text, resp)                   # الردّ نفسه لا يُكتب في أي سجل: موضع الخطأ وطول الرد وبصمته فقط
     try:
         rep = json.loads(text[i:j + 1])
-        if not isinstance(rep.get("ar"), dict):
-            raise ValueError("missing ar")
-    except Exception as e:
-        raise RuntimeError(f"AI report: could not parse JSON ({e}); first chars: {text[:120]!r}")
+    except ValueError as e:
+        pos = f"@{e.pos + max(i, 0)}" if isinstance(e, json.JSONDecodeError) else ""
+        raise AIReportError("parse", f"parse: JSONDecodeError{pos}, {meta}") from None
+    if not isinstance(rep, dict) or not isinstance(rep.get("ar"), dict):
+        raise AIReportError("shape", f"shape: no ar object, {meta}")
     outlook = _outlook(rep)
     if not outlook:
         log("AI report: bias/scenarios missing or malformed; report kept without them")
@@ -4726,19 +4769,27 @@ def main():
     due_daily = ny.weekday() < 5 and (ny.hour, ny.minute) >= DAILY_REPORT_NY and last_ny != ny.date()
     if due_daily and not active:
         new_major = {**new_major, "daily": vn.date().isoformat()}
+    # فشل التقرير: يُعاد في التحديث التالي، بسقف AI_RETRY_MAX محاولة إضافية في يوم نيويورك. الحالة تبقى في
+    # status.json حتى ينجح تقرير. AI_FORCE يتجاوز مهلة الانتظار ولا يتجاوز السقف.
     fail = state.get("ai_fail") or {}
-    wait_until = fail.get("retry_after")
+    ny_day = ny.date().isoformat()
+    tries = state.get("ai_tries") or {}
+    failed_today = tries.get("failed", 0) if tries.get("day") == ny_day else 0
+    wait_until = fail.get("retry_after") if fail.get("day") == ny_day else None
     try:
         if not active and not forced and not due_daily:
             if new_major:
                 log("AI report: held for the next daily report (9:00 New York):", ", ".join(new_major))
             raise _AIWait()
-        if new_major and wait_until and now_d.isoformat() < wait_until:
-            # بعد فشل طلب مكلف لا نعيده كل نصف ساعة: ننتظر AI_RETRY_HOURS ثم نحاول مرة أخرى
+        if failed_today > AI_RETRY_MAX:
+            log(f"AI report: {failed_today} failed attempts today (New York); no more requests today, AI_FORCE included")
+            raise _AIWait()
+        if new_major and not forced and wait_until and now_d.isoformat() < wait_until:
             log(f"AI report: last attempt failed; next try after {wait_until}")
             raise _AIWait()
         ai, wrote = ai_report(data, prev, new_major, releases)
-        state.pop("ai_fail", None)
+        if wrote:
+            state.pop("ai_fail", None)
         if wrote and active:
             disc["reports"] = disc.get("reports", 0) + 1
             if ("cot" in new_major or "cot_legacy" in new_major) and today_s >= DISCOVERY_COT_FROM:
@@ -4753,14 +4804,23 @@ def main():
         status["sources"]["ai"] = {"ok": True, "checked": now, "wrote": wrote, "off": not bool(ai)}
     except _AIWait:
         state["ai_pending"] = new_major
+        if fail:                                                    # لم يُحاوَل في هذا التشغيل، والفشل السابق قائم: يبقى ظاهرًا
+            status["sources"]["ai"] = _ai_fail_status(fail, last_utc)
         if prev.get("ai"):
             data["ai"] = _no_cost(prev["ai"])
     except Exception as e:
-        log("ai FAILED:", repr(e)[:300])
-        state["ai_pending"] = new_major                             # نعيد المحاولة بعد مهلة، لا في كل تشغيل
-        state["ai_fail"] = {"at": now_d.isoformat(), "error": repr(e)[:200],
-                            "retry_after": (now_d + dt.timedelta(hours=AI_RETRY_HOURS)).isoformat()}
-        status["sources"]["ai"] = {"ok": False, "checked": now, "error": str(e)[:300]}
+        kind, detail = _ai_failure(e)
+        failed_today += 1
+        state["ai_tries"] = {"day": ny_day, "failed": failed_today}
+        retry_at = now_d + dt.timedelta(minutes=AI_RETRY_MINUTES) if due_daily and failed_today <= AI_RETRY_MAX else None
+        state["ai_pending"] = new_major
+        state["ai_fail"] = {"day": ny_day, "at": now_d.isoformat(), "since": fail.get("since") or fail.get("at") or now_d.isoformat(),
+                            "kind": kind, "attempts": failed_today,
+                            "error": f"{detail}; attempt {failed_today}/{1 + AI_RETRY_MAX}; "
+                                     + (f"retry after {retry_at:%H:%M} UTC" if retry_at else "no more attempts today"),
+                            "retry_after": retry_at.isoformat() if retry_at else None}
+        log("ai FAILED:", state["ai_fail"]["error"])
+        status["sources"]["ai"] = _ai_fail_status(state["ai_fail"], last_utc)
         if prev.get("ai"):
             data["ai"] = _no_cost(prev["ai"])
     try:
