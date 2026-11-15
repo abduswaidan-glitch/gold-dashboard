@@ -3740,6 +3740,29 @@ summary: 4 to 6 short points. sections: 4 to 6 (central banks and countries, ban
 physical market and vaults, and anything else notable). events: 2 to 5. watch: 2 to 4 things to watch next."""
 
 
+def _obj(props):
+    """كائن في مخطط التقرير: كل حقوله مطلوبة ولا حقل زائدًا (شرط المخرجات المقيّدة بمخطط)."""
+    return {"type": "object", "properties": props, "required": list(props), "additionalProperties": False}
+
+
+_STR = {"type": "string"}
+_ARR = lambda items: {"type": "array", "items": items}
+# شكل التقرير نفسه المكتوب في AI_SYSTEM، مخططًا يفرضه الـ API: الرد يخرج JSON صالحًا ومطابقًا، فلا يسقط التقرير بفاصلة
+# ناقصة كما حدث في 10 نوفمبر. المخطط لا يغيّر التعليمات ولا بصمتها؛ الأعداد (3 سيناريوهات، 4 إلى 6 نقاط) تبقى في النص.
+AI_REPORT_SCHEMA = _obj({
+    "outlook": _obj({"bias": {"type": "string", "enum": ["bullish", "bearish", "neutral"]},
+                     "scenarios": _ARR(_obj({"dir": {"type": "string", "enum": ["up", "flat", "down"]}, "p": {"type": "integer"}}))}),
+    "ar": _obj({"headline": _STR, "tone": {"type": "string", "enum": ["إيجابي", "سلبي", "محايد", "متباين"]},
+                "summary": _ARR(_STR), "sections": _ARR(_obj({"title": _STR, "body": _STR})),
+                "events": _ARR(_obj({"title": _STR, "impact": _STR, "source": _STR, "date": _STR})),
+                "watch": _ARR(_STR), "risks": _STR,
+                "outlook": _obj({"bias_note": _STR, "scenarios": _ARR(_obj({"title": _STR, "why": _STR, "trigger": _STR})),
+                                 "flip": _STR})}),
+    "focus_zones": _ARR(_obj({"zone": _STR, "why": _STR})),
+    "research_map": _ARR(_obj({"section": _STR, "need": _STR, "queries": _ARR(_STR), "sources": _ARR(_STR), "found": _STR})),
+})
+
+
 class ClaudeHTTPError(RuntimeError):
     def __init__(self, status, text):
         super().__init__(f"Claude API HTTP {status}: {text[:200]}")
@@ -3956,7 +3979,7 @@ def ai_report(data, prev, new_major, releases):
         system += ("\n\nStanding instructions from the platform owner (written in Arabic). Follow them within the rules and "
                    "the JSON shape above; if they ever conflict, the rules above win:\n" + owner)
     # fallbacks "default": إن رفض النموذج الطلب يُعاد تشغيله على نموذج بديل من Anthropic تلقائيًا (ويُعرض اسمه الحقيقي)
-    use_cache = True
+    use_cache = use_schema = True
     attempts = [(ws_new, True), (ws_old, True), (ws_new, False), (None, False)]
     while attempts:
         tools, fallback = attempts[0]
@@ -3970,6 +3993,8 @@ def ai_report(data, prev, new_major, releases):
                 payload["cache_control"] = {"type": "ephemeral"}
             else:
                 payload["system"] = system
+            if use_schema:                           # الـ API يضمن JSON صالحًا ومطابقًا لشكل التقرير
+                payload["output_config"]["format"] = {"type": "json_schema", "schema": AI_REPORT_SCHEMA}
             if tools:
                 payload["tools"] = tools
             if fallback:
@@ -3994,10 +4019,16 @@ def ai_report(data, prev, new_major, releases):
                 use_cache = False                    # التخزين المؤقت مرفوض: نعيد نفس المحاولة بدونه
                 log("AI request: caching rejected, retrying without it:", _ai_failure(e)[1])
                 continue
+            if use_schema:
+                use_schema = False                   # المخطط مرفوض مع هذا الطلب: نعيد المحاولة نفسها بدونه (نص حر كما كان)
+                log("AI request: structured output rejected, retrying without it:", _ai_failure(e)[1])
+                continue
             log("AI request rejected" + (" (with web search)" if tools else "") + (" (with fallbacks)" if fallback else "") + ":", _ai_failure(e)[1])
             attempts.pop(0)
+            use_schema = True                        # الصيغة التالية تُجرَّب بالمخطط أولًا: الرفض قد يكون من الصيغة لا منه
     if not resp:
         raise AIReportError("http", "http: every request variant was rejected (4xx)")
+    log("AI report: structured output", "on" if use_schema else "off (free text)")
     if resp.get("stop_reason") == "refusal":
         cat = re.sub(r"[^a-z_]", "", str((resp.get("stop_details") or {}).get("category")))[:40]
         raise AIReportError("refusal", f"refusal: request declined ({cat})")
@@ -4049,6 +4080,7 @@ def ai_report(data, prev, new_major, releases):
     fz = _focus_zones(rep.get("focus_zones"), digest_obj.get("statistical_direction_filter"))
     if fz:
         latest["focus"] = fz  # الكلفة تُكتب في سجل Actions فقط، لا في الملفات المنشورة
+    latest["structured"] = use_schema                # هل فرض الـ API شكل التقرير (true) أم كُتب نصًّا حرًّا (false)
     last_price = load(PRICES_OUT, {}).get("last") or {}
     if outlook and outlook.get("dirs") and last_price.get("price"):
         olog = load(OUTLOOK_LOG, [])
