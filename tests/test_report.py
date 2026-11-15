@@ -353,10 +353,19 @@ def test_schema(tmp, F):
     check(seen == [True] and ai.get("ok") is True, f"schema: the report request carries the schema, one request (sent: {seen})")
     check(any("structured output on" in l for l in LOGS), "schema: the log says structured output is on")
     check(json.load(open("data.json", encoding="utf-8"))["ai"]["latest"].get("structured") is True, "schema: the report records that the schema was enforced")
+    d = json.load(open("data.json", encoding="utf-8"))
+    row = json.load(open(os.path.join("data", "outlook_log.json"), encoding="utf-8"))[-1]
+    want = F.report_config(True)
+    check(want.startswith("schema") and d["ai"]["latest"].get("config") == want and row.get("config") == want,
+          f"config: the report and its forecast row carry the setup stamp ({want!r}; row {row.get('config')!r})")
+    byc = (d.get("outlook_track") or {}).get("summary", {}).get("by_config") or {}
+    check("unrecorded" in byc and all("since" in v for v in byc.values()), f"config: the track record is split by setup, older forecasts under 'unrecorded' ({sorted(byc)})")
     ai = run_with(True)
     check(seen == [True, False] and ai.get("ok") is True, f"schema: when the server rejects the schema, the same request is retried without it and the report is written (sent: {seen})")
     check(any("structured output off" in l for l in LOGS) and not any(SECRET_API in l for l in LOGS),
           "schema: the log says structured output is off, without the server's message")
+    check(json.load(open("data.json", encoding="utf-8"))["ai"]["latest"].get("config") == F.report_config(False) and F.report_config(False).startswith("text"),
+          "config: a free-text report is stamped as text")
     check(json.load(open("data.json", encoding="utf-8"))["ai"]["latest"].get("structured") is False, "schema: the report records that it was written as free text")
 
 
