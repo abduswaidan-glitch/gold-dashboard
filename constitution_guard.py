@@ -56,8 +56,9 @@ FILES = [
     (".claude/skills/blunt/SKILL.md", "مهارة «الرد الصريح» (المادة 25)."),
     (".gitignore", "ما لا يُرفع إلى المستودع (ملفات Python المؤقتة)."),
     (".github/workflows/update.yml", "التشغيل الحي في GitHub Actions."),
-    (".github/workflows/constitution.yml", "فحص الدستور واختبارات سجل الأداء والأخبار على كل PR وكل دفع إلى main."),
+    (".github/workflows/constitution.yml", "فحص الدستور واختبارات سجل الأداء وفشل التقرير والأخبار على كل PR وكل دفع إلى main."),
     ("tests/test_track.py", "اختبارات انحدار لسجل الأداء: النوافذ المستقلة من السجل كاملًا، ومرآة الأداء بعد 10 توقعات، وBrier مقابل المعدل التاريخي، وثبات قفل التقييم (المادتان 19 و20)."),
+    ("tests/test_report.py", "اختبارات فشل التقرير الذكي: الحالة تبقى في `status.json` حتى ينجح تقرير، وإعادة المحاولة في التحديث التالي بسقف يومي لا يتجاوزه التشغيل اليدوي، وتصنيف نوع الفشل، وألا يدخل السجلَّ ولا الملفات المنشورة نصٌّ من ردّ النموذج أو الحزم المخفية. بلا شبكة وبلا طلب مدفوع."),
     ("tests/track_ui.js", "اختبار واجهة سجل الأداء عند 390 و1280 بكسل (Playwright، يُشغَّل محليًا لا في CI)."),
     ("tests/test_news.py", "اختبارات فلتر «النفط والطاقة» (ومعه إيران وهرمز والحرب والسلام): الكلمات والعبارات المستبعدة، وتطابق أنماط Python والصفحة، وعلامة oil في news.json ومدخل التقرير (المادة 22)."),
     ("tests/news_ui.js", "اختبار واجهة أزرار الأخبار الثلاثة عند 390 و1280 بكسل (Playwright، يُشغَّل محليًا لا في CI)."),
@@ -204,10 +205,18 @@ def faults():
         if v.get("ok", True) or v.get("skipped"):
             continue
         last = v.get("last_ok")
-        hrs = (now - dt.datetime.fromisoformat(last)).total_seconds() / 3600 if last else None
+        # التقرير اليومي يحمل failed_since: مدة فشله تُقاس من أول فشل، لأن آخر نجاح له عمره يوم كامل بطبيعته
+        began = v.get("failed_since") or last
+        hrs = (now - dt.datetime.fromisoformat(began)).total_seconds() / 3600 if began else None
         since = f"آخر نجاح {day_ar(last)} {last[11:16]} UTC" if last else "لم ينجح قط"
         err = re.sub(r"https?://\S+", "", str(v.get("error") or ""))[:90].strip()
-        rows.append(f"- `{name}`: يفشل، {since}. الخطأ: {err}")
+        if v.get("state") in ("retry_pending", "report_failed"):
+            nxt = (f"ينتظر إعادة المحاولة بعد {v['retry_after'][11:16]} UTC" if v.get("state") == "retry_pending" and v.get("retry_after")
+                   else "لا محاولة أخرى اليوم")
+            rows.append(f"- `{name}`: فشل التقرير منذ {day_ar(began)} {began[11:16]} UTC (المحاولة {v.get('attempts')} من "
+                        f"{v.get('max_attempts')})، {nxt}. المعروض: {since}. الخطأ: {err}")
+        else:
+            rows.append(f"- `{name}`: يفشل، {since}. الخطأ: {err}")
         if hrs is None or hrs > FAIL_HOURS:
             hard.append(name)
     return ("\n".join(rows) if rows else "لا أعطال جارية في آخر فحص."), hard
@@ -239,7 +248,8 @@ def computed():
         "searches": ("code", str(C.get("AI_SEARCHES"))),
         "discovery_searches": ("code", str(C.get("DISCOVERY_SEARCHES"))),
         "keep_reports": ("code", str(C.get("AI_KEEP"))),
-        "retry_hours": ("code", str(C.get("AI_RETRY_HOURS"))),
+        "retry_minutes": ("code", str(C.get("AI_RETRY_MINUTES"))),
+        "retry_max": ("code", str(C.get("AI_RETRY_MAX"))),
         "bands": ("code", " و".join(f"±{fmt_g(b)}" for b in C.get("FILTER_BANDS", ())) + "σ"),
         "zone_width": ("code", f"{fmt_g(C.get('ZONE_WIDTH_SIGMA', 0))}σ"),
         "w_gex": ("code", fmt_g((C.get("LV_WEIGHT") or {}).get("zero_gamma", 0))),
