@@ -109,11 +109,24 @@ def fresh(tmp, state_ai_fail=None):
     for d in ("data", "prompts"):
         shutil.rmtree(os.path.join(tmp, d), ignore_errors=True)
         shutil.copytree(os.path.join(ROOT, d), os.path.join(tmp, d))
+    # الملفات الحقيقية تتغير كل يوم: يُثبَّت آخر تقرير على 13 نوفمبر، وتُمحى أي حالة فشل حقيقية جارية،
+    # كي لا تصطدم تواريخ الاختبار (16 و17 نوفمبر) بتقرير أو فشل وقع فعلًا بعدها
+    p = os.path.join(tmp, "data.json")
+    d = json.load(open(p, encoding="utf-8"))
+    d["ai"]["latest"].update(date="2026-11-13", generated_utc="2026-11-13T14:07:02+00:00")
+    d["ai"]["history"] = [h for h in d["ai"].get("history") or [] if h.get("date", "") <= "2026-11-13"]
+    json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
+    p = os.path.join(tmp, "status.json")
+    s = json.load(open(p, encoding="utf-8"))
+    s.get("sources", {}).pop("ai", None)
+    json.dump(s, open(p, "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
+    p = os.path.join(tmp, "data", "state.json")
+    st = json.load(open(p, encoding="utf-8"))
+    for k in ("ai_fail", "ai_tries", "ai_pending"):
+        st.pop(k, None)
     if state_ai_fail is not None:
-        p = os.path.join(tmp, "data", "state.json")
-        st = json.load(open(p, encoding="utf-8"))
         st["ai_fail"] = state_ai_fail
-        json.dump(st, open(p, "w", encoding="utf-8"), ensure_ascii=False)
+    json.dump(st, open(p, "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
 
 
 def msg(text, stop="end_turn"):
@@ -292,6 +305,39 @@ def test_kinds_and_leaks(tmp, F):
     check("max_tokens" in str(ai.get("error")), f"detail: a cut-off reply is told apart by its stop reason: {ai.get('error')!r}")
 
 
+def test_billing(tmp, F):
+    """رصيد الـAPI نفد (18 نوفمبر): يُسمّى السبب بنص ثابت من الكود، ولا تُجرَّب الصيغ الأخرى، ولا يُحسب من سقف اليوم،
+    ويُعاد في التحديث التالي كي يصدر التقرير تلقائيًا بعد الشحن. الطلب المرفوض لا يُحتسب كلفة."""
+    body = json.dumps({"type": "error", "error": {"type": "invalid_request_error",
+                       "message": "Your credit balance is too low to access the Anthropic API. " + SECRET_API}})
+    sent = []
+
+    def stream(payload, key, beta=None, idle=300):
+        sent.append(1)
+        raise F.ClaudeHTTPError(400, body)
+    fresh(tmp)
+    for i, t in enumerate((at(16, 14, 7), at(16, 14, 37), at(16, 15, 7), at(16, 15, 37))):
+        CLOCK[0] = t
+        del LOGS[:], sent[:]
+        os.environ.pop("AI_FORCE", None)
+        F._claude_stream = stream
+        F.main()
+        ai = (json.load(open("status.json", encoding="utf-8")).get("sources") or {}).get("ai") or {}
+        st = json.load(open(os.path.join("data", "state.json"), encoding="utf-8"))
+        check(ai.get("kind") == "billing" and "credit balance" in str(ai.get("error")),
+              f"billing: run {i + 1} names the cause as billing ({ai.get('kind')}: {ai.get('error')!r})")
+        check(len(sent) == 1, f"billing: run {i + 1} sends one request, not every request variant ({len(sent)})")
+        check(ai.get("state") == "retry_pending" and (st.get("ai_tries") or {}).get("failed", 0) == 0,
+              f"billing: run {i + 1} does not use up today's attempts and retries next update ({ai.get('state')}, {st.get('ai_tries')})")
+        check(not leaked(published(), body), f"billing: run {i + 1} carries no server text")
+    CLOCK[0] = at(16, 16, 7)
+    F._claude_stream = lambda *a, **k: (sent.append(1), copy.deepcopy(msg(good_text())))[1]
+    del sent[:]
+    F.main()
+    ai = (json.load(open("status.json", encoding="utf-8")).get("sources") or {}).get("ai") or {}
+    check(len(sent) == 1 and ai.get("ok") is True, "billing: once the balance is topped up, the next update writes the report")
+
+
 def test_guard(tmp, F, G):
     """الحارس يعرف أن التقرير فشل وينتظر إعادة المحاولة، بلا ادعاء أنه لم ينجح قط؛ والمخالفة بعد 24 ساعة من بدء الفشل."""
     fresh(tmp)
@@ -377,6 +423,7 @@ def main():
         test_force(tmp, F)
         test_legacy_state(tmp, F)
         test_kinds_and_leaks(tmp, F)
+        test_billing(tmp, F)
         test_guard(tmp, F, G)
         test_schema(tmp, F)
         check(NET == [], f"network: no HTTP request left the test ({len(NET)} attempted: {NET[:3]})")
