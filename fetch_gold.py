@@ -3046,6 +3046,8 @@ def _ai_failure(e):
     النموذج ولا من مدخله (وفيه الحزم المخفية) ولا من جسم خطأ الخادم: اسم الخطأ وموضعه فقط."""
     if isinstance(e, AIReportError):
         return e.kind, str(e)
+    if isinstance(e, ClaudeHTTPError) and e.billing:
+        return "billing", "billing: API credit balance too low"
     if isinstance(e, ClaudeHTTPError):
         return "http", f"http: {e.status}" + (f" {e.etype}" if e.etype else "")
     if isinstance(e, requests.RequestException):
@@ -3777,6 +3779,7 @@ class ClaudeHTTPError(RuntimeError):
         self.status = status
         m = re.search(r'"type"\s*:\s*"([a-z_]{1,40}_error)"', str(text))     # نوع الخطأ من الـ API (قيمة ثابتة)، لا رسالته
         self.etype = m.group(1) if m else ""
+        self.billing = "credit balance" in str(text).lower()            # رصيد الـAPI نفد: سبب معروف يُسمّى بنص ثابت من الكود
 
 
 def _claude(payload, key, beta=None, timeout=300):
@@ -4023,6 +4026,8 @@ def ai_report(data, prev, new_major, releases):
             if not 400 <= e.status < 500 or e.status == 429:
                 raise                                # خطأ خادم أو ضغط: نعيد المحاولة في التشغيل التالي بدل تكرار طلب مكلف
             resp = None
+            if e.billing:                            # الرصيد نفد: كل صيغة أخرى ستُرفض للسبب نفسه
+                raise AIReportError("billing", "billing: API credit balance too low") from None
             if use_cache and "cach" in str(e).lower():
                 use_cache = False                    # التخزين المؤقت مرفوض: نعيد نفس المحاولة بدونه
                 log("AI request: caching rejected, retrying without it:", _ai_failure(e)[1])
@@ -4853,13 +4858,16 @@ def main():
             data["ai"] = _no_cost(prev["ai"])
     except Exception as e:
         kind, detail = _ai_failure(e)
-        failed_today += 1
+        # الرصيد النافد يُرفض قبل أي كلفة: لا يُحسب من سقف اليوم، ويُعاد في كل تحديث فيصدر التقرير تلقائيًا بعد الشحن
+        if kind != "billing":
+            failed_today += 1
         state["ai_tries"] = {"day": ny_day, "failed": failed_today}
-        retry_at = now_d + dt.timedelta(minutes=AI_RETRY_MINUTES) if due_daily and failed_today <= AI_RETRY_MAX else None
+        retry_at = (now_d + dt.timedelta(minutes=AI_RETRY_MINUTES)
+                    if (due_daily or kind == "billing") and failed_today <= AI_RETRY_MAX else None)
         state["ai_pending"] = new_major
         state["ai_fail"] = {"day": ny_day, "at": now_d.isoformat(), "since": fail.get("since") or fail.get("at") or now_d.isoformat(),
                             "kind": kind, "attempts": failed_today,
-                            "error": f"{detail}; attempt {failed_today}/{1 + AI_RETRY_MAX}; "
+                            "error": f"{detail}; " + ("not counted; " if kind == "billing" else f"attempt {failed_today}/{1 + AI_RETRY_MAX}; ")
                                      + (f"retry after {retry_at:%H:%M} UTC" if retry_at else "no more attempts today"),
                             "retry_after": retry_at.isoformat() if retry_at else None}
         log("ai FAILED:", state["ai_fail"]["error"])
