@@ -333,7 +333,7 @@ Gamma بالدولار لكل حركة 1%: Gamma × OI × 100 × S² × 0.01، �
 ### المادة 27 مكرر: الأعطال
 **الأعطال الجارية** (يكتبها الحارس من `status.json`؛ ما يفشل أكثر من 24 ساعة مخالفة. مدة فشل التقرير اليومي تُقاس من أول فشل، لا من آخر نجاح، لأن آخر نجاح له عمره يوم كامل بطبيعته):
 <!--a:faults-->
-- `ai`: فشل التقرير منذ 18 نوفمبر 14:07 UTC (المحاولة 2 من 3)، ينتظر إعادة المحاولة بعد 15:02 UTC. المعروض: آخر نجاح 17 نوفمبر 14:07 UTC. الخطأ: http: every request variant was rejected (4xx); attempt 2/3; retry after 15:02 UTC
+- `ai`: فشل التقرير منذ 18 نوفمبر 14:07 UTC (المحاولة 3 من 3)، لا محاولة أخرى اليوم. المعروض: آخر نجاح 17 نوفمبر 14:07 UTC. الخطأ: http: every request variant was rejected (4xx); attempt 3/3; no more attempts today
 - `gex`: يفشل، آخر نجاح 19 نوفمبر 21:07 UTC. الخطأ: chrome: HTTP 403 [Attention Required! | Cloudflare] | safari: HTTP 403 [Attention Required
 <!--/a-->
 
